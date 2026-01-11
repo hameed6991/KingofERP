@@ -1,0 +1,477 @@
+﻿@page "/balance-sheet"
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.AspNetCore.Authorization
+@using UaeEInvoice.Data
+@using UaeEInvoice.Services.Auth
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject UaeEInvoice.Services.LedgerService LedgerSvc
+@inject ICurrentCompany CurrentCompany
+@inject NavigationManager Nav
+
+@attribute [Authorize(Roles = "Admin,Accounting")]
+
+<div class="container-xxl py-4">
+
+    <div class="d-flex align-items-start justify-content-between flex-wrap gap-2 mb-3">
+        <div>
+            <h2 class="page-title mb-1">Balance Sheet</h2>
+            <div class="text-muted">Assets, Liabilities & Equity as of selected date.</div>
+        </div>
+
+        <div class="d-flex gap-2">
+            <button class="btn btn-outline-secondary" type="button" @onclick="SetToday" disabled="@_loading">Today</button>
+            <button class="btn btn-outline-secondary" type="button" @onclick="SetThisMonthEnd" disabled="@_loading">This Month</button>
+            <button class="btn btn-outline-secondary" type="button" @onclick="SetThisYearEnd" disabled="@_loading">This Year</button>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_error))
+    {
+        <div class="alert alert-danger soft-card">@_error</div>
+    }
+
+    <div class="card soft-card bs-hero mb-3">
+        <div class="card-body">
+            <div class="row g-3 align-items-end">
+
+                <div class="col-12 col-lg-4">
+                    <label class="form-label small mb-1">As of</label>
+                    <InputDate class="form-control" @bind-Value="_asOf" />
+                    <div class="form-text">Balances are calculated up to this date.</div>
+                </div>
+
+                <div class="col-12 col-lg-3 d-grid">
+                    <button class="btn btn-primary" type="button" @onclick="Load" disabled="@_loading">
+                        @(_loading ? "Loading..." : "Apply")
+                    </button>
+                </div>
+
+                <div class="col-12 col-lg-2 d-grid">
+                    <button class="btn btn-outline-secondary" type="button" @onclick="Clear" disabled="@_loading">Clear</button>
+                </div>
+
+                <div class="col-12 col-lg-3 text-lg-end">
+                    <div class="small text-muted">As of</div>
+                    <div class="fw-semibold">@_asOf.ToString("dd-MM-yyyy")</div>
+                </div>
+            </div>
+
+            <hr class="my-3" />
+
+            <div class="row g-3">
+                <div class="col-12 col-lg-4">
+                    <div class="card soft-card kpi">
+                        <div class="card-body">
+                            <div class="text-muted small">Total Assets</div>
+                            <div class="display-6 fw-bold mb-0">@_assetsTotal.ToString("0.00")</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-12 col-lg-4">
+                    <div class="card soft-card kpi">
+                        <div class="card-body">
+                            <div class="text-muted small">Total Liabilities</div>
+                            <div class="display-6 fw-bold mb-0">@_liabTotal.ToString("0.00")</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-12 col-lg-4">
+                    <div class="card soft-card kpi">
+                        <div class="card-body">
+                            <div class="text-muted small">Total Equity</div>
+                            <div class="display-6 fw-bold mb-0">@_equityTotal.ToString("0.00")</div>
+                            <div class="small text-muted mt-1">
+                                Includes Retained Earnings: @_retainedEarnings.ToString("0.00")
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="d-flex flex-wrap justify-content-between align-items-center mt-3 gap-2">
+                <div class="small text-muted">
+                    Check: Assets = Liabilities + Equity
+                </div>
+
+                <div class="d-flex align-items-center gap-2">
+                    <div class="small text-muted">Difference</div>
+                    <div class="fw-bold @(Math.Abs(_diff) < 0.01m ? "text-success" : "text-danger")">
+                        @_diff.ToString("0.00")
+                    </div>
+
+                    <span class="badge rounded-pill @(Math.Abs(_diff) < 0.01m ? "bg-success" : "bg-danger")">
+                        @(Math.Abs(_diff) < 0.01m ? "OK" : "Mismatch")
+                    </span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-3">
+        <!-- Assets -->
+        <div class="col-12 col-lg-6">
+            <div class="card soft-card">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <div class="fw-semibold">Assets</div>
+                        <div class="text-muted small">Total: @_assetsTotal.ToString("0.00")</div>
+                    </div>
+
+                    <div class="table-responsive">
+                        <table class="table align-middle">
+                            <thead>
+                                <tr class="text-uppercase small text-muted">
+                                    <th style="width:110px;">Acc No</th>
+                                    <th>Account</th>
+                                    <th class="text-end" style="width:170px;">Amount</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var r in _assets)
+                                {
+                                    <tr class="bs-row" @onclick="() => OpenLedger(r.AccountNo)">
+                                        <td class="text-muted">@r.AccountNo</td>
+                                        <td class="fw-semibold">@r.AccountName</td>
+                                        <td class="text-end fw-semibold">@r.Amount.ToString("0.00")</td>
+                                    </tr>
+                                }
+
+                                @if (!_loading && _assets.Count == 0)
+                                {
+                                    <tr><td colspan="3" class="text-center text-muted py-4">No asset accounts.</td></tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+
+        <!-- Liabilities & Equity -->
+        <div class="col-12 col-lg-6">
+            <div class="card soft-card mb-3">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <div class="fw-semibold">Liabilities</div>
+                        <div class="text-muted small">Total: @_liabTotal.ToString("0.00")</div>
+                    </div>
+
+                    <div class="table-responsive">
+                        <table class="table align-middle">
+                            <thead>
+                                <tr class="text-uppercase small text-muted">
+                                    <th style="width:110px;">Acc No</th>
+                                    <th>Account</th>
+                                    <th class="text-end" style="width:170px;">Amount</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var r in _liabs)
+                                {
+                                    <tr class="bs-row" @onclick="() => OpenLedger(r.AccountNo)">
+                                        <td class="text-muted">@r.AccountNo</td>
+                                        <td class="fw-semibold">@r.AccountName</td>
+                                        <td class="text-end fw-semibold">@r.Amount.ToString("0.00")</td>
+                                    </tr>
+                                }
+
+                                @if (!_loading && _liabs.Count == 0)
+                                {
+                                    <tr><td colspan="3" class="text-center text-muted py-4">No liability accounts.</td></tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+
+                </div>
+            </div>
+
+            <div class="card soft-card">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <div class="fw-semibold">Equity</div>
+                        <div class="text-muted small">Total: @_equityTotal.ToString("0.00")</div>
+                    </div>
+
+                    <div class="table-responsive">
+                        <table class="table align-middle">
+                            <thead>
+                                <tr class="text-uppercase small text-muted">
+                                    <th style="width:110px;">Acc No</th>
+                                    <th>Account</th>
+                                    <th class="text-end" style="width:170px;">Amount</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var r in _equities)
+                                {
+                                    <tr class="bs-row" @onclick="() => OpenLedger(r.AccountNo)">
+                                        <td class="text-muted">@r.AccountNo</td>
+                                        <td class="fw-semibold">@r.AccountName</td>
+                                        <td class="text-end fw-semibold">@r.Amount.ToString("0.00")</td>
+                                    </tr>
+                                }
+
+                                <tr class="table-light">
+                                    <td class="text-muted">-</td>
+                                    <td class="fw-semibold">Retained Earnings (P&amp;L till date)</td>
+                                    <td class="text-end fw-semibold">@_retainedEarnings.ToString("0.00")</td>
+                                </tr>
+
+                                @if (!_loading && _equities.Count == 0)
+                                {
+                                    <tr><td colspan="3" class="text-center text-muted py-4">No equity accounts.</td></tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="small text-muted mt-2">
+                        Retained Earnings = Total Revenue - Total Expense (till selected date).
+                    </div>
+
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+@code {
+    private bool _loading;
+    private string? _error;
+
+    private int _companyId;
+
+    private DateTime _asOf = DateTime.Today;
+
+    private decimal _assetsTotal;
+    private decimal _liabTotal;
+    private decimal _equityTotal;
+    private decimal _retainedEarnings;
+    private decimal _diff;
+
+    private List<BsRow> _assets = new();
+    private List<BsRow> _liabs = new();
+    private List<BsRow> _equities = new();
+
+    // cache COA
+    private List<ChartOfAccount> _coa = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            await EnsureCompanyAsync();
+            await LoadCoaAsync();
+            await Load();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private async Task EnsureCompanyAsync()
+    {
+        await CurrentCompany.RefreshAsync();
+        _companyId = CurrentCompany.CompanyId;
+
+        if (_companyId <= 0)
+            throw new Exception("CompanyId not found from login/session.");
+    }
+
+    private async Task LoadCoaAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        _coa = await db.ChartOfAccounts.AsNoTracking()
+            .Where(x => x.CompanyId == _companyId && x.IsActive)
+            .OrderBy(x => x.AccountNo)
+            .ToListAsync();
+    }
+
+    private async Task Load()
+    {
+        _loading = true;
+        _error = null;
+
+        try
+        {
+            // ✅ if company changed during session, reload COA
+            var oldCompany = _companyId;
+            await EnsureCompanyAsync();
+            if (oldCompany != _companyId || _coa.Count == 0)
+                await LoadCoaAsync();
+
+            _assets.Clear();
+            _liabs.Clear();
+            _equities.Clear();
+
+            _assetsTotal = 0;
+            _liabTotal = 0;
+            _equityTotal = 0;
+            _retainedEarnings = 0;
+            _diff = 0;
+
+            var assetsAcc = _coa.Where(a => IsType(a.AccountType, "Asset")).ToList();
+            var liabAcc = _coa.Where(a => IsType(a.AccountType, "Liability")).ToList();
+            var eqAcc = _coa.Where(a => IsType(a.AccountType, "Equity")).ToList();
+
+            foreach (var a in assetsAcc)
+            {
+                var bal = await GetClosingBalance(a.AccountNo, _asOf);
+                var amt = NormalizeAmount(a.AccountType, bal);
+                if (Math.Abs(amt) < 0.0001m) continue;
+
+                _assets.Add(new BsRow { AccountNo = a.AccountNo, AccountName = a.AccountName, Amount = amt });
+            }
+
+            foreach (var a in liabAcc)
+            {
+                var bal = await GetClosingBalance(a.AccountNo, _asOf);
+                var amt = NormalizeAmount(a.AccountType, bal);
+                if (Math.Abs(amt) < 0.0001m) continue;
+
+                _liabs.Add(new BsRow { AccountNo = a.AccountNo, AccountName = a.AccountName, Amount = amt });
+            }
+
+            foreach (var a in eqAcc)
+            {
+                var bal = await GetClosingBalance(a.AccountNo, _asOf);
+                var amt = NormalizeAmount(a.AccountType, bal);
+                if (Math.Abs(amt) < 0.0001m) continue;
+
+                _equities.Add(new BsRow { AccountNo = a.AccountNo, AccountName = a.AccountName, Amount = amt });
+            }
+
+            _assetsTotal = _assets.Sum(x => x.Amount);
+            _liabTotal = _liabs.Sum(x => x.Amount);
+
+            var equityBase = _equities.Sum(x => x.Amount);
+
+            _retainedEarnings = await ComputeRetainedEarnings(_asOf);
+            _equityTotal = equityBase + _retainedEarnings;
+
+            _diff = _assetsTotal - (_liabTotal + _equityTotal);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task<decimal> GetClosingBalance(int accountNo, DateTime asOf)
+    {
+        var from = new DateTime(2000, 1, 1);
+
+        var res = await LedgerSvc.GetLedgerAsync(_companyId, accountNo, from, asOf.Date);
+
+        if (res.Rows == null || res.Rows.Count == 0)
+            return res.OpeningBalance;
+
+        return res.Rows.Last().Balance;
+    }
+
+    private async Task<decimal> ComputeRetainedEarnings(DateTime asOf)
+    {
+        var revenueAcc = _coa.Where(a => IsType(a.AccountType, "Revenue")).ToList();
+        var expenseAcc = _coa.Where(a => IsType(a.AccountType, "Expense")).ToList();
+
+        decimal totalRevenue = 0m;
+        decimal totalExpense = 0m;
+
+        foreach (var a in revenueAcc)
+        {
+            var bal = await GetClosingBalance(a.AccountNo, asOf);
+            totalRevenue += NormalizeAmount("Revenue", bal);
+        }
+
+        foreach (var a in expenseAcc)
+        {
+            var bal = await GetClosingBalance(a.AccountNo, asOf);
+            totalExpense += NormalizeAmount("Expense", bal);
+        }
+
+        return totalRevenue - totalExpense;
+    }
+
+    private decimal NormalizeAmount(string? accountType, decimal balance)
+    {
+        if (IsType(accountType, "Liability") || IsType(accountType, "Equity") || IsType(accountType, "Revenue"))
+            return -balance;
+
+        return balance; // Asset, Expense
+    }
+
+    private bool IsType(string? t, string expected)
+    {
+        if (string.IsNullOrWhiteSpace(t)) return false;
+        return t.Trim().Equals(expected, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task SetToday()
+    {
+        _asOf = DateTime.Today;
+        await Load();
+    }
+
+    private async Task SetThisMonthEnd()
+    {
+        var d = DateTime.Today;
+        var lastDay = DateTime.DaysInMonth(d.Year, d.Month);
+        _asOf = new DateTime(d.Year, d.Month, lastDay);
+        await Load();
+    }
+
+    private async Task SetThisYearEnd()
+    {
+        var d = DateTime.Today;
+        _asOf = new DateTime(d.Year, 12, 31);
+        await Load();
+    }
+
+    private async Task Clear()
+    {
+        _asOf = DateTime.Today;
+        await Load();
+    }
+
+    private void OpenLedger(int accNo)
+        => Nav.NavigateTo($"/ledger/{accNo}");
+
+    private class BsRow
+    {
+        public int AccountNo { get; set; }
+        public string AccountName { get; set; } = "";
+        public decimal Amount { get; set; }
+    }
+}
+
+<style>
+    .bs-hero {
+        border-radius: 18px;
+        background: linear-gradient(135deg, rgba(13,110,253,.08), rgba(0,0,0,0));
+    }
+
+    .kpi {
+        border-radius: 18px;
+    }
+
+    .bs-row {
+        cursor: pointer;
+        transition: all .12s ease;
+    }
+
+        .bs-row:hover {
+            background: rgba(13,110,253,.05);
+        }
+</style>

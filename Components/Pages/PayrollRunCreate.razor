@@ -1,0 +1,130 @@
+﻿@page "/payroll-run-create"
+@using Microsoft.EntityFrameworkCore
+@using UaeEInvoice.Data
+@inject AppDbContext Db
+@inject NavigationManager Nav
+
+<h3>Create Payroll Run</h3>
+
+@if (!string.IsNullOrWhiteSpace(_error))
+{
+    <div class="alert alert-danger">@_error</div>
+}
+@if (!string.IsNullOrWhiteSpace(_msg))
+{
+    <div class="alert alert-success">@_msg</div>
+}
+
+<div class="card">
+    <div class="card-body">
+
+        <div class="row g-3 align-items-end">
+
+            <div class="col-12 col-md-6">
+                <label class="form-label">Payroll Month</label>
+                <div class="d-flex gap-2">
+                    <select class="form-select" @bind="_year">
+                        @for (int y = DateTime.Today.Year - 5; y <= DateTime.Today.Year + 2; y++)
+                        {
+                            <option value="@y">@y</option>
+                        }
+                    </select>
+
+                    <select class="form-select" @bind="_month">
+                        @for (int m = 1; m <= 12; m++)
+                        {
+                            <option value="@m">@m.ToString("00")</option>
+                        }
+                    </select>
+                </div>
+                <div class="text-muted small mt-1">
+                    Selected: @_year-@_month.ToString("00")
+                </div>
+            </div>
+
+            <div class="col-12 col-md-6">
+                <label class="form-label">Notes (Optional)</label>
+                <input class="form-control" placeholder="e.g., December payroll" @bind="_notes" />
+            </div>
+
+        </div>
+
+        <hr />
+
+        <button class="btn btn-primary" @onclick="Save" disabled="@_busy">Save</button>
+        <button class="btn btn-outline-secondary ms-2" @onclick="Back" disabled="@_busy">Back</button>
+
+    </div>
+</div>
+
+@code {
+    private string? _error;
+    private string? _msg;
+    private bool _busy;
+
+    // TODO: later replace with logged-in company id
+    private int _companyId = 1;
+
+    private int _year = DateTime.Today.Year;
+    private int _month = DateTime.Today.Month;
+    private string? _notes;
+
+    private async Task Save()
+    {
+        _busy = true;
+        _error = _msg = null;
+
+        try
+        {
+            var periodMonth = new DateTime(_year, _month, 1);
+            var runNo = $"PR-{periodMonth:yyyyMM}-{DateTime.Now:HHmmss}";
+
+            var run = new PayrollRun
+                {
+                    CompanyId = _companyId,
+                    PeriodMonth = periodMonth,
+                    RunNo = runNo,
+                    Status = "Draft",
+                    Notes = _notes ?? ""
+                };
+
+            Db.PayrollRuns.Add(run);
+            await Db.SaveChangesAsync();
+
+            // create lines for active employees
+            var emps = await Db.Employees.AsNoTracking()
+                .Where(e => e.CompanyId == _companyId && e.IsActive)
+                .OrderBy(e => e.EmpName)
+                .ToListAsync();
+
+            foreach (var e in emps)
+            {
+                Db.PayrollLines.Add(new PayrollLine
+                    {
+                        CompanyId = _companyId,
+                        PayrollRunId = run.PayrollRunId,
+                        EmployeeId = e.EmployeeId,
+                        EmpCode = e.EmpCode,
+                        EmpName = e.EmpName,
+                        BasicSalary = e.BasicSalary,
+                        Allowance = e.Allowance
+                    });
+            }
+
+            await Db.SaveChangesAsync();
+
+            _msg = "Payroll run created.";
+            Nav.NavigateTo($"/payroll-run/{run.PayrollRunId}");
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void Back() => Nav.NavigateTo("/payroll-runs");
+}

@@ -1,0 +1,197 @@
+﻿@page "/recurring"
+@using Microsoft.EntityFrameworkCore
+@using UaeEInvoice.Data
+@using UaeEInvoice.Services.Auth
+@inject AppDbContext Db
+@inject ICurrentCompany CurrentCompany
+
+<div class="container-xxl py-4">
+    <h2 class="fw-black mb-1">Recurring Cash Rules</h2>
+    <div class="text-muted mb-3">Add Rent / Salary / DEWA etc to include in cash forecast.</div>
+
+    <div class="card border-0 shadow-sm rounded-4 mb-3">
+        <div class="card-body p-4">
+            <div class="row g-3">
+                <div class="col-12 col-md-4">
+                    <label class="form-label fw-semibold">Name</label>
+                    <input class="form-control rounded-3" @bind="_new.Name" />
+                </div>
+                <div class="col-12 col-md-2">
+                    <label class="form-label fw-semibold">Direction</label>
+                    <select class="form-select rounded-3" @bind="_new.Direction">
+                        <option>Out</option>
+                        <option>In</option>
+                    </select>
+                </div>
+                <div class="col-12 col-md-2">
+                    <label class="form-label fw-semibold">Amount</label>
+                    <input type="number" class="form-control rounded-3" @bind="_new.Amount" />
+                </div>
+                <div class="col-12 col-md-2">
+                    <label class="form-label fw-semibold">Frequency</label>
+                    <select class="form-select rounded-3" @bind="_new.Frequency">
+                        <option>Monthly</option>
+                        <option>Weekly</option>
+                        <option>Daily</option>
+                    </select>
+                </div>
+                <div class="col-12 col-md-2">
+                    <label class="form-label fw-semibold">Next Date</label>
+                    <input type="date" class="form-control rounded-3" @bind="_new.NextDate" />
+                </div>
+            </div>
+
+            <div class="mt-3 d-flex gap-2">
+                <button class="btn btn-primary rounded-3 px-4" @onclick="AddRule">Add</button>
+                <button class="btn btn-outline-secondary rounded-3 px-4" @onclick="Load">Reload</button>
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(_err))
+            {
+                <div class="alert alert-danger mt-3">@_err</div>
+            }
+        </div>
+    </div>
+
+    <div class="card border-0 shadow-sm rounded-4">
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th class="ps-4">Name</th>
+                            <th>Dir</th>
+                            <th class="text-end">Amount</th>
+                            <th>Freq</th>
+                            <th>Next</th>
+                            <th class="text-end pe-4">#</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var r in _list)
+                        {
+                            <tr>
+                                <td class="ps-4 fw-semibold">@r.Name</td>
+                                <td>@r.Direction</td>
+                                <td class="text-end">@r.Amount.ToString("0.00")</td>
+                                <td>@r.Frequency</td>
+                                <td>@r.NextDate.ToString("dd-MM-yyyy")</td>
+                                <td class="text-end pe-4">
+                                    <button class="btn btn-sm btn-outline-danger rounded-3"
+                                            @onclick="() => Delete(r.RecurringCashRuleId)">
+                                        Delete
+                                    </button>
+                                </td>
+                            </tr>
+                        }
+                        @if (_list.Count == 0)
+                        {
+                            <tr>
+                                <td colspan="6" class="text-center text-muted py-4">No recurring rules.</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private int _companyId;
+    private string? _err;
+
+    private RecurringCashRule _new = new()
+        {
+            Direction = "Out",
+            Frequency = "Monthly",
+            NextDate = DateTime.Today
+        };
+
+    private List<RecurringCashRule> _list = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _companyId = CurrentCompany.CompanyId; // ✅ Dynamic
+
+        if (_companyId <= 0)
+        {
+            _err = "Company not selected / not found.";
+            return;
+        }
+
+        _new.CompanyId = _companyId; // ✅ set company on model
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        _err = null;
+
+        _list = await Db.RecurringCashRules
+            .AsNoTracking()
+            .Where(x => x.CompanyId == _companyId && x.IsActive)
+            .OrderBy(x => x.NextDate)
+            .ToListAsync();
+    }
+
+    private async Task AddRule()
+    {
+        try
+        {
+            _err = null;
+
+            if (_companyId <= 0)
+                throw new Exception("Company not selected / not found.");
+
+            if (string.IsNullOrWhiteSpace(_new.Name))
+                throw new Exception("Name required");
+
+            if (_new.Amount <= 0)
+                throw new Exception("Amount must be > 0");
+
+            // ✅ enforce company id always
+            _new.CompanyId = _companyId;
+            _new.IsActive = true;
+
+            Db.RecurringCashRules.Add(_new);
+            await Db.SaveChangesAsync();
+
+            _new = new RecurringCashRule
+                {
+                    CompanyId = _companyId,
+                    Direction = "Out",
+                    Frequency = "Monthly",
+                    NextDate = DateTime.Today
+                };
+
+            await Load();
+        }
+        catch (Exception ex)
+        {
+            _err = ex.Message;
+        }
+    }
+
+    private async Task Delete(int id)
+    {
+        try
+        {
+            _err = null;
+
+            var row = await Db.RecurringCashRules
+                .FirstOrDefaultAsync(x => x.RecurringCashRuleId == id && x.CompanyId == _companyId);
+
+            if (row == null) return;
+
+            row.IsActive = false;
+            await Db.SaveChangesAsync();
+
+            await Load();
+        }
+        catch (Exception ex)
+        {
+            _err = ex.Message;
+        }
+    }
+}

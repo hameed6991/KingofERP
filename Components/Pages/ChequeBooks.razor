@@ -1,0 +1,614 @@
+﻿@page "/cheques/books"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+
+@using Microsoft.EntityFrameworkCore
+@using UaeEInvoice.Data
+@using UaeEInvoice.Services.Auth
+@using System.Timers
+
+@inject AppDbContext Db
+@inject ICurrentCompany CurrentCompany
+
+<style>
+    /* ===== Ultra Premium Theme (Bootstrap-friendly) ===== */
+    .p-hero {
+        border-radius: 22px;
+        border: 1px solid rgba(15, 23, 42, .10);
+        background: radial-gradient(900px 420px at 10% 10%, rgba(13,110,253,.18), transparent 60%), radial-gradient(900px 420px at 85% 10%, rgba(111,66,193,.14), transparent 60%), linear-gradient(180deg, rgba(255,255,255,.9), rgba(255,255,255,.75));
+        box-shadow: 0 18px 45px rgba(2, 6, 23, .08);
+        padding: 18px;
+    }
+
+    .p-card {
+        border-radius: 22px;
+        border: 1px solid rgba(15, 23, 42, .10);
+        background: rgba(255,255,255,.88);
+        box-shadow: 0 14px 38px rgba(2, 6, 23, .07);
+    }
+
+    .p-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: .45rem;
+        padding: .35rem .75rem;
+        border-radius: 999px;
+        border: 1px solid rgba(15, 23, 42, .10);
+        background: rgba(255,255,255,.85);
+        font-size: .85rem;
+        white-space: nowrap;
+    }
+
+    .p-title {
+        font-weight: 900;
+        letter-spacing: .2px;
+        margin: 0;
+    }
+
+    .p-muted {
+        color: rgba(15, 23, 42, .60);
+    }
+
+    .p-soft-input, .p-soft-select {
+        border-radius: 14px !important;
+        border: 1px solid rgba(15, 23, 42, .12) !important;
+        box-shadow: 0 12px 30px rgba(2, 6, 23, .05);
+    }
+
+    .p-table thead th {
+        color: rgba(15, 23, 42, .65);
+        font-weight: 800;
+        letter-spacing: .3px;
+        font-size: .82rem;
+        text-transform: uppercase;
+        border-bottom: 1px solid rgba(15, 23, 42, .08);
+    }
+
+    .p-table tbody td {
+        border-top: 1px solid rgba(15, 23, 42, .06);
+        vertical-align: middle;
+    }
+
+    .badge-soft {
+        border-radius: 999px;
+        padding: .4rem .6rem;
+        border: 1px solid rgba(15, 23, 42, .10);
+        background: rgba(15, 23, 42, .04);
+        font-weight: 800;
+    }
+
+    /* ===== Drawer (right side) ===== */
+    .drawer-backdrop {
+        position: fixed;
+        inset: 0;
+        background: rgba(2, 6, 23, .55);
+        z-index: 1040;
+        backdrop-filter: blur(4px);
+    }
+
+    .drawer {
+        position: fixed;
+        top: 0;
+        right: 0;
+        width: min(520px, 92vw);
+        height: 100vh;
+        z-index: 1050;
+        background: rgba(255,255,255,.92);
+        border-left: 1px solid rgba(15, 23, 42, .10);
+        box-shadow: -18px 0 45px rgba(2, 6, 23, .18);
+        backdrop-filter: blur(10px);
+        display: flex;
+        flex-direction: column;
+    }
+
+    .drawer-head {
+        padding: 16px 16px 10px 16px;
+        border-bottom: 1px solid rgba(15, 23, 42, .08);
+    }
+
+    .drawer-body {
+        padding: 16px;
+        overflow: auto;
+    }
+
+    .drawer-foot {
+        padding: 14px 16px;
+        border-top: 1px solid rgba(15, 23, 42, .08);
+        display: flex;
+        gap: 10px;
+        justify-content: flex-end;
+        background: rgba(255,255,255,.75);
+    }
+
+    /* Toast style alert */
+    .toastish {
+        border-radius: 16px;
+        border: 1px solid rgba(15,23,42,.10);
+        box-shadow: 0 12px 30px rgba(2,6,23,.10);
+        padding: 12px 14px;
+    }
+</style>
+
+<div class="container-xxl py-4">
+
+    <!-- HERO -->
+    <div class="p-hero mb-3">
+        <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+            <div>
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <h2 class="p-title">Cheque Books</h2>
+                    <span class="p-chip">🏦 Bank-wise setup</span>
+                    <span class="p-chip">⚡ Auto refresh: @(_autoRefreshSeconds)s</span>
+                    <span class="p-chip">🧾 Books: @_books.Count</span>
+                </div>
+                <div class="p-muted mt-1">
+                    Create cheque book per bank, manage Start / End / Next & active status. (UAE PDC ready)
+                </div>
+
+                <div class="d-flex flex-wrap gap-2 mt-2">
+                    <span class="p-chip">🏢 CompanyId: @_companyId</span>
+                    <span class="p-chip">🟢 Active: @_books.Count(x => x.IsActive)</span>
+                    <span class="p-chip">⚪ Inactive: @_books.Count(x => !x.IsActive)</span>
+                </div>
+            </div>
+
+            <div class="d-flex gap-2 align-items-center">
+                <button class="btn btn-outline-secondary" @onclick="ManualRefresh" disabled="@_loading">
+                    @(_loading ? "Refreshing..." : "Refresh")
+                </button>
+                <button class="btn btn-primary" @onclick="NewBook">
+                    <i class="bi bi-plus-lg me-1"></i> New Cheque Book
+                </button>
+            </div>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_err))
+    {
+        <div class="alert alert-danger toastish mb-3">
+            <b>⚠️ Error:</b> @_err
+        </div>
+    }
+    @if (!string.IsNullOrWhiteSpace(_msg))
+    {
+        <div class="alert alert-success toastish mb-3">
+            <b>✅</b> @_msg
+        </div>
+    }
+
+    <!-- FILTER BAR -->
+    <div class="p-card p-3 mb-3">
+        <div class="row g-2 align-items-end">
+            <div class="col-12 col-md-5">
+                <label class="form-label p-muted mb-1">Search</label>
+                <input class="form-control p-soft-input"
+                       placeholder="Bank name or Bank A/c No..."
+                       @bind="_q" @bind:event="oninput" />
+            </div>
+
+            <div class="col-12 col-md-3">
+                <label class="form-label p-muted mb-1">Status</label>
+                <select class="form-select p-soft-select" @bind="_status">
+                    <option value="ALL">All</option>
+                    <option value="ACTIVE">Active</option>
+                    <option value="INACTIVE">Inactive</option>
+                </select>
+            </div>
+
+            <div class="col-12 col-md-4 d-flex gap-2 justify-content-md-end">
+                <button class="btn btn-outline-secondary w-100" @onclick="ClearFilters">Clear</button>
+                <button class="btn btn-outline-dark w-100" @onclick="ManualRefresh" disabled="@_loading">
+                    @(_loading ? "..." : "Reload")
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- LIST -->
+    <div class="p-card p-3">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+            <div>
+                <div class="fw-bold">Cheque Books List</div>
+                <div class="p-muted small">Tip: “Next No” auto used for outgoing cheques.</div>
+            </div>
+            <div class="p-muted small">
+                Showing <b>@Filtered().Count</b> of <b>@_books.Count</b>
+            </div>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table p-table align-middle">
+                <thead>
+                    <tr>
+                        <th>Bank</th>
+                        <th>Bank A/c No</th>
+                        <th>Start</th>
+                        <th>End</th>
+                        <th>Next</th>
+                        <th>Status</th>
+                        <th class="text-end" style="width:260px;"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var b in Filtered())
+                    {
+                        <tr>
+                            <td class="fw-semibold">
+                                @b.BankName
+                                <div class="p-muted small">BookId: @b.ChequeBookId</div>
+                            </td>
+                            <td>
+                                <span class="badge-soft">@b.BankAccountNo</span>
+                            </td>
+                            <td>@b.StartNo</td>
+                            <td>@b.EndNo</td>
+                            <td>
+                                <span class="badge bg-dark">@b.NextNo</span>
+                                @if (b.NextNo < b.StartNo || b.NextNo > b.EndNo)
+                                {
+                                    <div class="text-danger small mt-1">⚠ out of range</div>
+                                }
+                            </td>
+                            <td>
+                                <div class="d-flex align-items-center gap-2">
+                                    <div class="form-check form-switch m-0">
+                                        <input class="form-check-input"
+                                               type="checkbox"
+                                               checked="@b.IsActive"
+                                               @onchange="async _ => await ToggleActive(b)"
+                                               disabled="@_saving" />
+                                    </div>
+                                    @if (b.IsActive)
+                                    {
+                                        <span class="badge bg-success">Active</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge bg-secondary">Inactive</span>
+                                    }
+                                </div>
+                            </td>
+                            <td class="text-end">
+                                <button class="btn btn-outline-primary btn-sm me-2" @onclick="() => EditBook(b)">
+                                    <i class="bi bi-pencil-square me-1"></i> Edit
+                                </button>
+                                <button class="btn btn-outline-secondary btn-sm" @onclick="() => QuickFillNext(b)" title="Set Next = Start">
+                                    <i class="bi bi-arrow-repeat me-1"></i> Reset Next
+                                </button>
+                            </td>
+                        </tr>
+                    }
+
+                    @if (Filtered().Count == 0)
+                    {
+                        <tr>
+                            <td colspan="7" class="p-muted">
+                                No cheque books found. Click <b>New Cheque Book</b> to create one.
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+</div>
+
+<!-- DRAWER -->
+@if (_editing != null)
+{
+    <div class="drawer-backdrop" @onclick="CancelEdit"></div>
+
+    <div class="drawer">
+        <div class="drawer-head">
+            <div class="d-flex justify-content-between align-items-start gap-2">
+                <div>
+                    <div class="fw-bold fs-5">
+                        @(_editing.ChequeBookId == 0 ? "Create Cheque Book" : "Edit Cheque Book")
+                    </div>
+                    <div class="p-muted small">Make sure Start/End are correct. Next must be within range.</div>
+                </div>
+                <button class="btn btn-outline-secondary btn-sm" @onclick="CancelEdit" disabled="@_saving">
+                    <i class="bi bi-x-lg"></i>
+                </button>
+            </div>
+        </div>
+
+        <div class="drawer-body">
+            <div class="row g-3">
+                <div class="col-12">
+                    <label class="form-label">Bank Name <span class="text-danger">*</span></label>
+                    <input class="form-control p-soft-input" @bind="_editing.BankName" placeholder="e.g., Emirates NBD" />
+                </div>
+
+                <div class="col-12">
+                    <label class="form-label">Bank GL AccountNo <span class="text-danger">*</span></label>
+                    <input class="form-control p-soft-input" type="number" @bind="_editing.BankAccountNo" />
+                    <div class="p-muted small mt-1">Example: 1010 (your bank account in COA)</div>
+                </div>
+
+                <div class="col-12 col-md-4">
+                    <label class="form-label">Start No <span class="text-danger">*</span></label>
+                    <input class="form-control p-soft-input" type="number" @bind="_editing.StartNo" />
+                </div>
+
+                <div class="col-12 col-md-4">
+                    <label class="form-label">End No <span class="text-danger">*</span></label>
+                    <input class="form-control p-soft-input" type="number" @bind="_editing.EndNo" />
+                </div>
+
+                <div class="col-12 col-md-4">
+                    <label class="form-label">Next No <span class="text-danger">*</span></label>
+                    <input class="form-control p-soft-input" type="number" @bind="_editing.NextNo" />
+                    <div class="p-muted small mt-1">Auto-used when creating outgoing cheque</div>
+                </div>
+
+                <div class="col-12">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" @bind="_editing.IsActive" id="isActiveDrawer" />
+                        <label class="form-check-label" for="isActiveDrawer">Active</label>
+                    </div>
+                </div>
+
+                <div class="col-12">
+                    <div class="p-card p-3" style="border-radius:18px; box-shadow:none;">
+                        <div class="fw-semibold mb-1">Quick validations</div>
+                        <div class="p-muted small">
+                            • Start &gt; 0, End &gt; 0 <br />
+                            • End must be ≥ Start <br />
+                            • Next must be between Start and End
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <div class="drawer-foot">
+            <button class="btn btn-outline-secondary" @onclick="CancelEdit" disabled="@_saving">Cancel</button>
+            <button class="btn btn-success" @onclick="SaveBook" disabled="@_saving">
+                @(_saving ? "Saving..." : "Save")
+            </button>
+        </div>
+    </div>
+}
+
+@code {
+    private int _companyId;
+    private bool _saving;
+    private bool _loading;
+    private string? _err;
+    private string? _msg;
+
+    private List<ChequeBook> _books = new();
+    private ChequeBook? _editing;
+
+    private string _q = "";
+    private string _status = "ALL";
+
+    // “Real-time feel”
+    private Timer? _timer;
+    private int _autoRefreshSeconds = 5;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CurrentCompany.RefreshAsync();
+        _companyId = CurrentCompany.CompanyId;
+
+        await Load();
+
+        // Auto refresh (polling)
+        _timer = new Timer(_autoRefreshSeconds * 1000);
+        _timer.Elapsed += async (_, __) =>
+        {
+            try
+            {
+                if (_saving || _editing != null) return; // don't disrupt user
+                await InvokeAsync(async () =>
+                {
+                    await Load(silent: true);
+                    StateHasChanged();
+                });
+            }
+            catch { /* ignore */ }
+        };
+        _timer.AutoReset = true;
+        _timer.Start();
+    }
+
+    public void Dispose()
+    {
+        if (_timer != null)
+        {
+            _timer.Stop();
+            _timer.Dispose();
+            _timer = null;
+        }
+    }
+
+    private async Task Load(bool silent = false)
+    {
+        if (!silent) { _err = _msg = null; _loading = true; }
+
+        try
+        {
+            _books = await Db.Set<ChequeBook>()
+                .AsNoTracking()
+                .Where(x => x.CompanyId == _companyId)
+                .OrderByDescending(x => x.IsActive)
+                .ThenBy(x => x.BankName)
+                .ThenBy(x => x.ChequeBookId)
+                .ToListAsync();
+        }
+        catch (Exception ex)
+        {
+            if (!silent) _err = ex.InnerException?.Message ?? ex.Message;
+        }
+        finally
+        {
+            if (!silent) _loading = false;
+        }
+    }
+
+    private List<ChequeBook> Filtered()
+    {
+        IEnumerable<ChequeBook> q = _books;
+
+        var s = (_q ?? "").Trim();
+        if (!string.IsNullOrWhiteSpace(s))
+        {
+            q = q.Where(x =>
+                (x.BankName ?? "").Contains(s, StringComparison.OrdinalIgnoreCase) ||
+                x.BankAccountNo.ToString().Contains(s, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (_status == "ACTIVE") q = q.Where(x => x.IsActive);
+        if (_status == "INACTIVE") q = q.Where(x => !x.IsActive);
+
+        return q.ToList();
+    }
+
+    private async Task ManualRefresh()
+    {
+        await Load();
+        _msg = "Refreshed ✅";
+    }
+
+    private void ClearFilters()
+    {
+        _q = "";
+        _status = "ALL";
+    }
+
+    private void NewBook()
+    {
+        _err = _msg = null;
+        _editing = new ChequeBook
+            {
+                CompanyId = _companyId,
+                IsActive = true,
+                StartNo = 1,
+                EndNo = 100,
+                NextNo = 1,
+                BankName = ""
+            };
+    }
+
+    private void EditBook(ChequeBook b)
+    {
+        _err = _msg = null;
+        _editing = new ChequeBook
+            {
+                ChequeBookId = b.ChequeBookId,
+                CompanyId = b.CompanyId,
+                BankAccountNo = b.BankAccountNo,
+                BankName = b.BankName,
+                StartNo = b.StartNo,
+                EndNo = b.EndNo,
+                NextNo = b.NextNo,
+                IsActive = b.IsActive,
+                CreatedOn = b.CreatedOn
+            };
+    }
+
+    private void CancelEdit() => _editing = null;
+
+    private async Task SaveBook()
+    {
+        if (_editing == null) return;
+
+        _saving = true;
+        _err = _msg = null;
+
+        try
+        {
+            if (_companyId <= 0) throw new Exception("Invalid company.");
+
+            _editing.CompanyId = _companyId;
+            _editing.BankName = (_editing.BankName ?? "").Trim();
+
+            if (_editing.BankAccountNo <= 0) throw new Exception("Bank GL AccountNo is required.");
+            if (string.IsNullOrWhiteSpace(_editing.BankName)) throw new Exception("Bank Name is required.");
+            if (_editing.StartNo <= 0) throw new Exception("StartNo must be > 0.");
+            if (_editing.EndNo <= 0) throw new Exception("EndNo must be > 0.");
+            if (_editing.EndNo < _editing.StartNo) throw new Exception("EndNo cannot be less than StartNo.");
+            if (_editing.NextNo < _editing.StartNo || _editing.NextNo > _editing.EndNo)
+                throw new Exception("NextNo must be within StartNo and EndNo.");
+
+            // Prevent duplicate active book for same bank account (optional but useful)
+            var dup = await Db.Set<ChequeBook>()
+                .AsNoTracking()
+                .AnyAsync(x => x.CompanyId == _companyId
+                            && x.BankAccountNo == _editing.BankAccountNo
+                            && x.ChequeBookId != _editing.ChequeBookId
+                            && x.IsActive);
+
+            if (dup && _editing.IsActive)
+                throw new Exception("An ACTIVE cheque book already exists for this Bank AccountNo. Deactivate it first.");
+
+            if (_editing.ChequeBookId == 0)
+                Db.Set<ChequeBook>().Add(_editing);
+            else
+                Db.Set<ChequeBook>().Update(_editing);
+
+            await Db.SaveChangesAsync();
+
+            _msg = "Cheque Book saved ✅";
+            _editing = null;
+            await Load(silent: true);
+        }
+        catch (Exception ex)
+        {
+            _err = ex.InnerException?.Message ?? ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task ToggleActive(ChequeBook b)
+    {
+        _err = _msg = null;
+
+        try
+        {
+            var entity = await Db.Set<ChequeBook>()
+                .FirstOrDefaultAsync(x => x.CompanyId == _companyId && x.ChequeBookId == b.ChequeBookId);
+
+            if (entity == null) return;
+
+            entity.IsActive = !entity.IsActive;
+            await Db.SaveChangesAsync();
+
+            _msg = entity.IsActive ? "Activated ✅" : "Deactivated ✅";
+            await Load(silent: true);
+        }
+        catch (Exception ex)
+        {
+            _err = ex.InnerException?.Message ?? ex.Message;
+        }
+    }
+
+    private async Task QuickFillNext(ChequeBook b)
+    {
+        _err = _msg = null;
+
+        try
+        {
+            var entity = await Db.Set<ChequeBook>()
+                .FirstOrDefaultAsync(x => x.CompanyId == _companyId && x.ChequeBookId == b.ChequeBookId);
+
+            if (entity == null) return;
+
+            entity.NextNo = entity.StartNo;
+            await Db.SaveChangesAsync();
+
+            _msg = "Next No reset to Start No ✅";
+            await Load(silent: true);
+        }
+        catch (Exception ex)
+        {
+            _err = ex.InnerException?.Message ?? ex.Message;
+        }
+    }
+}

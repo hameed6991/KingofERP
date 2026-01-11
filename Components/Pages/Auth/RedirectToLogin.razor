@@ -1,0 +1,11 @@
+﻿@inject NavigationManager Nav
+
+@code {
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        var returnUrl = Uri.EscapeDataString(Nav.Uri.Replace(Nav.BaseUri, "/"));
+        Nav.NavigateTo($"/login?returnUrl={returnUrl}", forceLoad: false);
+    }
+}

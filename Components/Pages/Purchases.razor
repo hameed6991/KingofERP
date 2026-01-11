@@ -1,0 +1,492 @@
+﻿@page "/purchases"
+@using Microsoft.EntityFrameworkCore
+@using UaeEInvoice.Data
+@using UaeEInvoice.Services.Auth
+@inject AppDbContext Db
+@inject NavigationManager Nav
+@inject ICurrentCompany CurrentCompany
+@using Microsoft.AspNetCore.Authorization
+@attribute [Authorize(Roles = "Admin,Purchase")]
+
+<style>
+    :root {
+        --r: 22px;
+        --b: 1px solid rgba(0,0,0,.06);
+        --shadow: 0 14px 45px rgba(0,0,0,.08);
+        --shadow-soft: 0 10px 30px rgba(0,0,0,.06);
+    }
+
+    .hero-pro {
+        border-radius: 26px;
+        border: var(--b);
+        background: radial-gradient(900px 260px at 10% 0%, rgba(13,110,253,.20), transparent 60%), radial-gradient(700px 260px at 70% 0%, rgba(25,135,84,.16), transparent 60%), linear-gradient(180deg, rgba(255,255,255,.95), rgba(255,255,255,.86));
+        backdrop-filter: blur(8px);
+        box-shadow: var(--shadow-soft);
+        padding: 18px;
+    }
+
+    .soft-card-pro {
+        border-radius: var(--r);
+        border: var(--b);
+        box-shadow: var(--shadow-soft);
+        background: rgba(255,255,255,.92);
+        backdrop-filter: blur(6px);
+    }
+
+    .btn-pro {
+        border-radius: 999px;
+        padding: .58rem 1rem;
+        font-weight: 800;
+    }
+
+    .pill {
+        border-radius: 999px;
+        border: var(--b);
+        background: #fff;
+        padding: .42rem .7rem;
+        font-weight: 800;
+        font-size: .82rem;
+        display: inline-flex;
+        gap: .45rem;
+        align-items: center;
+        white-space: nowrap;
+    }
+
+    .searchbox {
+        position: relative;
+    }
+
+        .searchbox .icon {
+            position: absolute;
+            left: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            opacity: .55;
+            font-size: 14px;
+        }
+
+        .searchbox input {
+            padding-left: 36px;
+            border-radius: 999px;
+        }
+
+    .table thead th {
+        font-size: .74rem;
+        letter-spacing: .10em;
+        text-transform: uppercase;
+        color: rgba(0,0,0,.55);
+        white-space: nowrap;
+        border-bottom: 1px solid rgba(0,0,0,.06) !important;
+    }
+
+    .row-click {
+        cursor: pointer;
+    }
+
+        .row-click:hover {
+            background: rgba(13,110,253,.05);
+        }
+
+    .money {
+        font-variant-numeric: tabular-nums;
+    }
+
+    .badge-soft {
+        border-radius: 999px;
+        padding: .35rem .6rem;
+        font-weight: 900;
+        font-size: .78rem;
+        border: var(--b);
+        background: #fff;
+        display: inline-flex;
+        align-items: center;
+        gap: .4rem;
+        white-space: nowrap;
+    }
+
+    .stat {
+        border: var(--b);
+        border-radius: 18px;
+        padding: 14px;
+        background: #fff;
+        height: 100%;
+    }
+
+        .stat .label {
+            font-size: .85rem;
+            color: rgba(0,0,0,.55);
+        }
+
+        .stat .value {
+            font-size: 1.8rem;
+            font-weight: 900;
+        }
+
+    .skeleton {
+        height: 12px;
+        border-radius: 999px;
+        background: linear-gradient(90deg, rgba(0,0,0,.06), rgba(0,0,0,.03), rgba(0,0,0,.06));
+        background-size: 200% 100%;
+        animation: sk 1.2s infinite linear;
+    }
+
+    @@keyframes sk {
+        0% {
+            background-position: 0 0
+        }
+
+        100% {
+            background-position: 200% 0
+        }
+    }
+</style>
+
+<div class="container-xxl py-4">
+
+    <!-- HERO -->
+    <div class="hero-pro mb-3">
+        <div class="d-flex align-items-start justify-content-between flex-wrap gap-2">
+            <div>
+                <h2 class="mb-1" style="font-weight:900;">Purchases</h2>
+                <div class="text-muted">View, search and open vendor purchase invoices.</div>
+
+                <div class="d-flex flex-wrap gap-2 mt-2">
+                    <span class="pill">📄 Shown: <b>@_rows.Count</b></span>
+                    <span class="pill">💰 Total (shown): <b class="money">@_rows.Sum(x => x.GrandTotal).ToString("0.00")</b> <span class="text-muted fw-semibold">AED</span></span>
+                </div>
+            </div>
+
+            <div class="d-flex gap-2">
+                <button class="btn btn-primary btn-pro" type="button" @onclick="GoCreate">
+                    + New Purchase
+                </button>
+                <button class="btn btn-outline-secondary btn-pro" type="button" @onclick="Reload" disabled="@_loading">
+                    @(_loading ? "Loading..." : "Reload")
+                </button>
+            </div>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_error))
+    {
+        <div class="alert alert-danger soft-card-pro p-3">@_error</div>
+    }
+
+    <!-- FILTERS -->
+    <div class="card soft-card-pro mb-3">
+        <div class="card-body">
+            <div class="row g-2 align-items-end">
+                <div class="col-12 col-lg-5">
+                    <label class="form-label">Search</label>
+                    <div class="searchbox">
+                        <span class="icon">🔎</span>
+                        <input class="form-control" placeholder="Purchase no / Vendor / TRN..."
+                               @bind="_q" @bind:event="oninput" />
+                    </div>
+                </div>
+
+                <div class="col-12 col-md-4 col-lg-2">
+                    <label class="form-label">From</label>
+                    <input type="date" class="form-control" style="border-radius:999px;"
+                           @bind-value="_from" @bind-value:event="onchange" />
+                </div>
+
+                <div class="col-12 col-md-4 col-lg-2">
+                    <label class="form-label">To</label>
+                    <input type="date" class="form-control" style="border-radius:999px;"
+                           @bind-value="_to" @bind-value:event="onchange" />
+                </div>
+
+                <div class="col-12 col-md-4 col-lg-3 d-flex gap-2">
+                    <div class="form-check me-auto" style="padding-top:6px;">
+                        <input class="form-check-input" type="checkbox" id="pendingOnly" @bind="_onlyPending" />
+                        <label class="form-check-label" for="pendingOnly">Only Pending</label>
+                    </div>
+
+                    <button class="btn btn-outline-primary btn-pro flex-grow-1" type="button"
+                            @onclick="Apply" disabled="@_loading">
+                        Apply
+                    </button>
+                    <button class="btn btn-outline-secondary btn-pro flex-grow-1" type="button"
+                            @onclick="Clear" disabled="@_loading">
+                        Clear
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- SUMMARY -->
+    <div class="card soft-card-pro mb-3">
+        <div class="card-body">
+            <div class="row g-2">
+                <div class="col-12 col-md-4">
+                    <div class="stat">
+                        <div class="label">Purchases (shown)</div>
+                        <div class="value">@_rows.Count</div>
+                    </div>
+                </div>
+                <div class="col-12 col-md-4">
+                    <div class="stat">
+                        <div class="label">Subtotal (shown)</div>
+                        <div class="value money">@_rows.Sum(x => x.SubTotal).ToString("0.00")</div>
+                    </div>
+                </div>
+                <div class="col-12 col-md-4">
+                    <div class="stat">
+                        <div class="label">Grand Total (shown)</div>
+                        <div class="value money">@_rows.Sum(x => x.GrandTotal).ToString("0.00")</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- GRID -->
+    <div class="card soft-card-pro">
+        <div class="card-body">
+
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <div class="text-muted">Showing: <b>@_rows.Count</b></div>
+                @if (_loading)
+                {
+                    <span class="badge-soft">⏳ Loading…</span>
+                }
+            </div>
+
+            <div class="table-responsive">
+                <table class="table table-hover align-middle">
+                    <thead>
+                        <tr>
+                            <!-- ✅ ID COLUMN REMOVED -->
+                            <th style="min-width:180px;">Purchase No</th>
+                            <th style="width:140px;">Date</th>
+                            <th style="min-width:260px;">Vendor</th>
+                            <th style="width:210px;">Due</th>
+                            <th class="text-end" style="width:160px;">Total</th>
+                            <th class="text-end" style="width:130px;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @if (_loading && _rows.Count == 0)
+                        {
+                            @for (int i = 0; i < 5; i++)
+                            {
+                                <tr>
+                                    <td><div class="skeleton" style="width:160px;"></div></td>
+                                    <td><div class="skeleton" style="width:90px;"></div></td>
+                                    <td><div class="skeleton" style="width:260px;"></div></td>
+                                    <td><div class="skeleton" style="width:140px;"></div></td>
+                                    <td class="text-end"><div class="skeleton" style="width:120px; margin-left:auto;"></div></td>
+                                    <td class="text-end"><div class="skeleton" style="width:70px; margin-left:auto;"></div></td>
+                                </tr>
+                            }
+                        }
+                        else
+                        {
+                            @foreach (var p in _rows)
+                            {
+                                <tr class="row-click" @onclick="() => View(p.PurchaseInvoiceId)">
+                                    <td class="fw-semibold">@p.PurchaseNo</td>
+                                    <td>@p.PurchaseDate.ToString("dd-MM-yyyy")</td>
+                                    <td>
+                                        <div class="fw-semibold">@p.VendorName</div>
+                                        <div class="text-muted small">TRN: @(string.IsNullOrWhiteSpace(p.VendorTRN) ? "-" : p.VendorTRN)</div>
+                                    </td>
+                                    <td>@RenderDueBadge(p.DueDate)</td>
+                                    <td class="text-end fw-bold money">@p.GrandTotal.ToString("0.00")</td>
+                                    <td class="text-end" @onclick:stopPropagation="true">
+                                        <button class="btn btn-sm btn-outline-primary btn-pro"
+                                                type="button"
+                                                @onclick="() => View(p.PurchaseInvoiceId)">
+                                            View
+                                        </button>
+                                    </td>
+                                </tr>
+                            }
+
+                            @if (_rows.Count == 0)
+                            {
+                                <tr>
+                                    <td colspan="6" class="text-center text-muted py-4">No purchases found.</td>
+                                </tr>
+                            }
+                        }
+                    </tbody>
+                </table>
+            </div>
+
+        </div>
+    </div>
+
+</div>
+
+@code {
+    private bool _loading;
+    private string? _error;
+
+    private int _companyId;
+
+    private string _q = "";
+    private DateTime? _from;
+    private DateTime? _to;
+    private bool _onlyPending = false;
+
+    private List<RowVm> _rows = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _error = null;
+
+        try
+        {
+            await CurrentCompany.RefreshAsync();
+            _companyId = CurrentCompany.CompanyId;
+
+            if (_companyId <= 0)
+            {
+                _error = "CompanyId not found from login. Please logout & login again.";
+                return;
+            }
+
+            await Load();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private void GoCreate() => Nav.NavigateTo("/purchase-create");
+    private void View(int id) => Nav.NavigateTo($"/purchase-view/{id}");
+
+    private async Task Reload() => await Load();
+    private async Task Apply() => await Load();
+
+    private async Task Clear()
+    {
+        _q = "";
+        _from = null;
+        _to = null;
+        _onlyPending = false;
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        _loading = true;
+        _error = null;
+
+        try
+        {
+            Db.ChangeTracker.Clear();
+
+            var qry = Db.PurchaseInvoices.AsNoTracking()
+                .Where(x => x.CompanyId == _companyId);
+
+            if (!string.IsNullOrWhiteSpace(_q))
+            {
+                var s = _q.Trim();
+                qry = qry.Where(x =>
+                    x.PurchaseNo.Contains(s) ||
+                    x.VendorName.Contains(s) ||
+                    (x.VendorTRN != null && x.VendorTRN.Contains(s)));
+            }
+
+            if (_from.HasValue)
+            {
+                var from = _from.Value.Date;
+                qry = qry.Where(x => x.PurchaseDate >= from);
+            }
+
+            if (_to.HasValue)
+            {
+                var to = _to.Value.Date.AddDays(1).AddTicks(-1);
+                qry = qry.Where(x => x.PurchaseDate <= to);
+            }
+
+            _rows = await qry
+                .OrderByDescending(x => x.PurchaseInvoiceId)
+                .Take(300)
+                .Select(x => new RowVm
+                    {
+                        PurchaseInvoiceId = x.PurchaseInvoiceId,
+                        PurchaseNo = x.PurchaseNo,
+                        PurchaseDate = x.PurchaseDate,
+                        DueDate = x.DueDate,
+                        VendorName = x.VendorName,
+                        VendorTRN = x.VendorTRN,
+                        SubTotal = x.SubTotal,
+                        VatTotal = x.VatTotal,
+                        GrandTotal = x.GrandTotal
+                    })
+                .ToListAsync();
+
+            if (_onlyPending)
+                _rows = _rows.Where(x => (x.DueDate.HasValue) && (x.DueDate.Value.Date >= DateTime.Today.Date)).ToList();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.InnerException?.Message ?? ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private class RowVm
+    {
+        public int PurchaseInvoiceId { get; set; }
+        public string PurchaseNo { get; set; } = "";
+        public DateTime PurchaseDate { get; set; }
+        public DateTime? DueDate { get; set; }
+        public string VendorName { get; set; } = "";
+        public string? VendorTRN { get; set; }
+        public decimal SubTotal { get; set; }
+        public decimal VatTotal { get; set; }
+        public decimal GrandTotal { get; set; }
+    }
+
+    // ✅ Badge for due date
+    private MarkupString RenderDueBadge(DateTime? dueDate)
+    {
+        if (!dueDate.HasValue)
+            return new MarkupString("<span class='badge bg-secondary'>No Due</span>");
+
+        var dd = dueDate.Value.Date;
+        var today = DateTime.Today.Date;
+        var daysUntil = (dd - today).Days;
+
+        var css = DueBadgeClass(daysUntil);
+        var label = DueLabel(daysUntil);
+
+        var html =
+            $"<span class='badge {css}' title='Due: {dd:dd-MM-yyyy}'>" +
+            $"{dd:dd-MM-yyyy} <span class='ms-1 small opacity-75'>{label}</span>" +
+            $"</span>";
+
+        return new MarkupString(html);
+    }
+
+    private string DueBadgeClass(int daysUntil)
+    {
+        if (daysUntil < 0)
+        {
+            var over = Math.Abs(daysUntil);
+            if (over > 20) return "bg-dark text-white";
+            return "bg-danger text-white";
+        }
+
+        if (daysUntil <= 10) return "bg-warning text-dark";
+        if (daysUntil <= 20) return "bg-info text-dark";
+        return "bg-success text-white";
+    }
+
+    private string DueLabel(int daysUntil)
+    {
+        if (daysUntil < 0) return $"Over {Math.Abs(daysUntil)}d";
+        if (daysUntil == 0) return "Today";
+        return $"{daysUntil}d";
+    }
+}

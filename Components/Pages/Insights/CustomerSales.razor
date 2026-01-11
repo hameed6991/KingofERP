@@ -1,0 +1,312 @@
+﻿@page "/insights/customer-sales"
+@page "/insights/customer-sales/{CustomerId:int}"
+
+@using Microsoft.EntityFrameworkCore
+@using UaeEInvoice.Data
+@using UaeEInvoice.Services.Analytics
+@using UaeEInvoice.Services.Auth
+
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject AnalyticsService Analytics
+@inject ICurrentCompany CurrentCompany
+@inject NavigationManager Nav
+
+<style>
+    .shell {
+        min-height: calc(100vh - 90px);
+        background: radial-gradient(900px 450px at 15% 0%, rgba(13,110,253,.12), transparent 60%), radial-gradient(900px 450px at 85% 0%, rgba(25,135,84,.10), transparent 60%), linear-gradient(180deg, rgba(248,249,250,1), rgba(255,255,255,1));
+        border: 1px solid rgba(0,0,0,.07);
+        border-radius: 18px;
+        box-shadow: 0 12px 34px rgba(0,0,0,.06);
+        padding: 18px;
+    }
+
+    .title {
+        font-weight: 900;
+        letter-spacing: -0.6px;
+        margin: 0;
+        font-size: clamp(22px, 2.2vw, 34px);
+        line-height: 1.05;
+    }
+
+    .mut {
+        color: rgba(33,37,41,.65);
+        font-size: 13px;
+    }
+
+    .cardx {
+        border: 1px solid rgba(0,0,0,.07);
+        border-radius: 18px;
+        background: rgba(255,255,255,.78);
+        box-shadow: 0 10px 28px rgba(0,0,0,.05);
+        backdrop-filter: blur(10px);
+        overflow: hidden;
+        padding: 14px;
+    }
+
+    .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        border-radius: 999px;
+        padding: 8px 12px;
+        border: 1px solid rgba(0,0,0,.10);
+        background: rgba(255,255,255,.78);
+        font-weight: 800;
+        box-shadow: 0 8px 22px rgba(0,0,0,.05);
+        backdrop-filter: blur(10px);
+        white-space: nowrap;
+    }
+
+    .btn-soft {
+        border-radius: 12px;
+        padding: 10px 12px;
+        font-weight: 800;
+        border: 1px solid rgba(0,0,0,.10);
+        background: rgba(255,255,255,.70);
+    }
+
+    .btn-main {
+        border-radius: 12px;
+        padding: 10px 14px;
+        font-weight: 900;
+    }
+
+    .table thead th {
+        font-size: 12px;
+        color: rgba(33,37,41,.65);
+        font-weight: 800;
+    }
+</style>
+
+<div class="container-xxl py-4">
+    <div class="shell">
+
+        <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
+            <div>
+                <h2 class="title">Customer Sales (MTD)</h2>
+                <div class="mut">Invoices created this month • Paid & Balance for those invoices</div>
+
+                <div class="d-flex gap-2 flex-wrap mt-3">
+                    <span class="pill"><span class="mut">Company</span> #@CurrentCompany.CompanyId</span>
+                    <span class="pill"><span class="mut">As of</span> @DateTime.Today.ToString("dd MMM yyyy")</span>
+                </div>
+            </div>
+
+            <div class="d-flex gap-2 flex-wrap">
+                <button class="btn btn-soft" type="button" @onclick="GoBack">Back</button>
+                <button class="btn btn-primary btn-main" type="button" @onclick="Reload" disabled="@_loading">
+                    @(_loading ? "Loading..." : "Refresh")
+                </button>
+            </div>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(_err))
+        {
+            <div class="alert alert-danger border-0 rounded-4 shadow-sm">
+                <b>Error:</b> @_err
+            </div>
+        }
+
+        <!-- Picker -->
+        <div class="cardx mb-3">
+            <div class="mut mb-2">Select Customer</div>
+
+            <div class="row g-2 align-items-center">
+                <div class="col-12 col-lg-7">
+                    <select class="form-select" @bind="_selectedCustomerId">
+                        <option value="">-- Select customer --</option>
+                        @foreach (var c in _customers)
+                        {
+                            <option value="@c.CustomerId">@c.Name</option>
+                        }
+                    </select>
+                    <div class="mut mt-1">Tip: If menu click opens without id, pick customer here.</div>
+                </div>
+
+                <div class="col-12 col-lg-5">
+                    <button class="btn btn-primary w-100 btn-main"
+                            type="button"
+                            @onclick="OpenSelected"
+                            disabled="@(!_selectedCustomerId.HasValue || _selectedCustomerId.Value <= 0 || _loading)">
+                        Open
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Content -->
+        @if (_loading && _result == null)
+        {
+            <div class="cardx">
+                <div class="mut">Loading customer analytics...</div>
+            </div>
+        }
+        else if (_result == null)
+        {
+            <div class="cardx">
+                <div class="mut">Select a customer to view MTD summary.</div>
+            </div>
+        }
+        else
+        {
+            <div class="row g-3">
+
+                <div class="col-12">
+                    <div class="cardx">
+                        <div class="d-flex justify-content-between flex-wrap gap-2 align-items-center mb-2">
+                            <div>
+                                <div class="fw-bold">@_result.Customer.Name</div>
+                                <div class="mut">
+                                    Period: @_result.From.ToString("dd MMM yyyy") → @_result.ToExclusive.AddDays(-1).ToString("dd MMM yyyy")
+                                </div>
+                            </div>
+
+                            <div class="d-flex gap-2 flex-wrap">
+                                <span class="pill"><span class="mut">Invoices</span> @_result.InvoiceCount</span>
+                                <span class="pill"><span class="mut">Sales (MTD)</span> @Fmt(_result.SalesMtd)</span>
+                                <span class="pill"><span class="mut">Paid</span> @Fmt(_result.PaidToDateOnMtdInvoices)</span>
+                                <span class="pill"><span class="mut">Balance</span> @Fmt(_result.BalanceOnMtdInvoices)</span>
+                            </div>
+                        </div>
+
+                        <div class="table-responsive">
+                            <table class="table table-sm align-middle mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>Invoice</th>
+                                        <th>Date</th>
+                                        <th>Due</th>
+                                        <th class="text-end">Total</th>
+                                        <th class="text-end">Paid</th>
+                                        <th class="text-end">Balance</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @if (_result.Invoices.Count == 0)
+                                    {
+                                        <tr><td colspan="7" class="mut">No invoices for this customer in MTD.</td></tr>
+                                    }
+                                    else
+                                    {
+                                        @foreach (var r in _result.Invoices)
+                                        {
+                                            <tr>
+                                                <td>@r.InvoiceNo</td>
+                                                <td>@r.InvoiceDate.ToString("dd MMM yyyy")</td>
+                                                <td>@(r.DueDate?.ToString("dd MMM yyyy") ?? "-")</td>
+                                                <td class="text-end">@Fmt(r.Total)</td>
+                                                <td class="text-end">@Fmt(r.Paid)</td>
+                                                <td class="text-end">@Fmt(r.Balance)</td>
+                                                <td>
+                                                    <span class="badge bg-light text-dark border">@r.Status</span>
+                                                </td>
+                                            </tr>
+                                        }
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+
+                    </div>
+                </div>
+
+            </div>
+        }
+
+    </div>
+</div>
+
+@code {
+    [Parameter] public int? CustomerId { get; set; }
+
+    private bool _loading;
+    private string? _err;
+
+    private List<Customer> _customers = new();
+    private int? _selectedCustomerId;
+
+    private int? _currentCustomerId;
+    private CustomerSalesMtdResult? _result;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadCustomers();
+        // if opened with /{CustomerId} it will load from OnParametersSetAsync
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // This is the KEY FIX: when URL changes (/customer-sales/2 -> /customer-sales/5),
+        // load data again.
+        if (CustomerId.HasValue && CustomerId.Value > 0 && CustomerId != _currentCustomerId)
+        {
+            _selectedCustomerId = CustomerId;
+            _currentCustomerId = CustomerId;
+            await LoadCustomerMtd(CustomerId.Value);
+        }
+    }
+
+    private void GoBack() => Nav.NavigateTo("/insights");
+
+    private async Task Reload()
+    {
+        _err = null;
+        await LoadCustomers();
+
+        if (_currentCustomerId.HasValue && _currentCustomerId.Value > 0)
+            await LoadCustomerMtd(_currentCustomerId.Value);
+    }
+
+    private async Task LoadCustomers()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        _customers = await db.Customers.AsNoTracking()
+            .Where(x => x.CompanyId == CurrentCompany.CompanyId)
+            .OrderBy(x => x.Name)
+            .ToListAsync();
+    }
+
+    private async Task OpenSelected()
+    {
+        if (!_selectedCustomerId.HasValue || _selectedCustomerId.Value <= 0)
+            return;
+
+        var cid = _selectedCustomerId.Value;
+
+        // Load immediately so UI won't stay blank
+        _currentCustomerId = cid;
+        await LoadCustomerMtd(cid);
+
+        // Update URL (nice deep-link), but don't rely on it for loading
+        Nav.NavigateTo($"/insights/customer-sales/{cid}", replace: true);
+    }
+
+    private async Task LoadCustomerMtd(int customerId)
+    {
+        _loading = true;
+        _err = null;
+
+        try
+        {
+            var companyId = CurrentCompany.CompanyId;
+            var asOf = DateTime.Today;
+
+            _result = await Analytics.GetCustomerSalesMtd(companyId, customerId, asOf);
+        }
+        catch (Exception ex)
+        {
+            _result = null;
+            _err = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private static string Fmt(decimal v) => v.ToString("0.00");
+}

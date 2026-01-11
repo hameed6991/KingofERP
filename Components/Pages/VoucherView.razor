@@ -1,0 +1,269 @@
+﻿@page "/voucher/{RefNo}"
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Components
+@using Microsoft.JSInterop
+@using UaeEInvoice.Data
+@using UaeEInvoice.Services.Auth
+
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@inject ICurrentCompany CurrentCompany
+
+<PageTitle>Voucher</PageTitle>
+
+<h1 class="display-5 fw-bold">Voucher</h1>
+
+@if (!string.IsNullOrWhiteSpace(_error))
+{
+    <div class="alert alert-danger">@_error</div>
+}
+else if (_loading)
+{
+    <div class="text-muted">Loading...</div>
+}
+else
+{
+    <div class="card shadow-sm rounded-4 p-4">
+        <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+            <div>
+                <div class="text-muted">Voucher No</div>
+                <div class="fs-4 fw-bold">@_refNo</div>
+                <div class="text-muted">
+                    Date: @_txnDate.ToString("dd-MM-yyyy")
+                </div>
+                @if (!string.IsNullOrWhiteSpace(_voucherType))
+                {
+                    <div class="text-muted small">Type: @_voucherType</div>
+                }
+            </div>
+
+            <button class="btn btn-outline-secondary" type="button" @onclick="Print">
+                <span class="me-1">🖨️</span> Print
+            </button>
+        </div>
+
+        <hr />
+
+        <div class="row g-3 mb-3">
+            <div class="col-md-4">
+                <div class="p-3 border rounded-4">
+                    <div class="text-muted">Narration</div>
+                    <div class="fw-semibold">@(_narration ?? "—")</div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="p-3 border rounded-4">
+                    <div class="text-muted">Total Debit</div>
+                    <div class="fw-bold">@_totalDr.ToString("N2")</div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="p-3 border rounded-4">
+                    <div class="text-muted">Total Credit</div>
+                    <div class="fw-bold">@_totalCr.ToString("N2")</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table align-middle">
+                <thead>
+                    <tr class="text-uppercase text-muted small">
+                        <th>Account</th>
+                        <th class="text-end">Debit</th>
+                        <th class="text-end">Credit</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (_lines.Count == 0)
+                    {
+                        <tr>
+                            <td colspan="3" class="text-center text-muted py-5">
+                                No lines found for this voucher.
+                            </td>
+                        </tr>
+                    }
+                    else
+                    {
+                        @foreach (var l in _lines.OrderBy(x => x.AccountNo))
+                        {
+                            <tr>
+                                <td>
+                                    <div class="fw-semibold">@GetAccountDisplay(l.AccountNo)</div>
+                                </td>
+                                <td class="text-end">@l.Debit.ToString("N2")</td>
+                                <td class="text-end">@l.Credit.ToString("N2")</td>
+                            </tr>
+                        }
+
+                        <tr class="fw-bold">
+                            <td class="text-end">Totals</td>
+                            <td class="text-end">@_totalDr.ToString("N2")</td>
+                            <td class="text-end">@_totalCr.ToString("N2")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        <div class="mt-2">
+            <button class="btn btn-link" type="button" @onclick="BackToLedger">← Back</button>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public string RefNo { get; set; } = "";
+
+    private bool _loading = true;
+    private string? _error;
+
+    private int _companyId;
+
+    private string _refNo = "";
+    private string? _voucherType;
+    private DateTime _txnDate = DateTime.Today;
+    private string? _narration;
+
+    private decimal _totalDr;
+    private decimal _totalCr;
+
+    private List<VoucherLineVm> _lines = new();
+    private Dictionary<int, string> _accName = new();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _loading = true;
+        _error = null;
+
+        try
+        {
+            await CurrentCompany.RefreshAsync();
+            _companyId = CurrentCompany.CompanyId;
+
+            if (_companyId <= 0)
+                throw new Exception("CompanyId not found. Please logout & login again.");
+
+            _refNo = Uri.UnescapeDataString(RefNo ?? "").Trim();
+            if (string.IsNullOrWhiteSpace(_refNo))
+                throw new Exception("Invalid voucher reference.");
+
+            await using var db = await DbFactory.CreateDbContextAsync();
+
+            // 1) Try LedgerEntries (if your system stores per-line debit/credit)
+            var le = await db.LedgerEntries.AsNoTracking()
+                .Where(x => x.CompanyId == _companyId && x.RefNo == _refNo)
+                .OrderBy(x => x.Id)
+                .ToListAsync();
+
+            if (le.Count > 0)
+            {
+                _txnDate = le[0].TxnDate;
+                _narration = le.Select(x => x.Narration).FirstOrDefault();
+
+                _lines = le.Select(x => new VoucherLineVm
+                    {
+                        AccountNo = x.AccountNo,
+                        Debit = x.Debit,
+                        Credit = x.Credit
+                    }).ToList();
+
+                _totalDr = _lines.Sum(x => x.Debit);
+                _totalCr = _lines.Sum(x => x.Credit);
+
+                await LoadAccountNames(db, _lines.Select(x => x.AccountNo).Distinct().ToList());
+                return;
+            }
+
+            // 2) If empty, try GeneralLedgerEntries (if your system stores one row with DebitAccountNo/CreditAccountNo)
+            var gl = await db.GeneralLedgerEntries.AsNoTracking()
+                .Where(x => x.CompanyId == _companyId && x.VoucherNo == _refNo)
+                .OrderBy(x => x.GeneralLedgerEntryId)
+                .ToListAsync();
+
+            if (gl.Count == 0)
+            {
+                // nothing found in both tables
+                _lines = new();
+                _totalDr = _totalCr = 0;
+                _narration = null;
+                _voucherType = null;
+                _txnDate = DateTime.Today;
+                return;
+            }
+
+            _txnDate = gl[0].TxnDate;
+            _voucherType = gl[0].VoucherType;
+            _narration = gl.Select(x => x.Narration).FirstOrDefault();
+
+            // Build lines: sum debit/credit by account
+            var dict = new Dictionary<int, (decimal dr, decimal cr)>();
+
+            foreach (var row in gl)
+            {
+                if (!dict.ContainsKey(row.DebitAccountNo)) dict[row.DebitAccountNo] = (0m, 0m);
+                if (!dict.ContainsKey(row.CreditAccountNo)) dict[row.CreditAccountNo] = (0m, 0m);
+
+                dict[row.DebitAccountNo] = (dict[row.DebitAccountNo].dr + row.Amount, dict[row.DebitAccountNo].cr);
+                dict[row.CreditAccountNo] = (dict[row.CreditAccountNo].dr, dict[row.CreditAccountNo].cr + row.Amount);
+            }
+
+            _lines = dict.Select(k => new VoucherLineVm
+                {
+                    AccountNo = k.Key,
+                    Debit = k.Value.dr,
+                    Credit = k.Value.cr
+                }).Where(x => x.Debit != 0 || x.Credit != 0).ToList();
+
+            _totalDr = _lines.Sum(x => x.Debit);
+            _totalCr = _lines.Sum(x => x.Credit);
+
+            await LoadAccountNames(db, _lines.Select(x => x.AccountNo).Distinct().ToList());
+        }
+        catch (Exception ex)
+        {
+            _error = ex.InnerException?.Message ?? ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task LoadAccountNames(AppDbContext db, List<int> accNos)
+    {
+        _accName = await db.ChartOfAccounts.AsNoTracking()
+            .Where(a => a.CompanyId == _companyId && accNos.Contains(a.AccountNo))
+            .ToDictionaryAsync(a => a.AccountNo, a => a.AccountName);
+    }
+
+    private string GetAccountDisplay(int accountNo)
+    {
+        if (_accName.TryGetValue(accountNo, out var name))
+            return $"{name} ({accountNo})";
+
+        return $"Account ({accountNo})";
+    }
+
+    private async Task Print()
+    {
+        await JS.InvokeVoidAsync("window.print");
+    }
+
+    private void BackToLedger()
+    {
+        // go to ledger page for first line account if available
+        if (_lines.Count > 0)
+            Nav.NavigateTo($"/ledger/{_lines[0].AccountNo}");
+        else
+            Nav.NavigateTo("/ledger/1000");
+    }
+
+    private class VoucherLineVm
+    {
+        public int AccountNo { get; set; }
+        public decimal Debit { get; set; }
+        public decimal Credit { get; set; }
+    }
+}

@@ -1,0 +1,805 @@
+﻿@page "/invoice-create"
+@using UaeEInvoice.Data
+@using UaeEInvoice.Services
+@using UaeEInvoice.Services.Auth
+@using Microsoft.EntityFrameworkCore
+@inject AppDbContext Db
+@inject NavigationManager Nav
+@inject LedgerService Ledger
+@inject ICurrentCompany CurrentCompany
+@inject InventoryPostingService Stock
+@inject AccountRoleService Roles
+
+<style>
+    .hero {
+        border-radius: 22px;
+        border: 1px solid rgba(0,0,0,.06);
+        background: linear-gradient(135deg, rgba(13,110,253,.14), rgba(255,255,255,0));
+        padding: 18px;
+    }
+
+    .soft-card {
+        border: 1px solid rgba(0,0,0,.06);
+        border-radius: 22px;
+    }
+
+    .soft-shadow {
+        box-shadow: 0 10px 30px rgba(0,0,0,.06);
+    }
+
+    .table thead th {
+        font-size: .78rem;
+        letter-spacing: .08em;
+        color: rgba(0,0,0,.55);
+    }
+
+    .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: .45rem;
+        padding: .30rem .75rem;
+        border-radius: 999px;
+        border: 1px solid rgba(0,0,0,.08);
+        background: #fff;
+        font-size: .85rem;
+        white-space: nowrap;
+    }
+
+    .muted {
+        color: rgba(0,0,0,.55);
+    }
+
+    .totalsBox .rowline {
+        display: flex;
+        justify-content: space-between;
+        padding: .65rem 0;
+        border-bottom: 1px solid rgba(0,0,0,.06);
+    }
+
+        .totalsBox .rowline:last-child {
+            border-bottom: none;
+        }
+
+    .tpl-badge {
+        font-size: .75rem;
+        padding: .12rem .5rem;
+        border-radius: 999px;
+        border: 1px solid rgba(0,0,0,.10);
+        background: rgba(0,0,0,.03);
+    }
+</style>
+
+<div class="container-xxl py-4">
+
+    <div class="hero mb-3">
+        <div class="d-flex align-items-start justify-content-between flex-wrap gap-2">
+            <div>
+                <h2 class="mb-1 fw-bold">Create Invoice</h2>
+                <div class="muted">Select customer, add items, auto-calculate VAT and totals.</div>
+                <div class="d-flex flex-wrap gap-2 mt-2">
+                    <span class="chip">🧾 Preview: @InvoiceNoPreview()</span>
+                    <span class="chip">📌 Lines: @_lines.Count</span>
+                    <span class="chip">💱 Currency: AED</span>
+                    <span class="chip">🎨 Template: @TemplatePreviewChip()</span>
+                </div>
+            </div>
+
+            <div class="d-flex gap-2">
+                <button class="btn btn-outline-secondary" type="button" @onclick="ResetForm" disabled="@_saving">Reset</button>
+                <button class="btn btn-primary" type="button" @onclick="SaveInvoice" disabled="@_saving">
+                    @(_saving ? "Saving..." : "Save Invoice")
+                </button>
+            </div>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_toast))
+    {
+        <div class="alert alert-success soft-card soft-shadow p-3">@_toast</div>
+    }
+    @if (!string.IsNullOrWhiteSpace(_error))
+    {
+        <div class="alert alert-danger soft-card soft-shadow p-3">@_error</div>
+    }
+
+    <div class="row g-3">
+
+        <!-- LEFT -->
+        <div class="col-12 col-lg-8">
+            <div class="card soft-card soft-shadow mb-3">
+                <div class="card-body">
+                    <div class="row g-3">
+
+                        <div class="col-12 col-md-3">
+                            <label class="form-label">Invoice No</label>
+                            <input class="form-control" value="@InvoiceNoPreview()" disabled />
+                            <div class="form-text">Auto-generated from prefix + next number.</div>
+                        </div>
+
+                        <div class="col-12 col-md-3">
+                            <label class="form-label">Invoice Date</label>
+                            <input type="date" class="form-control"
+                                   value="@_invoiceDate.ToString("yyyy-MM-dd")"
+                                   @onchange="OnDateChanged" />
+                        </div>
+
+                        <div class="col-12 col-md-3">
+                            <label class="form-label">Due Date</label>
+                            <input type="date" class="form-control"
+                                   value="@_dueDate.ToString("yyyy-MM-dd")"
+                                   @onchange="OnDueDateChanged" />
+                            <div class="form-text">Default: Invoice Date + @_defaultCreditDays days</div>
+                        </div>
+
+                        <div class="col-12 col-md-3">
+                            <label class="form-label">Customer <span class="text-danger">*</span></label>
+                            <select class="form-select" value="@_selectedCustomerId" @onchange="OnCustomerChanged">
+                                <option value="0">-- Select customer --</option>
+                                @foreach (var c in _customers)
+                                {
+                                    <option value="@c.CustomerId">@c.Name</option>
+                                }
+                            </select>
+                            @if (!string.IsNullOrWhiteSpace(_customerInfo))
+                            {
+                                <div class="form-text">@_customerInfo</div>
+                            }
+                        </div>
+
+                        <!-- ✅ TEMPLATE DROPDOWN (NEW) -->
+                        <div class="col-12 col-md-6">
+                            <label class="form-label">Invoice Template</label>
+                            <div class="d-flex gap-2">
+                                <select class="form-select" value="@(_selectedTemplateId?.ToString() ?? "")"
+                                        @onchange="OnTemplateChanged">
+                                    <option value="">Default (System)</option>
+                                    @foreach (var t in _templates)
+                                    {
+                                        <option value="@t.InvoiceTemplateId">
+                                            @(t.IsSystem ? "Sample • " : "My • ")@t.Name
+                                        </option>
+                                    }
+                                </select>
+
+                                <button class="btn btn-outline-secondary" type="button"
+                                        title="Manage templates"
+                                        @onclick="GoTemplates">
+                                    Templates
+                                </button>
+                            </div>
+                            <div class="form-text">
+                                Select a template for this invoice. You can manage templates in Templates page.
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+
+            <!-- LINES -->
+            <div class="card soft-card soft-shadow">
+                <div class="card-body">
+
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <div class="fw-semibold">Invoice Items</div>
+                        <button class="btn btn-sm btn-outline-primary" type="button" @onclick="AddLine" disabled="@_saving">+ Add Line</button>
+                    </div>
+
+                    <div class="table-responsive">
+                        <table class="table align-middle">
+                            <thead>
+                                <tr class="text-uppercase small text-muted">
+                                    <th style="min-width: 260px;">Item</th>
+                                    <th class="text-end" style="width: 120px;">Qty</th>
+                                    <th class="text-end" style="width: 140px;">Rate</th>
+                                    <th class="text-end" style="width: 140px;">VAT %</th>
+                                    <th class="text-end" style="width: 180px;">Line Total</th>
+                                    <th class="text-end" style="width: 90px;">#</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @for (int idx = 0; idx < _lines.Count; idx++)
+                                {
+                                    var rowIndex = idx;
+                                    var ln = _lines[rowIndex];
+
+                                    <tr @key="ln.RowId">
+                                        <td>
+                                            <select class="form-select" value="@ln.ItemId"
+                                                    @onchange="(e) => OnLineItemChanged(rowIndex, e)">
+                                                <option value="0">-- Select item --</option>
+                                                @foreach (var it in _items)
+                                                {
+                                                    <option value="@it.ItemId">@it.Name</option>
+                                                }
+                                            </select>
+
+                                            @if (ln.ItemId != 0)
+                                            {
+                                                <div class="small text-muted mt-1">Item: <b>@ln.ItemName</b></div>
+                                            }
+                                        </td>
+
+                                        <td class="text-end">
+                                            <!-- ✅ Qty: ONLY whole number -->
+                                            <input type="number" class="form-control text-end"
+                                                   step="1" min="1"
+                                                   value="@ln.Qty"
+                                                   @onchange="(e) => { ln.Qty = ParseIntSafe(e.Value); RecalcLine(rowIndex); }" />
+                                        </td>
+
+                                        <td class="text-end">
+                                            <input type="number" class="form-control text-end"
+                                                   step="0.01" min="0"
+                                                   value="@ln.Rate.ToString("0.00")"
+                                                   @onchange="(e) => { ln.Rate = ParseDec(e.Value); RecalcLine(rowIndex); }" />
+                                        </td>
+
+                                        <td class="text-end">
+                                            <!-- ✅ VAT UI shows Percent like 5 -->
+                                            <input type="number" class="form-control text-end"
+                                                   step="0.01" min="0" max="100"
+                                                   value="@ln.VatPercent.ToString("0.##")"
+                                                   @onchange="(e) => { ln.VatPercent = ClampPct(ParseDec(e.Value)); RecalcLine(rowIndex); }" />
+                                            <div class="small text-muted">Example: 5 = 5%</div>
+                                        </td>
+
+                                        <td class="text-end fw-semibold">
+                                            @ln.LineTotal.ToString("0.00")
+                                            <div class="small text-muted">
+                                                Sub: @ln.LineSubTotal.ToString("0.00") | VAT: @ln.LineVat.ToString("0.00")
+                                            </div>
+                                        </td>
+
+                                        <td class="text-end">
+                                            <button class="btn btn-sm btn-outline-danger" type="button"
+                                                    title="Remove line"
+                                                    @onclick="() => RemoveLine(rowIndex)"
+                                                    disabled="@(_lines.Count <= 1)">
+                                                X
+                                            </button>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+
+                        @if (_lines.Count == 0)
+                        {
+                            <div class="text-center text-muted py-4">
+                                No lines. Click <b>+ Add Line</b>.
+                            </div>
+                        }
+                    </div>
+
+                </div>
+            </div>
+        </div>
+
+        <!-- RIGHT -->
+        <div class="col-12 col-lg-4">
+            <div class="card soft-card soft-shadow">
+                <div class="card-body totalsBox">
+                    <div class="fw-semibold mb-2">Totals</div>
+
+                    <div class="rowline">
+                        <div class="text-muted">Subtotal</div>
+                        <div class="fw-semibold">@_subTotal.ToString("0.00")</div>
+                    </div>
+
+                    <div class="rowline">
+                        <div class="text-muted">VAT Total</div>
+                        <div class="fw-semibold">@_vatTotal.ToString("0.00")</div>
+                    </div>
+
+                    <div class="d-flex justify-content-between py-3">
+                        <div class="text-muted">Grand Total</div>
+                        <div class="fs-4 fw-bold">@_grandTotal.ToString("0.00")</div>
+                    </div>
+
+                    <div class="d-grid mt-2">
+                        <button class="btn btn-primary" type="button" @onclick="SaveInvoice" disabled="@_saving">
+                            @(_saving ? "Saving..." : "Save Invoice")
+                        </button>
+                    </div>
+
+                    <div class="small text-muted mt-2">
+                        VAT shown in <b>%</b>. Saved internally as <b>rate</b> (5% → 0.05).
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+@code {
+    private int _companyId;
+    private Company? _company;
+
+    private List<Customer> _customers = new();
+    private List<Item> _items = new();
+
+    // ✅ NEW: templates list + selected template
+    private List<InvoiceTemplate> _templates = new();
+    private int? _selectedTemplateId = null;
+
+    private int _selectedCustomerId = 0;
+    private DateTime _invoiceDate = DateTime.Today;
+
+    private DateTime _dueDate = DateTime.Today.AddDays(30);
+    private bool _dueDateManual = false;
+    private int _defaultCreditDays = 30;
+
+    private List<LineVm> _lines = new();
+
+    private decimal _subTotal = 0m;
+    private decimal _vatTotal = 0m;
+    private decimal _grandTotal = 0m;
+
+    private bool _saving = false;
+    private string? _toast;
+    private string? _error;
+    private string? _customerInfo;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _error = null;
+
+        try
+        {
+            await CurrentCompany.RefreshAsync();
+            _companyId = CurrentCompany.CompanyId;
+
+            if (_companyId <= 0)
+            {
+                _error = "CompanyId not found from login. Please logout & login again.";
+                return;
+            }
+
+            Db.ChangeTracker.Clear();
+
+            _company = await Db.Companies.AsNoTracking()
+                .FirstOrDefaultAsync(x => x.CompanyId == _companyId);
+
+            if (_company == null)
+            {
+                _error = "Company setup not found. Please complete Company Setup.";
+                return;
+            }
+
+            _customers = await Db.Customers.AsNoTracking()
+                .Where(x => x.CompanyId == _companyId)
+                .OrderBy(x => x.Name)
+                .ToListAsync();
+
+            _items = await Db.Items.AsNoTracking()
+                .Where(x => x.CompanyId == _companyId && x.IsActive)
+                .OrderBy(x => x.Name)
+                .ToListAsync();
+
+            // ✅ NEW: Load templates (system + company)
+            _templates = await Db.InvoiceTemplates.AsNoTracking()
+                .Where(t => t.IsActive && (t.CompanyId == 0 || t.CompanyId == _companyId))
+                .OrderByDescending(t => t.CompanyId != 0) // My templates first
+                .ThenByDescending(t => t.IsSystem)        // then samples
+                .ThenBy(t => t.Name)
+                .ToListAsync();
+
+            // default selection: keep null = Default (System)
+            _selectedTemplateId = null;
+
+            _invoiceDate = DateTime.Today;
+            _dueDate = _invoiceDate.AddDays(_defaultCreditDays);
+            _dueDateManual = false;
+
+            _lines.Clear();
+            AddLine();
+            RecalcTotals();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.InnerException?.Message ?? ex.Message;
+        }
+    }
+
+    private void GoTemplates() => Nav.NavigateTo("/settings/invoice-templates");
+
+    private void OnTemplateChanged(ChangeEventArgs e)
+    {
+        var raw = e.Value?.ToString();
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            _selectedTemplateId = null;
+            return;
+        }
+
+        if (int.TryParse(raw, out var id) && id > 0) _selectedTemplateId = id;
+        else _selectedTemplateId = null;
+    }
+
+    private string TemplatePreviewChip()
+    {
+        if (_selectedTemplateId is null) return "Default";
+        var t = _templates.FirstOrDefault(x => x.InvoiceTemplateId == _selectedTemplateId.Value);
+        return t == null ? "Default" : t.Name;
+    }
+
+    private string InvoiceNoPreview()
+    {
+        if (_company == null) return "INV-000001";
+        var prefix = string.IsNullOrWhiteSpace(_company.InvoicePrefix) ? "INV" : _company.InvoicePrefix.Trim();
+        var nextNo = _company.NextInvoiceNumber <= 0 ? 1 : _company.NextInvoiceNumber;
+        return $"{prefix}-{nextNo:000000}";
+    }
+
+    private void OnDateChanged(ChangeEventArgs e)
+    {
+        if (DateTime.TryParse(e.Value?.ToString(), out var dt))
+        {
+            _invoiceDate = dt.Date;
+            if (!_dueDateManual) _dueDate = _invoiceDate.AddDays(_defaultCreditDays);
+        }
+    }
+
+    private void OnDueDateChanged(ChangeEventArgs e)
+    {
+        if (DateTime.TryParse(e.Value?.ToString(), out var dt))
+        {
+            _dueDate = dt.Date;
+            _dueDateManual = true;
+        }
+    }
+
+    private async Task OnCustomerChanged(ChangeEventArgs e)
+    {
+        _error = null;
+        _toast = null;
+
+        _selectedCustomerId = ParseInt(e.Value);
+
+        if (_selectedCustomerId <= 0)
+        {
+            _customerInfo = null;
+            return;
+        }
+
+        var c = await Db.Customers.AsNoTracking()
+            .FirstAsync(x => x.CompanyId == _companyId && x.CustomerId == _selectedCustomerId);
+
+        var type = (c.CustomerType ?? "B2B").Trim().ToUpperInvariant();
+        var trn = string.IsNullOrWhiteSpace(c.TRN) ? "-" : c.TRN;
+
+        _customerInfo = $"Type: {type} | TRN: {trn}";
+    }
+
+    private void AddLine()
+    {
+        var defaultVatRate = _company?.DefaultVatRate ?? 0.05m;
+        var defaultVatPercent = ClampPct(defaultVatRate * 100m);
+
+        _lines.Add(new LineVm
+            {
+                ItemId = 0,
+                Qty = 1,
+                Rate = 0,
+                VatPercent = defaultVatPercent
+            });
+
+        RecalcTotals();
+    }
+
+    private void RemoveLine(int idx)
+    {
+        if (_lines.Count <= 1) return;
+        if (idx >= 0 && idx < _lines.Count) _lines.RemoveAt(idx);
+        RecalcTotals();
+    }
+
+    private void OnLineItemChanged(int idx, ChangeEventArgs e)
+    {
+        if (idx < 0 || idx >= _lines.Count) return;
+
+        var ln = _lines[idx];
+        ln.ItemId = ParseInt(e.Value);
+
+        var item = _items.FirstOrDefault(x => x.ItemId == ln.ItemId);
+
+        if (item == null)
+        {
+            ln.ItemName = "";
+            ln.Rate = 0;
+
+            var dRate = _company?.DefaultVatRate ?? 0.05m;
+            ln.VatPercent = ClampPct(dRate * 100m);
+
+            RecalcLine(idx);
+            return;
+        }
+
+        ln.ItemName = item.Name;
+        ln.Rate = item.SellingPrice;
+
+        var vatRate = item.VatRate <= 0 ? (_company?.DefaultVatRate ?? 0.05m) : item.VatRate;
+        ln.VatPercent = ClampPct(vatRate * 100m);
+
+        RecalcLine(idx);
+    }
+
+    private void RecalcLine(int idx)
+    {
+        if (idx < 0 || idx >= _lines.Count) return;
+
+        var ln = _lines[idx];
+
+        var qty = ln.Qty <= 0 ? 0 : ln.Qty;
+        var rate = ln.Rate < 0 ? 0 : ln.Rate;
+
+        var vatRate = ClampPct(ln.VatPercent) / 100m;
+
+        ln.LineSubTotal = qty * rate;
+        ln.LineVat = ln.LineSubTotal * vatRate;
+        ln.LineTotal = ln.LineSubTotal + ln.LineVat;
+
+        RecalcTotals();
+    }
+
+    private void RecalcTotals()
+    {
+        _subTotal = _lines.Sum(x => x.LineSubTotal);
+        _vatTotal = _lines.Sum(x => x.LineVat);
+        _grandTotal = _lines.Sum(x => x.LineTotal);
+    }
+
+    // ✅ Weighted avg purchase cost from StockLedgers (Purchases)
+    private async Task<Dictionary<int, decimal>> GetAvgCostMapAsync(int companyId, List<int> itemIds)
+    {
+        var avg = await Db.StockLedgers.AsNoTracking()
+            .Where(x => x.CompanyId == companyId && itemIds.Contains(x.ItemId) && x.QtyChange > 0)
+            .GroupBy(x => x.ItemId)
+            .Select(g => new
+            {
+                ItemId = g.Key,
+                Qty = g.Sum(z => z.QtyChange),
+                Val = g.Sum(z => z.QtyChange * z.UnitCost)
+            })
+            .ToListAsync();
+
+        return avg.ToDictionary(
+            x => x.ItemId,
+            x => x.Qty == 0 ? 0m : (x.Val / x.Qty)
+        );
+    }
+
+    private async Task SaveInvoice()
+    {
+        _saving = true;
+        _error = null;
+        _toast = null;
+
+        try
+        {
+            await CurrentCompany.RefreshAsync();
+            var liveCompanyId = CurrentCompany.CompanyId;
+
+            if (liveCompanyId <= 0 || liveCompanyId != _companyId)
+                throw new Exception("Company changed. Please reload the page.");
+
+            if (_company == null) throw new Exception("Company setup not found.");
+            if (_selectedCustomerId <= 0) throw new Exception("Please select a customer.");
+            if (_lines.Count == 0) throw new Exception("Add at least one invoice line.");
+
+            for (int i = 0; i < _lines.Count; i++)
+            {
+                var ln = _lines[i];
+                if (ln.ItemId <= 0) throw new Exception($"Line {i + 1}: Please select an item.");
+                if (ln.Qty <= 0) throw new Exception($"Line {i + 1}: Qty must be greater than 0.");
+            }
+
+            if (_dueDate.Date < _invoiceDate.Date)
+                throw new Exception("Due Date cannot be before Invoice Date.");
+
+            var cust = await Db.Customers.AsNoTracking()
+                .FirstAsync(x => x.CompanyId == _companyId && x.CustomerId == _selectedCustomerId);
+
+            var custType = (cust.CustomerType ?? "B2B").Trim().ToUpperInvariant();
+            if (custType == "B2B" && string.IsNullOrWhiteSpace(cust.TRN))
+                throw new Exception("Selected customer is B2B. TRN is required.");
+
+            var companyRow = await Db.Companies.FirstAsync(x => x.CompanyId == _companyId);
+
+            var prefix = string.IsNullOrWhiteSpace(companyRow.InvoicePrefix) ? "INV" : companyRow.InvoicePrefix.Trim();
+            var nextNo = companyRow.NextInvoiceNumber <= 0 ? 1 : companyRow.NextInvoiceNumber;
+            var invNo = $"{prefix}-{nextNo:000000}";
+
+            var validLines = _lines.Where(x => x.ItemId > 0 && x.Qty > 0).ToList();
+            if (validLines.Count == 0) throw new Exception("Add at least one valid line.");
+
+            var invDate = _invoiceDate.Date;
+            var dueDate = _dueDate.Date;
+
+            // ✅ Resolve accounts from mapping
+            var ar = await Roles.RequirePrimaryAccountNoAsync(_companyId, AccountRoleKeys.AR, "Accounts Receivable (AR)");
+            var sales = await Roles.RequirePrimaryAccountNoAsync(_companyId, AccountRoleKeys.SALES, "Sales");
+            var vatOut = await Roles.RequirePrimaryAccountNoAsync(_companyId, AccountRoleKeys.VAT_OUTPUT, "VAT Output");
+
+            // ✅ Inventory + COGS accounts
+            var inventoryAcc = await Roles.RequirePrimaryAccountNoAsync(_companyId, AccountRoleKeys.INVENTORY, "Inventory");
+            var cogsAcc = await Roles.RequirePrimaryAccountNoAsync(_companyId, AccountRoleKeys.COGS, "Cost of Goods Sold (COGS)");
+
+            // ✅ Cost map (avg purchase cost) + fallback to Item.CostPrice
+            var itemIds = validLines.Select(x => x.ItemId).Distinct().ToList();
+
+            var itemInfo = await Db.Items.AsNoTracking()
+                .Where(i => i.CompanyId == _companyId && itemIds.Contains(i.ItemId))
+                .Select(i => new { i.ItemId, i.ItemType, i.CostPrice })
+                .ToListAsync();
+
+            var typeMap = itemInfo.ToDictionary(x => x.ItemId, x => (x.ItemType ?? "Product").Trim().ToUpperInvariant());
+            var costFallback = itemInfo.ToDictionary(x => x.ItemId, x => x.CostPrice);
+
+            var avgCostMap = await GetAvgCostMapAsync(_companyId, itemIds);
+
+            decimal totalCogs = 0m;
+            var stockLines = new List<InventoryPostingService.StockLine>();
+
+            foreach (var ln in validLines)
+            {
+                typeMap.TryGetValue(ln.ItemId, out var t);
+                if ((t ?? "PRODUCT") == "SERVICE")
+                    continue;
+
+                var unitCost = 0m;
+
+                if (avgCostMap.TryGetValue(ln.ItemId, out var avgCost) && avgCost > 0) unitCost = avgCost;
+                else if (costFallback.TryGetValue(ln.ItemId, out var cp) && cp > 0) unitCost = cp;
+
+                totalCogs += (ln.Qty * unitCost);
+
+                stockLines.Add(new InventoryPostingService.StockLine(
+                    ln.ItemId,
+                    ln.ItemName ?? "",
+                    ln.Qty,
+                    unitCost
+                ));
+            }
+
+            using var tx = await Db.Database.BeginTransactionAsync();
+
+            var inv = new Invoice
+                {
+                    CompanyId = _companyId,
+                    InvoiceNo = invNo,
+                    InvoiceDate = invDate,
+                    DueDate = dueDate,
+                    CustomerId = cust.CustomerId,
+                    CustomerName = cust.Name,
+                    CustomerTRN = cust.TRN,
+                    SubTotal = _subTotal,
+                    VatTotal = _vatTotal,
+                    GrandTotal = _grandTotal,
+
+                    // ✅ NEW: Save selected template
+                    SelectedTemplateId = _selectedTemplateId
+                };
+
+            Db.Invoices.Add(inv);
+            await Db.SaveChangesAsync();
+
+            var lineEntities = validLines.Select(ln => new InvoiceLine
+                {
+                    CompanyId = _companyId,
+                    InvoiceId = inv.InvoiceId,
+                    ItemId = ln.ItemId,
+                    ItemName = ln.ItemName ?? "",
+                    Qty = ln.Qty,
+                    Rate = ln.Rate,
+                    VatRate = ClampPct(ln.VatPercent) / 100m,
+                    LineSubTotal = ln.LineSubTotal,
+                    LineVat = ln.LineVat,
+                    LineTotal = ln.LineTotal
+                }).ToList();
+
+            Db.InvoiceLines.AddRange(lineEntities);
+            await Db.SaveChangesAsync();
+
+            await Ledger.PostAsync(_companyId, invDate, "INV", inv.InvoiceNo, ar, sales, inv.SubTotal,
+                narration: $"Invoice {inv.InvoiceNo} Sales", refId: inv.InvoiceId);
+
+            if (inv.VatTotal > 0)
+            {
+                await Ledger.PostAsync(_companyId, invDate, "INV", inv.InvoiceNo, ar, vatOut, inv.VatTotal,
+                    narration: $"Invoice {inv.InvoiceNo} VAT Output", refId: inv.InvoiceId);
+            }
+
+            if (stockLines.Count > 0)
+            {
+                await Stock.PostAsync(
+                    companyId: _companyId,
+                    txnDate: invDate,
+                    txnType: InventoryPostingService.TxnSale,
+                    refNo: invNo,
+                    notes: cust.Name,
+                    lines: stockLines,
+                    validateStockForOut: true
+                );
+            }
+
+            if (totalCogs > 0)
+            {
+                await Ledger.PostAsync(_companyId, invDate, "INV", inv.InvoiceNo, cogsAcc, inventoryAcc, totalCogs,
+                    narration: $"COGS for {inv.InvoiceNo}", refId: inv.InvoiceId);
+            }
+
+            companyRow.NextInvoiceNumber = nextNo + 1;
+            await Db.SaveChangesAsync();
+
+            await tx.CommitAsync();
+
+            _toast = $"Invoice saved: {inv.InvoiceNo} ✅";
+            ResetForm(keepCustomer: false);
+
+            _company = await Db.Companies.AsNoTracking().FirstAsync(x => x.CompanyId == _companyId);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.InnerException?.Message ?? ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private void ResetForm() => ResetForm(keepCustomer: false);
+
+    private void ResetForm(bool keepCustomer)
+    {
+        _error = null;
+
+        if (!keepCustomer)
+        {
+            _selectedCustomerId = 0;
+            _customerInfo = null;
+        }
+
+        // ✅ reset template to default
+        _selectedTemplateId = null;
+
+        _invoiceDate = DateTime.Today;
+        _dueDate = _invoiceDate.AddDays(_defaultCreditDays);
+        _dueDateManual = false;
+
+        _lines.Clear();
+        AddLine();
+        RecalcTotals();
+    }
+
+    private int ParseInt(object? v) => (v != null && int.TryParse(v.ToString(), out var i)) ? i : 0;
+    private int ParseIntSafe(object? v) => (v != null && int.TryParse(v.ToString(), out var i)) ? i : 1;
+    private decimal ParseDec(object? v) => (v != null && decimal.TryParse(v.ToString(), out var d)) ? d : 0m;
+
+    private static decimal ClampPct(decimal p)
+    {
+        if (p < 0) return 0m;
+        if (p > 100m) return 100m;
+        return p;
+    }
+
+    private class LineVm
+    {
+        public Guid RowId { get; } = Guid.NewGuid();
+        public int ItemId { get; set; }
+        public string ItemName { get; set; } = "";
+
+        public int Qty { get; set; } = 1;
+
+        public decimal Rate { get; set; } = 0m;
+
+        public decimal VatPercent { get; set; } = 5m;
+
+        public decimal LineSubTotal { get; set; }
+        public decimal LineVat { get; set; }
+        public decimal LineTotal { get; set; }
+    }
+}

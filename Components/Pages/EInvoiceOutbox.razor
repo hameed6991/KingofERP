@@ -1,0 +1,504 @@
+﻿@page "/einvoice-outbox"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+
+@using Microsoft.EntityFrameworkCore
+@using UaeEInvoice.Data
+@using UaeEInvoice.Services.Einvoicing
+@using UaeEInvoice.Services.Auth
+@inject AppDbContext Db
+@inject ICurrentCompany CurrentCompany
+@inject EinvoiceService EInv
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+
+<style>
+    :root {
+        --x-bg: #070b16;
+        --x-card: rgba(255,255,255,.06);
+        --x-border: rgba(255,255,255,.12);
+        --x-text: rgba(255,255,255,.92);
+        --x-muted: rgba(255,255,255,.62);
+        --x-shadow: 0 18px 70px rgba(0,0,0,.45);
+        --x-radius: 20px;
+    }
+
+    .x-wrap {
+        background: radial-gradient(1100px 650px at 12% -10%, rgba(34,197,94,.20), transparent 60%), radial-gradient(900px 520px at 90% 0%, rgba(59,130,246,.18), transparent 60%), radial-gradient(900px 520px at 50% 120%, rgba(168,85,247,.14), transparent 65%), linear-gradient(180deg, #0b1220, #070b16 70%, #040711);
+        min-height: calc(100vh - 70px);
+        border-radius: 22px;
+        padding: 18px;
+    }
+
+    .x-hero {
+        border-radius: 22px;
+        padding: 16px;
+        background: radial-gradient(900px 460px at 10% -10%, rgba(34,197,94,.25), transparent 62%), radial-gradient(800px 420px at 92% 0%, rgba(59,130,246,.20), transparent 55%), linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,.03));
+        border: 1px solid var(--x-border);
+        box-shadow: var(--x-shadow);
+        backdrop-filter: blur(10px);
+        color: var(--x-text);
+    }
+
+    .x-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 10px;
+        border-radius: 999px;
+        border: 1px solid rgba(255,255,255,.14);
+        background: rgba(255,255,255,.06);
+        color: rgba(255,255,255,.86);
+        font-size: .85rem;
+    }
+
+    .x-card {
+        border-radius: var(--x-radius);
+        background: rgba(255,255,255,.06);
+        border: 1px solid rgba(255,255,255,.10);
+        box-shadow: 0 14px 35px rgba(0,0,0,.22);
+        backdrop-filter: blur(10px);
+        overflow: hidden;
+        height: 100%;
+        color: var(--x-text);
+    }
+
+    .x-head {
+        padding: 12px 14px;
+        border-bottom: 1px solid rgba(255,255,255,.08);
+        background: linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.02));
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
+        font-weight: 900;
+    }
+
+    .x-body {
+        padding: 14px;
+    }
+
+    .x-input, .x-select {
+        border-radius: 12px !important;
+        background: rgba(255,255,255,.92) !important;
+        border: 1px solid rgba(15,23,42,.12) !important;
+    }
+
+    .x-table {
+        border-radius: 14px;
+        overflow: hidden;
+        border: 1px solid rgba(15,23,42,.10);
+        background: #fff;
+    }
+
+        .x-table thead th {
+            background: linear-gradient(180deg, #f8fafc, #f1f5f9) !important;
+            border-bottom: 1px solid rgba(15,23,42,.10) !important;
+            font-size: .80rem;
+            text-transform: uppercase;
+            letter-spacing: .3px;
+            color: rgba(15,23,42,.70);
+        }
+
+    .x-badge {
+        border-radius: 999px;
+        padding: 6px 10px;
+        font-weight: 900;
+        font-size: .78rem;
+        border: 1px solid rgba(15,23,42,.10);
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    .b-draft {
+        background: #eef2ff;
+        color: #3730a3;
+    }
+
+    .b-sent {
+        background: #e0f2fe;
+        color: #075985;
+    }
+
+    .b-acc {
+        background: #dcfce7;
+        color: #166534;
+    }
+
+    .b-rej {
+        background: #fee2e2;
+        color: #991b1b;
+    }
+
+    .x-actions .btn {
+        border-radius: 12px;
+        font-weight: 900;
+        padding: 9px 12px;
+    }
+
+    .x-muted {
+        color: var(--x-muted);
+    }
+
+    .x-backdrop {
+        position: fixed;
+        inset: 0;
+        background: rgba(2,6,23,.55);
+        backdrop-filter: blur(6px);
+        z-index: 1040;
+    }
+
+    .x-modal {
+        position: fixed;
+        inset: 0;
+        z-index: 1050;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 18px;
+    }
+
+    .x-modal-card {
+        width: min(1100px,98vw);
+        max-height: 90vh;
+        overflow: auto;
+        border-radius: 22px;
+        border: 1px solid rgba(255,255,255,.12);
+        box-shadow: 0 30px 90px rgba(0,0,0,.50);
+        background: radial-gradient(1200px 650px at 10% -10%, rgba(34,197,94,.20), transparent 60%), radial-gradient(900px 520px at 90% 0%, rgba(59,130,246,.18), transparent 60%), linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,.03));
+        color: rgba(255,255,255,.92);
+        backdrop-filter: blur(10px);
+    }
+
+    .x-modal-head {
+        padding: 14px 16px;
+        border-bottom: 1px solid rgba(255,255,255,.10);
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: flex-start;
+    }
+
+    .x-modal-body {
+        padding: 16px;
+    }
+
+    .x-code {
+        width: 100%;
+        min-height: 360px;
+        border-radius: 14px;
+        border: 1px solid rgba(255,255,255,.14);
+        background: rgba(2,6,23,.55);
+        color: rgba(255,255,255,.92);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        font-size: .85rem;
+        padding: 12px;
+        white-space: pre;
+        overflow: auto;
+    }
+</style>
+
+<div class="container-xxl py-4">
+    <div class="x-wrap">
+
+        <div class="x-hero mb-3">
+            <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+                <div>
+                    <div class="d-flex gap-2 flex-wrap">
+                        <span class="x-pill">🧾 eInvoice Outbox</span>
+                        <span class="x-pill">UBL Draft XML</span>
+                        <span class="x-pill">Ready for ASP Integration Later</span>
+                    </div>
+                    <h2 class="fw-black mt-2 mb-1" style="font-weight:900; letter-spacing:.2px;">Outbox</h2>
+                    <div class="x-muted">All generated draft / submitted / accepted documents for this company.</div>
+                    <div class="x-muted small mt-1">CompanyId: <b>@companyId</b></div>
+                </div>
+
+                <div class="x-actions d-flex gap-2">
+                    <button class="btn btn-light" type="button" @onclick="Load" disabled="@loading">
+                        @(loading ? "Loading..." : "Refresh")
+                    </button>
+                    <button class="btn btn-outline-light" type="button" @onclick="GoInvoices">Go Invoices</button>
+                </div>
+            </div>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(err))
+        {
+            <div class="alert alert-danger py-2">@err</div>
+        }
+
+        <div class="x-card">
+            <div class="x-head">
+                <div>Documents</div>
+                <div class="x-muted small">Click View XML to preview + download</div>
+            </div>
+
+            <div class="x-body">
+                <div class="row g-2 align-items-end mb-3">
+                    <div class="col-12 col-md-3">
+                        <label class="form-label x-muted">Status</label>
+                        <select class="form-select x-select" @bind="filterStatus">
+                            <option value="">All</option>
+                            <option value="Draft">Draft</option>
+                            <option value="Sent">Sent</option>
+                            <option value="Accepted">Accepted</option>
+                            <option value="Rejected">Rejected</option>
+                        </select>
+                    </div>
+
+                    <div class="col-12 col-md-3">
+                        <label class="form-label x-muted">Source Type</label>
+                        <select class="form-select x-select" @bind="filterSourceType">
+                            <option value="">All</option>
+                            <option value="INV">INV</option>
+                            <option value="PINV">PINV</option>
+                            <option value="CRN">CRN</option>
+                        </select>
+                    </div>
+
+                    <div class="col-12 col-md-4">
+                        <label class="form-label x-muted">Search</label>
+                        <input class="form-control x-input" @bind="search" @bind:event="oninput"
+                               placeholder="InvoiceNo / ProviderMessageId / SourceId..." />
+                    </div>
+
+                    <div class="col-12 col-md-2">
+                        <label class="form-label x-muted">Top</label>
+                        <select class="form-select x-select" @bind="take">
+                            <option value="25">25</option>
+                            <option value="50">50</option>
+                            <option value="100">100</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="x-table">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead>
+                            <tr>
+                                <th style="width:140px;">Updated</th>
+                                <th style="width:90px;">Type</th>
+                                <th style="width:110px;">SourceId</th>
+                                <th>Status</th>
+                                <th class="text-truncate" style="max-width:240px;">Provider</th>
+                                <th style="width:220px;">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var d in Filtered())
+                            {
+                                <tr>
+                                    <td>@d.UpdatedAt.ToLocalTime().ToString("dd-MMM-yyyy HH:mm")</td>
+                                    <td class="fw-semibold">@d.SourceType</td>
+                                    <td class="fw-semibold">#@d.SourceId</td>
+                                    <td>
+                                        <span class="x-badge @StatusCls(d.Status)">@d.Status</span>
+                                    </td>
+                                    <td class="text-truncate" style="max-width:240px;">
+                                        @if (!string.IsNullOrWhiteSpace(d.ProviderName))
+                                        {
+                                            <div class="fw-semibold">@d.ProviderName</div>
+                                            <div class="text-muted small">@d.ProviderMessageId</div>
+                                        }
+                                        else
+                                        {
+                                            <span class="text-muted">—</span>
+                                        }
+                                    </td>
+                                    <td>
+                                        <div class="d-flex gap-2 flex-wrap">
+                                            <button class="btn btn-sm btn-primary" type="button" @onclick="() => ViewXml(d)">
+                                                View XML
+                                            </button>
+                                            <button class="btn btn-sm btn-outline-secondary" type="button" @onclick="() => OpenSource(d)">
+                                                Open Source
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            }
+
+                            @if (!Filtered().Any())
+                            {
+                                <tr>
+                                    <td colspan="6" class="text-center text-muted py-4">
+                                        No documents. Generate draft from Invoice View first.
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+
+            </div>
+        </div>
+
+        @if (showXmlModal)
+        {
+            <div class="x-backdrop" @onclick="CloseXml"></div>
+            <div class="x-modal">
+                <div class="x-modal-card">
+                    <div class="x-modal-head">
+                        <div>
+                            <div class="d-flex gap-2 flex-wrap">
+                                <span class="x-pill">🧾 XML Preview</span>
+                                <span class="x-pill x-muted">@activeDoc?.SourceType #@activeDoc?.SourceId</span>
+                                <span class="x-pill x-muted">Status: @activeDoc?.Status</span>
+                            </div>
+                            <div class="x-muted small mt-2">You can copy or download XML.</div>
+                        </div>
+
+                        <div class="x-actions d-flex gap-2 flex-wrap">
+                            <button class="btn btn-light" type="button" @onclick="DownloadXml" disabled="@string.IsNullOrWhiteSpace(activeXml)">
+                                Download
+                            </button>
+                            <button class="btn btn-outline-light" type="button" @onclick="CloseXml">Close</button>
+                        </div>
+                    </div>
+
+                    <div class="x-modal-body">
+                        @if (!string.IsNullOrWhiteSpace(xmlErr))
+                        {
+                            <div class="alert alert-danger py-2">@xmlErr</div>
+                        }
+
+                        <div class="x-code">@activeXml</div>
+
+                        @if (!string.IsNullOrWhiteSpace(activeDoc?.PayloadHashSha256))
+                        {
+                            <div class="x-muted small mt-2">
+                                SHA256: <b>@activeDoc.PayloadHashSha256</b>
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
+        }
+
+    </div>
+</div>
+
+@code {
+    int companyId;
+    bool loading;
+    string? err;
+
+    List<EInvoiceDocument> docs = new();
+
+    string filterStatus = "";
+    string filterSourceType = "";
+    string search = "";
+    int take = 50;
+
+    bool showXmlModal;
+    EInvoiceDocument? activeDoc;
+    string? activeXml;
+    string? xmlErr;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CurrentCompany.RefreshAsync();
+        companyId = CurrentCompany.CompanyId;
+        await Load();
+    }
+
+    async Task Load()
+    {
+        err = null;
+        loading = true;
+        try
+        {
+            if (companyId <= 0) throw new Exception("CompanyId not resolved. Logout/Login again.");
+
+            docs = await Db.EInvoiceDocuments.AsNoTracking()
+                .Where(x => x.CompanyId == companyId)
+                .OrderByDescending(x => x.UpdatedAt)
+                .Take(take)
+                .ToListAsync();
+        }
+        catch (Exception ex) { err = ex.InnerException?.Message ?? ex.Message; }
+        finally { loading = false; }
+    }
+
+    IEnumerable<EInvoiceDocument> Filtered()
+    {
+        var q = docs.AsEnumerable();
+
+        if (!string.IsNullOrWhiteSpace(filterStatus))
+            q = q.Where(x => (x.Status ?? "").Equals(filterStatus, StringComparison.OrdinalIgnoreCase));
+
+        if (!string.IsNullOrWhiteSpace(filterSourceType))
+            q = q.Where(x => (x.SourceType ?? "").Equals(filterSourceType, StringComparison.OrdinalIgnoreCase));
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var s = search.Trim();
+            q = q.Where(x =>
+                x.SourceId.ToString().Contains(s, StringComparison.OrdinalIgnoreCase)
+                || (x.ProviderMessageId ?? "").Contains(s, StringComparison.OrdinalIgnoreCase)
+                || (x.ProviderName ?? "").Contains(s, StringComparison.OrdinalIgnoreCase)
+                || (x.PayloadHashSha256 ?? "").Contains(s, StringComparison.OrdinalIgnoreCase)
+            );
+        }
+
+        return q;
+    }
+
+    async Task ViewXml(EInvoiceDocument d)
+    {
+        showXmlModal = true;
+        activeDoc = d;
+        activeXml = null;
+        xmlErr = null;
+
+        try
+        {
+            activeXml = await EInv.GetXmlAsync(d.EInvoiceDocumentId);
+            if (string.IsNullOrWhiteSpace(activeXml))
+                xmlErr = "XML is empty.";
+        }
+        catch (Exception ex) { xmlErr = ex.InnerException?.Message ?? ex.Message; }
+    }
+
+    void CloseXml()
+    {
+        showXmlModal = false;
+        activeDoc = null;
+        activeXml = null;
+        xmlErr = null;
+    }
+
+    async Task DownloadXml()
+    {
+        if (activeDoc == null || string.IsNullOrWhiteSpace(activeXml)) return;
+
+        var fileName = $"eInvoice_{activeDoc.SourceType}_{activeDoc.SourceId}_{DateTime.Now:yyyyMMddHHmm}.xml";
+        await JS.InvokeVoidAsync("uaeEInvoice.downloadTextFile", fileName, activeXml);
+    }
+
+    void OpenSource(EInvoiceDocument d)
+    {
+        // ✅ INV -> invoice view
+        if ((d.SourceType ?? "").Equals("INV", StringComparison.OrdinalIgnoreCase))
+        {
+            Nav.NavigateTo($"/invoice-view/{d.SourceId}", forceLoad: true);
+            return;
+        }
+
+        // others later
+        Nav.NavigateTo("/invoices", forceLoad: true);
+    }
+
+    void GoInvoices() => Nav.NavigateTo("/invoices", forceLoad: true);
+
+    static string StatusCls(string? status)
+    {
+        var s = (status ?? "").Trim().ToLowerInvariant();
+        if (s == "draft") return "b-draft";
+        if (s == "sent") return "b-sent";
+        if (s == "accepted") return "b-acc";
+        if (s == "rejected") return "b-rej";
+        return "b-draft";
+    }
+}

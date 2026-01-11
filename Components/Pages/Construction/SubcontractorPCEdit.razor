@@ -1,0 +1,1106 @@
+﻿@page "/construction/pc/{Id:int}"
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.EntityFrameworkCore
+@using System.Globalization
+@using System.Reflection
+@using UaeEInvoice.Data
+@using UaeEInvoice.Services.Auth
+@attribute [Authorize]
+
+@inject AppDbContext Db
+@inject NavigationManager Nav
+@inject ICurrentCompany CurrentCompany
+
+<PageTitle>Subcontractor PC</PageTitle>
+
+<style>
+    /* ---------- Ultra premium (scoped) ---------- */
+    .pcx {
+        --ring: rgba(13,110,253,.25);
+    }
+
+        .pcx .hero {
+            border-radius: 22px;
+            padding: 22px;
+            color: #eaf1ff;
+            background: radial-gradient(900px 450px at 12% 10%, rgba(13,110,253,.28), transparent 55%), radial-gradient(800px 420px at 88% 20%, rgba(111,66,193,.22), transparent 55%), radial-gradient(700px 420px at 55% 92%, rgba(32,201,151,.16), transparent 60%), linear-gradient(180deg,#0b1220 0%, #0a0f1a 100%);
+            box-shadow: 0 18px 55px rgba(0,0,0,.25);
+            border: 1px solid rgba(255,255,255,.08);
+        }
+
+            .pcx .hero h1 {
+                font-size: 34px;
+                margin: 0;
+                font-weight: 900;
+            }
+
+            .pcx .hero .sub {
+                color: rgba(234,241,255,.78);
+                margin-top: 4px;
+            }
+
+        .pcx .pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+            border-radius: 999px;
+            border: 1px solid rgba(255,255,255,.14);
+            background: rgba(255,255,255,.06);
+            font-size: 12.5px;
+        }
+
+        .pcx .cardx {
+            background: #fff;
+            border-radius: 18px;
+            border: 1px solid rgba(15,23,42,.09);
+            box-shadow: 0 10px 30px rgba(2,6,23,.07);
+            overflow: hidden;
+        }
+
+            .pcx .cardx .head {
+                padding: 14px 16px;
+                border-bottom: 1px solid rgba(15,23,42,.08);
+                display: flex;
+                align-items: flex-start;
+                justify-content: space-between;
+                gap: 10px;
+            }
+
+                .pcx .cardx .head .t {
+                    font-weight: 900;
+                    font-size: 18px;
+                }
+
+                .pcx .cardx .head .m {
+                    color: #5b6477;
+                    font-size: 13px;
+                    margin-top: 2px;
+                }
+
+            .pcx .cardx .body {
+                padding: 16px;
+            }
+
+        .pcx .form-control, .pcx .form-select {
+            border-radius: 14px !important;
+            border: 1px solid rgba(15,23,42,.14) !important;
+            padding: .62rem .85rem;
+            box-shadow: none !important;
+        }
+
+            .pcx .form-control:focus, .pcx .form-select:focus {
+                border-color: rgba(13,110,253,.55) !important;
+                box-shadow: 0 0 0 .25rem var(--ring) !important;
+            }
+
+        .pcx .btnx {
+            border-radius: 999px;
+            padding: .6rem 1rem;
+            font-weight: 800;
+        }
+
+        .pcx .btn-primary.btnx {
+            box-shadow: 0 12px 25px rgba(13,110,253,.22);
+        }
+
+        .pcx th {
+            font-size: 12px;
+            letter-spacing: .08em;
+            text-transform: uppercase;
+            color: #6b7280;
+        }
+
+        .pcx .kpi {
+            border-radius: 16px;
+            border: 1px solid rgba(15,23,42,.10);
+            padding: 14px;
+            background: linear-gradient(180deg,#fff 0%, #fbfdff 100%);
+        }
+
+            .pcx .kpi .v {
+                font-weight: 900;
+                font-size: 22px;
+                line-height: 1.1;
+            }
+
+            .pcx .kpi .l {
+                color: #6b7280;
+                font-size: 12.5px;
+                margin-top: 2px;
+            }
+
+        .pcx .soft-note {
+            border-radius: 16px;
+            border: 1px solid rgba(13,110,253,.25);
+            background: rgba(13,110,253,.08);
+            padding: 12px 14px;
+            color: #0b3d91;
+        }
+
+        .pcx .delbtn {
+            width: 38px;
+            height: 38px;
+            border-radius: 12px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid rgba(220,53,69,.35);
+            color: #dc3545;
+            background: rgba(220,53,69,.06);
+        }
+</style>
+
+<div class="container-xxl py-4 pcx">
+
+    <div class="hero mb-3">
+        <div class="d-flex align-items-start justify-content-between flex-wrap gap-3">
+            <div>
+                <h1>Subcontractor PC</h1>
+                <div class="sub">Project-wise subcontractor claim with real-time totals.</div>
+                <div class="mt-2 d-flex flex-wrap gap-2">
+                    <span class="pill">🏢 Company #@_companyId</span>
+                    <span class="pill">🧾 @(_isNew ? "New PC" : $"Edit PC #{Id}")</span>
+                    <span class="pill">⚡ Auto totals</span>
+                </div>
+            </div>
+
+            <div class="d-flex gap-2 flex-wrap">
+                <button type="button" class="btn btn-outline-secondary btnx" @onclick="Reload" disabled="@_loading">Refresh</button>
+
+                <button type="button" class="btn btn-primary btnx" @onclick="SaveOnly" disabled="@(_saving || _loading)">Save PC</button>
+
+                <button type="button" class="btn btn-outline-primary btnx" @onclick="SaveAndPrint" disabled="@(_saving || _loading)">Save &amp; Print</button>
+
+                <button type="button" class="btn btn-outline-primary btnx" @onclick="GoPrint" disabled="@(_loading || _isNew)">Print</button>
+
+                <button type="button" class="btn btn-outline-dark btnx" @onclick="Back">Back</button>
+            </div>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_err))
+    {
+        <div class="alert alert-danger py-2">@_err</div>
+    }
+    @if (!string.IsNullOrWhiteSpace(_msg))
+    {
+        <div class="alert alert-success py-2">@_msg</div>
+    }
+
+    <div class="row g-3">
+        <!-- LEFT -->
+        <div class="col-12 col-xl-8">
+            <div class="cardx">
+                <div class="head">
+                    <div>
+                        <div class="t">PC Header</div>
+                        <div class="m">Select Project + Subcontractor. Totals will auto-calc.</div>
+                    </div>
+                </div>
+                <div class="body">
+                    <div class="row g-3">
+
+                        <div class="col-12 col-md-4">
+                            <label class="form-label fw-semibold">PC No</label>
+                            <input class="form-control" value="@_vm.PCNo"
+                                   @oninput="OnPcNoInput" />
+                        </div>
+
+                        <div class="col-12 col-md-4">
+                            <label class="form-label fw-semibold">Period (Month)</label>
+                            <input class="form-control" type="month" value="@_vm.PeriodMonthStr"
+                                   @onchange="OnPeriodChanged" />
+                            <div class="text-muted small mt-1">Format: yyyy-MM</div>
+                        </div>
+
+                        <div class="col-12 col-md-4">
+                            <label class="form-label fw-semibold">Status</label>
+                            <input class="form-control" value="@_vm.Status"
+                                   @oninput="OnStatusInput" />
+                        </div>
+
+                        <div class="col-12 col-md-6">
+                            <label class="form-label fw-semibold">Project</label>
+                            <select class="form-select" value="@_vm.ProjectId"
+                                    @onchange="OnProjectChanged">
+                                <option value="0">-- select project --</option>
+                                @foreach (var p in _projects)
+                                {
+                                    <option value="@p.Id">@p.Display</option>
+                                }
+                            </select>
+                        </div>
+
+                        <div class="col-12 col-md-6">
+                            <label class="form-label fw-semibold">Subcontractor</label>
+                            <select class="form-select" value="@_vm.SubcontractorId"
+                                    @onchange="OnSubcontractorChanged">
+                                <option value="0">-- select subcontractor --</option>
+                                @foreach (var s in _subs)
+                                {
+                                    <option value="@s.ConstructionSubcontractorId">@s.Name</option>
+                                }
+                            </select>
+                            <div class="text-muted small mt-1">Retention defaults from subcontractor master.</div>
+                        </div>
+
+                        <div class="col-12 col-md-4">
+                            <label class="form-label fw-semibold">Issue Date</label>
+                            <input class="form-control" type="date" value="@_vm.IssueDateStr"
+                                   @onchange="OnIssueChanged" />
+                        </div>
+
+                        <div class="col-12 col-md-4">
+                            <label class="form-label fw-semibold">Due Date</label>
+                            <input class="form-control" type="date" value="@_vm.DueDateStr"
+                                   @onchange="OnDueChanged" />
+                        </div>
+
+                        <div class="col-12 col-md-4">
+                            <label class="form-label fw-semibold">VAT %</label>
+                            <input class="form-control" type="number" step="0.01" value="@_vm.VatRate"
+                                   @oninput="OnVatInput" />
+                        </div>
+
+                        <div class="col-12 col-md-4">
+                            <label class="form-label fw-semibold">Retention %</label>
+                            <input class="form-control" type="number" step="0.01" value="@_vm.RetentionPct"
+                                   @oninput="OnRetentionInput" />
+                        </div>
+
+                        <div class="col-12 col-md-4">
+                            <label class="form-label fw-semibold">Previous Cumulative</label>
+                            <input class="form-control" type="number" step="0.01" value="@_vm.PreviousCumulative"
+                                   @oninput="OnPrevCumInput" />
+                        </div>
+
+                        <div class="col-12 col-md-4">
+                            <label class="form-label fw-semibold">Backcharge / Deductions</label>
+                            <input class="form-control" type="number" step="0.01" value="@_vm.BackchargeThisMonth"
+                                   @oninput="OnBackchargeInput" />
+                        </div>
+
+                        <div class="col-12">
+                            <label class="form-label fw-semibold">Notes</label>
+                            <textarea class="form-control" rows="3" @oninput="OnNotesInput">@_vm.Notes</textarea>
+                        </div>
+                    </div>
+
+                    <hr class="my-4" />
+
+                    <div class="cardx" style="border-radius:16px;">
+                        <div class="head">
+                            <div>
+                                <div class="t">Breakdown Lines</div>
+                                <div class="m">Previous + Current → Total. Auto-calculated.</div>
+                            </div>
+                            <button type="button" class="btn btn-outline-primary btnx" @onclick="AddLine">+ Add Line</button>
+                        </div>
+                        <div class="body">
+                            <div class="table-responsive">
+                                <table class="table align-middle">
+                                    <thead>
+                                        <tr>
+                                            <th style="min-width:240px;">Work Section</th>
+                                            <th style="min-width:140px;">Previous</th>
+                                            <th style="min-width:140px;">Current</th>
+                                            <th style="min-width:140px;">Total</th>
+                                            <th style="width:60px;">Del</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @for (var i = 0; i < _vm.Lines.Count; i++)
+                                        {
+                                            var ln = _vm.Lines[i];
+                                            var idx = i;
+
+                                            <tr>
+                                                <td>
+                                                    <input class="form-control" value="@ln.WorkSection"
+                                                           @oninput="(e) => { ln.WorkSection = AsString(e.Value); }" />
+                                                </td>
+                                                <td>
+                                                    <input class="form-control" type="number" step="0.01" value="@ln.Previous"
+                                                           @oninput="(e) => { ln.Previous = AsDec(e.Value); Recalc(); }" />
+                                                </td>
+                                                <td>
+                                                    <input class="form-control" type="number" step="0.01" value="@ln.Current"
+                                                           @oninput="(e) => { ln.Current = AsDec(e.Value); Recalc(); }" />
+                                                </td>
+                                                <td class="fw-bold">@ln.Total.ToString("N2")</td>
+                                                <td>
+                                                    <button type="button" class="delbtn" title="Remove" @onclick="() => RemoveLine(idx)">🗑️</button>
+                                                </td>
+                                            </tr>
+                                        }
+                                        <tr>
+                                            <td class="text-muted fw-semibold">Work Done to Date (Sum of totals)</td>
+                                            <td></td>
+                                            <td></td>
+                                            <td class="fw-bold">@_calc.WorkDoneToDate.ToString("N2")</td>
+                                            <td></td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <div class="soft-note mt-2">
+                                <div class="fw-bold mb-1">Posting logic (when you implement Post):</div>
+                                <ul class="mb-0">
+                                    <li>Dr Subcontract Cost</li>
+                                    <li>Cr AP + Retention Payable + Backcharge</li>
+                                    <li>Dr VAT Input</li>
+                                </ul>
+                            </div>
+
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+
+        <!-- RIGHT -->
+        <div class="col-12 col-xl-4">
+            <div class="cardx mb-3">
+                <div class="head">
+                    <div>
+                        <div class="t">PC Summary</div>
+                        <div class="m">Auto calculated in real time.</div>
+                    </div>
+                </div>
+                <div class="body">
+                    <div class="row g-2">
+                        <div class="col-6"><div class="kpi"><div class="v">@_calc.ThisMonthGross.ToString("N2")</div><div class="l">This Month Gross</div></div></div>
+                        <div class="col-6"><div class="kpi"><div class="v">@_calc.Retention.ToString("N2")</div><div class="l">Retention</div></div></div>
+                        <div class="col-6"><div class="kpi"><div class="v">@_calc.Backcharge.ToString("N2")</div><div class="l">Backcharge</div></div></div>
+                        <div class="col-6"><div class="kpi"><div class="v">@_calc.PayableExVat.ToString("N2")</div><div class="l">Payable (ex VAT)</div></div></div>
+                        <div class="col-6"><div class="kpi"><div class="v">@_calc.Vat.ToString("N2")</div><div class="l">VAT</div></div></div>
+                        <div class="col-6"><div class="kpi"><div class="v">@_calc.NetPayable.ToString("N2")</div><div class="l">Net Payable</div></div></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="cardx">
+                <div class="head">
+                    <div>
+                        <div class="t">Posting Accounts (Company)</div>
+                        <div class="m">Read from ConstructionAccountsMap (safe reflection).</div>
+                    </div>
+                </div>
+                <div class="body">
+                    @if (_accountsMapLines.Count == 0)
+                    {
+                        <div class="text-muted">Accounts map not found / fields not detected.</div>
+                    }
+                    else
+                    {
+                        <ul class="mb-0">
+                            @foreach (var ln in _accountsMapLines)
+                            {
+                                <li>@ln</li>
+                            }
+                        </ul>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private bool _loading = true;
+    private bool _saving = false;
+    private bool _isNew => Id == 0;
+
+    private int _companyId;
+    private string? _err;
+    private string? _msg;
+
+    private readonly PcVm _vm = new();
+    private CalcVm _calc = new();
+
+    private List<ProjectPick> _projects = new();
+    private List<ConstructionSubcontractor> _subs = new();
+    private List<string> _accountsMapLines = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CurrentCompany.RefreshAsync();
+        _companyId = CurrentCompany.CompanyId;
+        await LoadAll();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await CurrentCompany.RefreshAsync();
+        _companyId = CurrentCompany.CompanyId;
+        await LoadAll();
+    }
+
+    // ---------------- UI handlers (keeps Razor clean / no broken attributes) ----------------
+    private void OnPcNoInput(ChangeEventArgs e) => _vm.PCNo = AsString(e.Value);
+    private void OnStatusInput(ChangeEventArgs e) => _vm.Status = AsString(e.Value);
+    private void OnPeriodChanged(ChangeEventArgs e) => _vm.PeriodMonthStr = AsString(e.Value);
+    private void OnIssueChanged(ChangeEventArgs e) => _vm.IssueDateStr = AsString(e.Value);
+    private void OnDueChanged(ChangeEventArgs e) => _vm.DueDateStr = AsString(e.Value);
+
+    private void OnVatInput(ChangeEventArgs e) { _vm.VatRate = AsDec(e.Value); Recalc(); }
+    private void OnRetentionInput(ChangeEventArgs e) { _vm.RetentionPct = AsDec(e.Value); Recalc(); }
+    private void OnPrevCumInput(ChangeEventArgs e) { _vm.PreviousCumulative = AsDec(e.Value); Recalc(); }
+    private void OnBackchargeInput(ChangeEventArgs e) { _vm.BackchargeThisMonth = AsDec(e.Value); Recalc(); }
+    private void OnNotesInput(ChangeEventArgs e) => _vm.Notes = AsString(e.Value);
+
+    private async Task OnProjectChanged(ChangeEventArgs e)
+    {
+        _vm.ProjectId = AsInt(e.Value);
+        await TryFillPreviousFromLastPc();
+        Recalc();
+    }
+
+    private async Task OnSubcontractorChanged(ChangeEventArgs e)
+    {
+        _vm.SubcontractorId = AsInt(e.Value);
+
+        var sc = _subs.FirstOrDefault(x => x.ConstructionSubcontractorId == _vm.SubcontractorId);
+        if (sc != null && sc.DefaultRetentionRate > 0)
+            _vm.RetentionPct = Decimal.Round(sc.DefaultRetentionRate * 100m, 2);
+
+        await TryFillPreviousFromLastPc();
+        Recalc();
+    }
+
+    private Task Reload() => LoadAll();
+    private void Back() => Nav.NavigateTo("/construction/subcontractorpcs");
+
+    private void GoPrint()
+    {
+        _err = null;
+        _msg = null;
+
+        if (_isNew)
+        {
+            _err = "Please save first, then print.";
+            return;
+        }
+
+        Nav.NavigateTo($"/construction/pc/{Id}/print");
+    }
+
+    private async Task SaveOnly() => await SaveInternal(openPrint: false);
+    private async Task SaveAndPrint() => await SaveInternal(openPrint: true);
+
+    // ---------------- Load ----------------
+    private async Task LoadAll()
+    {
+        _loading = true;
+        _err = null;
+        _msg = null;
+
+        try
+        {
+            _subs = await Db.Set<ConstructionSubcontractor>()
+                .AsNoTracking()
+                .Where(x => x.CompanyId == _companyId && x.IsActive)
+                .OrderBy(x => x.Name)
+                .ToListAsync();
+
+            var rawProjects = await Db.Set<ConstructionProject>().AsNoTracking().ToListAsync();
+            _projects = rawProjects
+                .Where(p => GetInt(p, "CompanyId") == _companyId)
+                .Select(p => new ProjectPick
+                    {
+                        Id = GetInt(p, "ConstructionProjectId", "ProjectId", "Id"),
+                        Display = BuildProjectDisplay(p)
+                    })
+                .Where(p => p.Id > 0)
+                .OrderBy(p => p.Display)
+                .ToList();
+
+            await LoadAccountsMapPreview();
+
+            if (_isNew) await InitNew();
+            else await LoadExisting(Id);
+
+            Recalc();
+        }
+        catch (Exception ex)
+        {
+            _err = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task InitNew()
+    {
+        _vm.Reset();
+        _vm.PCNo = await GenerateNextPcNo();
+        _vm.Status = "Draft";
+        _vm.PeriodMonthStr = DateTime.Today.ToString("yyyy-MM", CultureInfo.InvariantCulture);
+        _vm.IssueDateStr = DateTime.Today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        _vm.DueDateStr = DateTime.Today.AddDays(25).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        _vm.VatRate = 5m;
+        _vm.RetentionPct = 10m;
+
+        _vm.Lines.Clear();
+        _vm.Lines.Add(new LineVm { WorkSection = "General Works", Previous = 0, Current = 0 });
+    }
+
+    private async Task LoadExisting(int id)
+    {
+        var pc = await TryFindPcById_NoTracking(id);
+        if (pc == null)
+        {
+            _err = "PC not found for this company.";
+            await InitNew();
+            return;
+        }
+
+        _vm.PCNo = GetString(pc, "PCNo", "PcNo", "ClaimNo") ?? "";
+        _vm.Status = GetString(pc, "Status") ?? "Draft";
+
+        _vm.ProjectId = GetInt(pc, "ProjectId", "ConstructionProjectId");
+        _vm.SubcontractorId = GetInt(pc, "SubcontractorId", "ConstructionSubcontractorId");
+
+        _vm.VatRate = GetDec(pc, "VatRate", "VATRate", "VatPercent", "VATPercent", "VatPct");
+        _vm.RetentionPct = GetDec(pc, "RetentionPct", "RetentionPercent", "RetentionPercentage", "RetentionPctValue");
+        if (_vm.RetentionPct == 0)
+        {
+            var rate = GetDec(pc, "RetentionRate", "DefaultRetentionRate", "RetentionValue");
+            if (rate > 0 && rate <= 1) _vm.RetentionPct = rate * 100m;
+        }
+
+        _vm.PreviousCumulative = GetDec(pc, "PreviousCumulative", "PreviousTotal", "PrevCumulative", "PrevTotal");
+        _vm.BackchargeThisMonth = GetDec(pc, "BackchargeThisMonth", "Backcharge", "Deduction", "Deductions");
+
+        _vm.Notes = GetString(pc, "Notes", "Remark", "Remarks") ?? "";
+
+        var issue = GetDate(pc, "IssueDate", "PcDate", "ClaimDate", "Date");
+        var due = GetDate(pc, "DueDate", "PaymentDueDate");
+        if (issue.HasValue) _vm.IssueDateStr = issue.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        if (due.HasValue) _vm.DueDateStr = due.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+
+        var pm = GetDate(pc, "PeriodMonth", "Period", "Month", "PeriodDate");
+        if (pm.HasValue) _vm.PeriodMonthStr = pm.Value.ToString("yyyy-MM", CultureInfo.InvariantCulture);
+
+        _vm.Lines = await TryLoadLines(id);
+        if (_vm.Lines.Count == 0)
+            _vm.Lines.Add(new LineVm { WorkSection = "General Works" });
+    }
+
+    // ---------------- Save ----------------
+    private async Task SaveInternal(bool openPrint)
+    {
+        _saving = true;
+        _err = null;
+        _msg = null;
+
+        try
+        {
+            if (_vm.ProjectId <= 0) throw new Exception("Please select a Project.");
+            if (_vm.SubcontractorId <= 0) throw new Exception("Please select a Subcontractor.");
+            if (string.IsNullOrWhiteSpace(_vm.PCNo)) throw new Exception("PC No is required.");
+
+            var pm = ParseMonth(_vm.PeriodMonthStr) ?? throw new Exception("Invalid Period Month (yyyy-MM).");
+            var issue = ParseDate(_vm.IssueDateStr) ?? throw new Exception("Invalid Issue Date.");
+            var due = ParseDate(_vm.DueDateStr) ?? throw new Exception("Invalid Due Date.");
+
+            SubcontractorPC pc;
+            var isNewNow = _isNew;
+
+            if (isNewNow)
+            {
+                pc = new SubcontractorPC();
+                Db.Add(pc);
+            }
+            else
+            {
+                pc = await TryFindPcById_Tracked(Id) ?? throw new Exception("PC not found.");
+            }
+
+            SetInt(pc, _companyId, "CompanyId");
+            SetString(pc, _vm.PCNo.Trim(), "PCNo", "PcNo", "ClaimNo");
+            SetString(pc, (_vm.Status ?? "Draft").Trim(), "Status");
+
+            SetMonth(pc, pm, "PeriodMonth", "Period", "Month", "PeriodDate");
+            SetInt(pc, _vm.ProjectId, "ProjectId", "ConstructionProjectId");
+            SetInt(pc, _vm.SubcontractorId, "SubcontractorId", "ConstructionSubcontractorId");
+
+            SetDate(pc, issue, "IssueDate", "PcDate", "ClaimDate", "Date");
+            SetDate(pc, due, "DueDate", "PaymentDueDate");
+
+            SetDec(pc, _vm.VatRate, "VatRate", "VATRate", "VatPercent", "VATPercent", "VatPct");
+            SetDec(pc, _vm.VatRate / 100m, "VatRateValue", "VatRateDecimal", "VatFraction");
+
+            SetDec(pc, _vm.RetentionPct, "RetentionPct", "RetentionPercent", "RetentionPercentage", "RetentionPctValue");
+            SetDec(pc, _vm.RetentionPct / 100m, "RetentionRate", "RetentionValue", "DefaultRetentionRate");
+
+            SetDec(pc, _vm.PreviousCumulative, "PreviousCumulative", "PreviousTotal", "PrevCumulative", "PrevTotal");
+            SetDec(pc, _vm.BackchargeThisMonth, "BackchargeThisMonth", "Backcharge", "Deduction", "Deductions");
+            SetString(pc, _vm.Notes ?? "", "Notes", "Remark", "Remarks");
+
+            await Db.SaveChangesAsync();
+
+            var pcId = GetInt(pc, "SubcontractorPCId", "Id", "PCId", "PcId");
+            if (pcId <= 0) throw new Exception("PC ID not generated after save (check key mapping).");
+
+            // delete old lines (safe FK guesses)
+            foreach (var fk in new[] { "SubcontractorPCId", "PCId", "PcId" })
+            {
+                try
+                {
+                    var old = await Db.Set<SubcontractorPCLine>().Where(l => EF.Property<int>(l, fk) == pcId).ToListAsync();
+                    if (old.Count > 0) Db.RemoveRange(old);
+                    break;
+                }
+                catch { }
+            }
+
+            foreach (var ln in _vm.Lines)
+            {
+                if (string.IsNullOrWhiteSpace(ln.WorkSection))
+                    throw new Exception("Work Section is required in each line.");
+
+                var ent = new SubcontractorPCLine();
+
+                SetInt(ent, pcId, "SubcontractorPCId", "PCId", "PcId");
+                SetString(ent, ln.WorkSection.Trim(), "WorkSection", "Section", "Description", "Work");
+
+                SetDec(ent, ln.Previous, "PreviousAmount", "Previous", "Prev", "PrevAmount");
+                SetDec(ent, ln.Current, "CurrentAmount", "Current", "Curr", "CurrAmount");
+                SetDec(ent, ln.Total, "TotalAmount", "Total", "TotalValue", "Amount");
+
+                Db.Add(ent);
+            }
+
+            await Db.SaveChangesAsync();
+
+            _msg = "Saved successfully.";
+
+            if (isNewNow)
+            {
+                // after new save, navigate to correct edit id
+                if (openPrint) Nav.NavigateTo($"/construction/pc/{pcId}/print");
+                else Nav.NavigateTo($"/construction/pc/{pcId}");
+            }
+            else
+            {
+                if (openPrint) Nav.NavigateTo($"/construction/pc/{Id}/print");
+            }
+        }
+        catch (Exception ex)
+        {
+            _err = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    // ---------------- Queries ----------------
+    private async Task<SubcontractorPC?> TryFindPcById_Tracked(int id)
+    {
+        var set = Db.Set<SubcontractorPC>();
+        foreach (var keyName in new[] { "SubcontractorPCId", "PCId", "PcId", "Id" })
+        {
+            try
+            {
+                return await set.FirstOrDefaultAsync(x =>
+                    EF.Property<int>(x, "CompanyId") == _companyId &&
+                    EF.Property<int>(x, keyName) == id);
+            }
+            catch { }
+        }
+        return null;
+    }
+
+    private async Task<SubcontractorPC?> TryFindPcById_NoTracking(int id)
+    {
+        var set = Db.Set<SubcontractorPC>().AsNoTracking();
+        foreach (var keyName in new[] { "SubcontractorPCId", "PCId", "PcId", "Id" })
+        {
+            try
+            {
+                return await set.FirstOrDefaultAsync(x =>
+                    EF.Property<int>(x, "CompanyId") == _companyId &&
+                    EF.Property<int>(x, keyName) == id);
+            }
+            catch { }
+        }
+        return null;
+    }
+
+    private async Task<List<LineVm>> TryLoadLines(int pcId)
+    {
+        var set = Db.Set<SubcontractorPCLine>().AsNoTracking();
+        foreach (var fk in new[] { "SubcontractorPCId", "PCId", "PcId" })
+        {
+            try
+            {
+                var rows = await set.Where(l => EF.Property<int>(l, fk) == pcId).ToListAsync();
+                if (rows.Count > 0) return rows.Select(MapLine).ToList();
+            }
+            catch { }
+        }
+        return new();
+    }
+
+    private static LineVm MapLine(object line)
+    {
+        var ws = GetString(line, "WorkSection", "Section", "Description", "Work") ?? "";
+        var prev = GetDec(line, "PreviousAmount", "Previous", "Prev", "PrevAmount");
+        var curr = GetDec(line, "CurrentAmount", "Current", "Curr", "CurrAmount");
+        var tot = GetDec(line, "TotalAmount", "Total", "TotalValue", "Amount");
+        return new LineVm { WorkSection = ws, Previous = prev, Current = curr, Total = tot };
+    }
+
+    // ---------------- UI actions ----------------
+    private void AddLine()
+    {
+        _vm.Lines.Add(new LineVm { WorkSection = "General Works" });
+        Recalc();
+    }
+
+    private void RemoveLine(int i)
+    {
+        if (i < 0 || i >= _vm.Lines.Count) return;
+        _vm.Lines.RemoveAt(i);
+        if (_vm.Lines.Count == 0) _vm.Lines.Add(new LineVm { WorkSection = "General Works" });
+        Recalc();
+    }
+
+    private void Recalc()
+    {
+        foreach (var ln in _vm.Lines)
+            ln.Total = Decimal.Round(ln.Previous + ln.Current, 2);
+
+        _calc.WorkDoneToDate = Decimal.Round(_vm.Lines.Sum(x => x.Total), 2);
+        _calc.ThisMonthGross = Decimal.Round(_vm.Lines.Sum(x => x.Current), 2);
+
+        var retentionRate = (_vm.RetentionPct <= 0) ? 0m : (_vm.RetentionPct / 100m);
+        _calc.Retention = Decimal.Round(_calc.ThisMonthGross * retentionRate, 2);
+
+        _calc.Backcharge = Decimal.Round(_vm.BackchargeThisMonth, 2);
+
+        _calc.PayableExVat = Decimal.Round(_calc.ThisMonthGross - _calc.Retention - _calc.Backcharge, 2);
+        if (_calc.PayableExVat < 0) _calc.PayableExVat = 0;
+
+        var vatRate = (_vm.VatRate <= 0) ? 0m : (_vm.VatRate / 100m);
+        _calc.Vat = Decimal.Round(_calc.PayableExVat * vatRate, 2);
+        _calc.NetPayable = Decimal.Round(_calc.PayableExVat + _calc.Vat, 2);
+    }
+
+    private async Task TryFillPreviousFromLastPc()
+    {
+        if (_vm.ProjectId <= 0 || _vm.SubcontractorId <= 0) return;
+
+        var pcs = await Db.Set<SubcontractorPC>().AsNoTracking()
+            .Where(x => EF.Property<int>(x, "CompanyId") == _companyId)
+            .ToListAsync();
+
+        SubcontractorPC? last = null;
+        DateTime lastMonth = DateTime.MinValue;
+
+        foreach (var p in pcs)
+        {
+            var pid = GetInt(p, "ProjectId", "ConstructionProjectId");
+            var sid = GetInt(p, "SubcontractorId", "ConstructionSubcontractorId");
+            if (pid != _vm.ProjectId || sid != _vm.SubcontractorId) continue;
+
+            var kid = GetInt(p, "SubcontractorPCId", "Id", "PCId", "PcId");
+            if (kid == Id) continue;
+
+            var pm = GetDate(p, "PeriodMonth", "Period", "Month", "PeriodDate") ?? DateTime.MinValue;
+            if (pm > lastMonth)
+            {
+                lastMonth = pm;
+                last = p;
+            }
+        }
+
+        if (last == null)
+        {
+            _vm.PreviousCumulative = 0;
+            return;
+        }
+
+        var lastId = GetInt(last, "SubcontractorPCId", "Id", "PCId", "PcId");
+        var lines = await TryLoadLines(lastId);
+        _vm.PreviousCumulative = Decimal.Round(lines.Sum(x => x.Total), 2);
+    }
+
+    private async Task<string> GenerateNextPcNo()
+    {
+        var list = await Db.Set<SubcontractorPC>().AsNoTracking()
+            .Where(x => EF.Property<int>(x, "CompanyId") == _companyId)
+            .ToListAsync();
+
+        var lastNo = list
+            .Select(x => GetString(x, "PCNo", "PcNo", "ClaimNo") ?? "")
+            .LastOrDefault(s => !string.IsNullOrWhiteSpace(s)) ?? "";
+
+        var next = 1;
+        var digits = new string(lastNo.Where(char.IsDigit).ToArray());
+        if (int.TryParse(digits, out var n)) next = n + 1;
+
+        return $"PC-{next:0000}";
+    }
+
+    private async Task LoadAccountsMapPreview()
+    {
+        _accountsMapLines.Clear();
+
+        var map = await Db.Set<ConstructionAccountsMap>()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => EF.Property<int>(x, "CompanyId") == _companyId);
+
+        if (map == null) return;
+
+        AddMapLine(map, "Subcontract Cost", "SubcontractCostAccount", "SubcontractCostAcc", "SubcontractCostLedger");
+        AddMapLine(map, "AP", "ApAccount", "APAccount", "AccountsPayableAccount", "PayablesAccount");
+        AddMapLine(map, "Retention Payable", "RetentionPayableAccount", "RetentionAccount", "RetentionLiabilityAccount");
+        AddMapLine(map, "VAT Input", "VatInputAccount", "VATInputAccount", "InputVatAccount");
+        AddMapLine(map, "Backcharge Recovery", "BackchargeRecoveryAccount", "BackchargeAccount", "BackchargeIncomeAccount");
+    }
+
+    private void AddMapLine(object map, string label, params string[] names)
+    {
+        var v = GetString(map, names);
+        if (!string.IsNullOrWhiteSpace(v))
+            _accountsMapLines.Add($"{label}: {v}");
+    }
+
+    // -------------------- Helpers --------------------
+    private static string AsString(object? v) => Convert.ToString(v, CultureInfo.InvariantCulture) ?? "";
+    private static int AsInt(object? v) => int.TryParse(AsString(v), out var n) ? n : 0;
+    private static decimal AsDec(object? v) => decimal.TryParse(AsString(v), NumberStyles.Any, CultureInfo.InvariantCulture, out var d) ? d : 0m;
+
+    private static DateTime? ParseDate(string s)
+        => DateTime.TryParseExact((s ?? "").Trim(), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var dt) ? dt : null;
+
+    private static DateTime? ParseMonth(string s)
+        => DateTime.TryParseExact((s ?? "").Trim(), "yyyy-MM", CultureInfo.InvariantCulture, DateTimeStyles.None, out var dt)
+            ? new DateTime(dt.Year, dt.Month, 1)
+            : null;
+
+    private static PropertyInfo? FindProp(object obj, params string[] names)
+        => names.Select(n => obj.GetType().GetProperty(n)).FirstOrDefault(p => p != null);
+
+    private static void SetString(object obj, string value, params string[] names)
+    {
+        var p = FindProp(obj, names);
+        if (p == null || !p.CanWrite) return;
+        if (p.PropertyType == typeof(string)) p.SetValue(obj, value);
+    }
+
+    private static void SetInt(object obj, int value, params string[] names)
+    {
+        var p = FindProp(obj, names);
+        if (p == null || !p.CanWrite) return;
+
+        var t = Nullable.GetUnderlyingType(p.PropertyType) ?? p.PropertyType;
+        if (t == typeof(int))
+        {
+            if (p.PropertyType == typeof(int)) p.SetValue(obj, value);
+            else p.SetValue(obj, (int?)value);
+        }
+    }
+
+    private static void SetDec(object obj, decimal value, params string[] names)
+    {
+        var p = FindProp(obj, names);
+        if (p == null || !p.CanWrite) return;
+
+        var t = Nullable.GetUnderlyingType(p.PropertyType) ?? p.PropertyType;
+        if (t == typeof(decimal))
+        {
+            if (p.PropertyType == typeof(decimal)) p.SetValue(obj, value);
+            else p.SetValue(obj, (decimal?)value);
+        }
+    }
+
+    private static void SetDate(object obj, DateTime value, params string[] names)
+    {
+        var p = FindProp(obj, names);
+        if (p == null || !p.CanWrite) return;
+
+        var t = Nullable.GetUnderlyingType(p.PropertyType) ?? p.PropertyType;
+
+        if (t == typeof(DateTime))
+        {
+            if (p.PropertyType == typeof(DateTime)) p.SetValue(obj, value);
+            else p.SetValue(obj, (DateTime?)value);
+            return;
+        }
+
+        if (t.FullName == "System.DateOnly")
+        {
+            var fromDt = t.GetMethod("FromDateTime", BindingFlags.Public | BindingFlags.Static);
+            if (fromDt != null)
+            {
+                var dateOnly = fromDt.Invoke(null, new object[] { value });
+                p.SetValue(obj, dateOnly);
+            }
+        }
+    }
+
+    private static void SetMonth(object obj, DateTime monthFirstDay, params string[] names)
+    {
+        SetDate(obj, monthFirstDay, names);
+        var p = FindProp(obj, names);
+        if (p != null && p.CanWrite && p.PropertyType == typeof(string))
+            p.SetValue(obj, monthFirstDay.ToString("yyyy-MM", CultureInfo.InvariantCulture));
+    }
+
+    private static int GetInt(object obj, params string[] names)
+    {
+        foreach (var n in names)
+        {
+            var p = obj.GetType().GetProperty(n);
+            if (p == null) continue;
+            var v = p.GetValue(obj);
+            if (v == null) continue;
+            if (v is int i) return i;
+            if (int.TryParse(Convert.ToString(v, CultureInfo.InvariantCulture), out var x)) return x;
+        }
+        return 0;
+    }
+
+    private static decimal GetDec(object obj, params string[] names)
+    {
+        foreach (var n in names)
+        {
+            var p = obj.GetType().GetProperty(n);
+            if (p == null) continue;
+            var v = p.GetValue(obj);
+            if (v == null) continue;
+            if (v is decimal d) return d;
+            if (decimal.TryParse(Convert.ToString(v, CultureInfo.InvariantCulture), NumberStyles.Any, CultureInfo.InvariantCulture, out var x)) return x;
+        }
+        return 0m;
+    }
+
+    private static string? GetString(object obj, params string[] names)
+    {
+        foreach (var n in names)
+        {
+            var p = obj.GetType().GetProperty(n);
+            if (p == null) continue;
+            var v = p.GetValue(obj);
+            if (v == null) continue;
+            return Convert.ToString(v, CultureInfo.InvariantCulture);
+        }
+        return null;
+    }
+
+    private static DateTime? GetDate(object obj, params string[] names)
+    {
+        foreach (var n in names)
+        {
+            var p = obj.GetType().GetProperty(n);
+            if (p == null) continue;
+            var v = p.GetValue(obj);
+            if (v == null) continue;
+
+            if (v is DateTime dt) return dt;
+
+            var t = Nullable.GetUnderlyingType(p.PropertyType) ?? p.PropertyType;
+            if (t.FullName == "System.DateOnly")
+            {
+                var toDateTime = t.GetMethod("ToDateTime", new[] { Type.GetType("System.TimeOnly")! });
+                if (toDateTime != null)
+                {
+                    var timeOnlyType = Type.GetType("System.TimeOnly");
+                    var minValue = timeOnlyType?.GetProperty("MinValue", BindingFlags.Public | BindingFlags.Static)?.GetValue(null);
+                    var dtObj = toDateTime.Invoke(v, new[] { minValue });
+                    if (dtObj is DateTime dtx) return dtx;
+                }
+            }
+
+            var s = Convert.ToString(v, CultureInfo.InvariantCulture) ?? "";
+            if (DateTime.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed))
+                return parsed;
+        }
+        return null;
+    }
+
+    private static string BuildProjectDisplay(object p)
+    {
+        var code = GetString(p, "Code", "ProjectCode", "SiteCode") ?? "";
+        var title = GetString(p, "Name", "ProjectName", "SiteName", "Title", "ProjectTitle", "Description") ?? "(Project)";
+        code = code.Trim(); title = title.Trim();
+        if (code.Length > 0 && title.Length > 0) return $"{code} - {title}";
+        return title.Length > 0 ? title : (code.Length > 0 ? code : "Project");
+    }
+
+    // -------------------- VMs --------------------
+    private sealed class ProjectPick { public int Id { get; set; } public string Display { get; set; } = ""; }
+
+    private sealed class PcVm
+    {
+        public string PCNo { get; set; } = "";
+        public string PeriodMonthStr { get; set; } = "";
+        public string Status { get; set; } = "Draft";
+
+        public int ProjectId { get; set; }
+        public int SubcontractorId { get; set; }
+
+        public string IssueDateStr { get; set; } = "";
+        public string DueDateStr { get; set; } = "";
+
+        public decimal VatRate { get; set; } = 5m;
+        public decimal RetentionPct { get; set; } = 10m;
+
+        public decimal PreviousCumulative { get; set; }
+        public decimal BackchargeThisMonth { get; set; }
+
+        public string Notes { get; set; } = "";
+
+        public List<LineVm> Lines { get; set; } = new();
+
+        public void Reset()
+        {
+            PCNo = "";
+            PeriodMonthStr = "";
+            Status = "Draft";
+            ProjectId = 0;
+            SubcontractorId = 0;
+            IssueDateStr = "";
+            DueDateStr = "";
+            VatRate = 5;
+            RetentionPct = 10;
+            PreviousCumulative = 0;
+            BackchargeThisMonth = 0;
+            Notes = "";
+            Lines = new();
+        }
+    }
+
+    private sealed class LineVm
+    {
+        public string WorkSection { get; set; } = "";
+        public decimal Previous { get; set; }
+        public decimal Current { get; set; }
+        public decimal Total { get; set; }
+    }
+
+    private sealed class CalcVm
+    {
+        public decimal WorkDoneToDate { get; set; }
+        public decimal ThisMonthGross { get; set; }
+        public decimal Retention { get; set; }
+        public decimal Backcharge { get; set; }
+        public decimal PayableExVat { get; set; }
+        public decimal Vat { get; set; }
+        public decimal NetPayable { get; set; }
+    }
+}

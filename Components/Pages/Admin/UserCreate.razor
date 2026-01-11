@@ -1,0 +1,330 @@
+﻿@page "/admin/users/create"
+@using System.ComponentModel.DataAnnotations
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Identity
+@using UaeEInvoice.Data
+
+@attribute [Authorize(Roles = "Admin")]
+
+@inject UserManager<ApplicationUser> UserManager
+@inject RoleManager<IdentityRole> RoleManager
+@inject NavigationManager Nav
+
+<div class="container-xxl py-4">
+    <div class="row justify-content-center">
+        <div class="col-12 col-lg-10 col-xl-9">
+            <div class="card border-0 shadow-sm overflow-hidden premium-card">
+                <!-- Header -->
+                <div class="premium-header d-flex align-items-center justify-content-between">
+                    <div>
+                        <div class="badge rounded-pill bg-light text-dark fw-semibold mb-2">ADMIN • USERS</div>
+                        <h2 class="m-0 fw-bold text-white">Create User</h2>
+                        <div class="text-white-50 small mt-1">Add a new user with role access.</div>
+                    </div>
+
+                    <div class="text-end">
+                        <button class="btn btn-outline-light btn-sm me-2" @onclick="GoBack" disabled="@busy">
+                            <i class="bi bi-arrow-left"></i> Back
+                        </button>
+                        <button class="btn btn-light btn-sm" @onclick="Reset" disabled="@busy">
+                            <i class="bi bi-arrow-counterclockwise"></i> Reset
+                        </button>
+                    </div>
+                </div>
+
+                <div class="card-body p-4 p-md-5">
+
+                    @if (!string.IsNullOrWhiteSpace(err))
+                    {
+                        <div class="alert alert-danger d-flex align-items-start gap-2" role="alert">
+                            <i class="bi bi-x-circle-fill mt-1"></i>
+                            <div>
+                                <div class="fw-semibold">Failed</div>
+                                <div class="small">@err</div>
+                            </div>
+                        </div>
+                    }
+
+                    @if (!string.IsNullOrWhiteSpace(msg))
+                    {
+                        <div class="alert alert-success d-flex align-items-start gap-2" role="alert">
+                            <i class="bi bi-check-circle-fill mt-1"></i>
+                            <div>
+                                <div class="fw-semibold">Success</div>
+                                <div class="small">@msg</div>
+                            </div>
+                        </div>
+                    }
+
+                    <!-- @key முக்கியம்: Reset போது inputs recreate ஆகும் -->
+                    <div @key="formKey">
+                        <EditForm Model="@model" OnValidSubmit="@CreateUser">
+                            <DataAnnotationsValidator />
+                            <ValidationSummary class="text-danger small" />
+
+                            <div class="row g-4">
+                                <!-- Email -->
+                                <div class="col-12 col-md-7">
+                                    <label class="form-label fw-semibold">Email / Username</label>
+                                    <InputText class="form-control form-control-lg"
+                                               @bind-Value="model.Email"
+                                               placeholder="user@company.com"
+                                               @attributes="emailAttrs" />
+                                    <div class="form-text">This will be used as login username.</div>
+                                </div>
+
+                                <!-- Phone -->
+                                <div class="col-12 col-md-5">
+                                    <label class="form-label fw-semibold">Phone</label>
+                                    <InputText class="form-control form-control-lg"
+                                               @bind-Value="model.PhoneNumber"
+                                               placeholder="+971..."
+                                               @attributes="phoneAttrs" />
+                                </div>
+
+                                <!-- Password -->
+                                <div class="col-12 col-md-7">
+                                    <label class="form-label fw-semibold">Password</label>
+                                    <div class="input-group input-group-lg">
+                                        <InputText class="form-control"
+                                                   type="@(_showPassword ? "text" : "password")"
+                                                   @bind-Value="model.Password"
+                                                   placeholder="Min 6 chars"
+                                                   @attributes="passwordAttrs" />
+                                        <button type="button" class="btn btn-outline-secondary" @onclick="TogglePassword" tabindex="-1">
+                                            <i class="bi @( _showPassword ? "bi-eye-slash" : "bi-eye")"></i>
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <!-- Role -->
+                                <div class="col-12 col-md-5">
+                                    <label class="form-label fw-semibold">Role</label>
+                                    <InputSelect class="form-select form-select-lg" @bind-Value="model.Role">
+                                        @foreach (var r in roles)
+                                        {
+                                            <option value="@r">@r</option>
+                                        }
+                                    </InputSelect>
+                                    <div class="form-text">Controls access permissions.</div>
+                                </div>
+
+                                <!-- CompanyId -->
+                                <div class="col-12 col-md-7">
+                                    <label class="form-label fw-semibold">Company Id</label>
+                                    <InputNumber class="form-control form-control-lg" @bind-Value="model.CompanyId" />
+                                </div>
+
+                                <!-- Email Confirmed -->
+                                <div class="col-12 col-md-5 d-flex align-items-end">
+                                    <div class="form-check form-switch ms-md-auto">
+                                        <InputCheckbox class="form-check-input" @bind-Value="model.EmailConfirmed" />
+                                        <label class="form-check-label fw-semibold">Email Confirmed</label>
+                                        <div class="text-muted small">Enable for instant login.</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <hr class="my-4" />
+
+                            <div class="d-flex gap-2">
+                                <button type="submit" class="btn btn-primary btn-lg px-4" disabled="@busy">
+                                    @if (busy)
+                                    {
+                                        <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                                        <span>Creating...</span>
+                                    }
+                                    else
+                                    {
+                                        <i class="bi bi-person-plus me-2"></i>
+                                        <span>Create User</span>
+                                    }
+                                </button>
+
+                                <button type="button" class="btn btn-outline-secondary btn-lg px-4" @onclick="GoUsers" disabled="@busy">
+                                    <i class="bi bi-people me-2"></i>
+                                    Users List
+                                </button>
+                            </div>
+                        </EditForm>
+                    </div>
+
+                </div>
+            </div>
+
+            <div class="text-center text-muted small mt-3">
+                Powered by Identity • Role-based access
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private bool busy;
+    private string? msg;
+    private string? err;
+    private bool _showPassword;
+
+    // 👇 EditForm re-render key
+    private Guid formKey = Guid.NewGuid();
+
+    private readonly string[] roles = new[] { "Admin", "Sales", "Purchase", "Inventory" };
+
+    private CreateUserVm model = new();
+
+    // 👇 Browser autofill stop (old email/password avoid)
+    private Dictionary<string, object> emailAttrs = new();
+    private Dictionary<string, object> phoneAttrs = new();
+    private Dictionary<string, object> passwordAttrs = new();
+
+    protected override void OnInitialized()
+    {
+        SetupAntiAutoFillAttrs();
+        Reset(); // ✅ every time component loads -> fresh
+    }
+
+    private void SetupAntiAutoFillAttrs()
+    {
+        // Unique names help to stop Chrome autofill
+        emailAttrs = new()
+            {
+                ["autocomplete"] = "off",
+                ["name"] = $"email_{Guid.NewGuid():N}"
+            };
+
+        phoneAttrs = new()
+            {
+                ["autocomplete"] = "off",
+                ["name"] = $"phone_{Guid.NewGuid():N}"
+            };
+
+        // new-password tells browser: do not use old saved password
+        passwordAttrs = new()
+            {
+                ["autocomplete"] = "new-password",
+                ["name"] = $"pwd_{Guid.NewGuid():N}"
+            };
+    }
+
+    private void TogglePassword() => _showPassword = !_showPassword;
+
+    private void Reset()
+    {
+        msg = err = null;
+        _showPassword = false;
+
+        model = new CreateUserVm
+            {
+                CompanyId = 1,
+                Role = "Sales",
+                EmailConfirmed = true,
+                Email = "",
+                Password = "",
+                PhoneNumber = ""
+            };
+
+        // re-render the whole form so previous values fully clear
+        formKey = Guid.NewGuid();
+
+        // regenerate attributes to avoid browser filling back old values
+        SetupAntiAutoFillAttrs();
+    }
+
+    private void GoBack() => Nav.NavigateTo("/");
+    private void GoUsers() => Nav.NavigateTo("/admin/users"); // create this page later if needed
+
+    private async Task CreateUser()
+    {
+        msg = err = null;
+        busy = true;
+
+        try
+        {
+            var email = (model.Email ?? "").Trim();
+
+            var existing = await UserManager.FindByEmailAsync(email);
+            if (existing != null)
+            {
+                err = "This email already exists.";
+                return;
+            }
+
+            var user = new ApplicationUser
+                {
+                    UserName = email,
+                    Email = email,
+                    PhoneNumber = model.PhoneNumber,
+                    EmailConfirmed = model.EmailConfirmed,
+                    CompanyId = model.CompanyId
+                };
+
+            var create = await UserManager.CreateAsync(user, model.Password);
+            if (!create.Succeeded)
+            {
+                err = string.Join(" | ", create.Errors.Select(e => e.Description));
+                return;
+            }
+
+            if (!await RoleManager.RoleExistsAsync(model.Role))
+                await RoleManager.CreateAsync(new IdentityRole(model.Role));
+
+            var roleRes = await UserManager.AddToRoleAsync(user, model.Role);
+            if (!roleRes.Succeeded)
+            {
+                err = string.Join(" | ", roleRes.Errors.Select(e => e.Description));
+                return;
+            }
+
+            msg = $"User created: {user.Email} (Role: {model.Role})";
+
+            // ✅ after success -> clear form immediately
+            Reset();
+        }
+        catch (Exception ex)
+        {
+            err = ex.Message;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    public class CreateUserVm
+    {
+        [Required, EmailAddress]
+        public string Email { get; set; } = "";
+
+        [Required, MinLength(6)]
+        public string Password { get; set; } = "";
+
+        public string? PhoneNumber { get; set; }
+
+        [Required]
+        public string Role { get; set; } = "Sales";
+
+        [Range(1, 999999)]
+        public int CompanyId { get; set; } = 1;
+
+        public bool EmailConfirmed { get; set; } = true;
+    }
+}
+
+<style>
+    .premium-card {
+        border-radius: 18px;
+    }
+
+    .premium-header {
+        padding: 26px 28px;
+        background: radial-gradient(1200px 600px at 10% 10%, rgba(255,255,255,.18), transparent 60%), linear-gradient(135deg, #0d6efd, #6f42c1);
+    }
+
+    .form-control, .form-select {
+        border-radius: 12px;
+    }
+
+    .btn {
+        border-radius: 12px;
+    }
+</style>

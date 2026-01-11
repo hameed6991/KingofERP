@@ -1,0 +1,639 @@
+﻿@page "/items"
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Authorization
+@using UaeEInvoice.Data
+@using UaeEInvoice.Services.Auth
+
+@attribute [Authorize]
+
+@inject AppDbContext Db
+@inject ICurrentCompany CurrentCompany
+
+<style>
+    .hero {
+        border-radius: 22px;
+        border: 1px solid rgba(0,0,0,.06);
+        background: linear-gradient(135deg, rgba(13,110,253,.14), rgba(255,255,255,0));
+        padding: 18px;
+    }
+
+    .soft-card {
+        border: 1px solid rgba(0,0,0,.06);
+        border-radius: 22px;
+    }
+
+    .soft-shadow {
+        box-shadow: 0 10px 30px rgba(0,0,0,.06);
+    }
+
+    .title {
+        font-weight: 900;
+        letter-spacing: .2px;
+        margin: 0;
+    }
+
+    .muted {
+        color: rgba(0,0,0,.55);
+    }
+
+    .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: .45rem;
+        padding: .30rem .75rem;
+        border-radius: 999px;
+        border: 1px solid rgba(0,0,0,.08);
+        background: #fff;
+        font-size: .85rem;
+        white-space: nowrap;
+    }
+
+    .table thead th {
+        font-size: .78rem;
+        letter-spacing: .08em;
+        color: rgba(0,0,0,.55);
+    }
+
+    .kbd {
+        font-size: .75rem;
+        border: 1px solid rgba(0,0,0,.15);
+        border-bottom-width: 2px;
+        border-radius: 6px;
+        padding: .1rem .35rem;
+        background: #fff;
+    }
+</style>
+
+<div class="container-xxl py-4">
+
+    <div class="hero mb-3">
+        <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+            <div>
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <h2 class="title">Items</h2>
+                    <span class="chip">📦 Masters</span>
+                </div>
+                <div class="muted">Manage products/services with cost, selling price and VAT.</div>
+
+                <div class="d-flex flex-wrap gap-2 mt-2">
+                    <span class="chip">🏢 CompanyId: @_companyId</span>
+                    <span class="chip">📌 Total: @_rows.Count</span>
+                    <span class="chip">🛒 Products: @_rows.Count(x => (x.ItemType ?? "Product") == "Product")</span>
+                    <span class="chip">🧾 Services: @_rows.Count(x => (x.ItemType ?? "") == "Service")</span>
+                </div>
+            </div>
+
+            <div class="d-flex gap-2">
+                <button class="btn btn-primary" type="button" @onclick="NewItem" disabled="@_loading">+ Add Item</button>
+                <button class="btn btn-outline-secondary" type="button" @onclick="Reload" disabled="@_loading">
+                    @(_loading ? "Loading..." : "Reload")
+                </button>
+            </div>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_toast))
+    {
+        <div class="alert alert-success soft-card soft-shadow p-3">
+            <strong>Done!</strong> @_toast
+        </div>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(_pageError))
+    {
+        <div class="alert alert-danger soft-card soft-shadow p-3">
+            <strong>Error:</strong> @_pageError
+        </div>
+    }
+
+    <div class="soft-card soft-shadow p-3 p-md-4 mb-3">
+        <div class="row g-2 align-items-end">
+            <div class="col-12 col-md-6">
+                <label class="form-label mb-1">Search</label>
+                <input class="form-control" placeholder="Search by name / SKU..."
+                       @bind="_search" @bind:event="onchange" />
+            </div>
+
+            <div class="col-12 col-md-3">
+                <label class="form-label mb-1">Type</label>
+                <select class="form-select" @bind="_typeFilter">
+                    <option value="">All</option>
+                    <option value="Product">Product</option>
+                    <option value="Service">Service</option>
+                </select>
+            </div>
+
+            <div class="col-12 col-md-3 text-md-end">
+                <div class="muted small">Showing</div>
+                <div class="fw-bold">@FilteredRows().Count()</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="soft-card soft-shadow p-3 p-md-4">
+        <div class="table-responsive">
+            <table class="table align-middle">
+                <thead>
+                    <tr>
+                        <th style="min-width:220px;">NAME</th>
+                        <th style="min-width:120px;">TYPE</th>
+                        <th style="min-width:200px;">VENDOR</th>
+                        <th style="min-width:160px;">VAT CATEGORY</th>
+                        <th class="text-end" style="min-width:120px;">VAT</th>
+                        <th class="text-end" style="min-width:120px;">COST</th>
+                        <th class="text-end" style="min-width:120px;">SELL</th>
+                        <th class="text-end" style="min-width:140px;">GROSS PROFIT</th>
+                        <th class="text-end" style="width:220px;">ACTIONS</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var i in FilteredRows())
+                    {
+                        var profit = i.SellingPrice - i.CostPrice;
+                        var vatPct = i.VatRate * 100m;
+
+                        <tr>
+                            <td class="fw-semibold">@i.Name</td>
+
+                            <td>
+                                @if ((i.ItemType ?? "Product") == "Service")
+                                {
+                                    <span class="badge rounded-pill bg-success px-3">Service</span>
+                                }
+                                else
+                                {
+                                    <span class="badge rounded-pill bg-primary px-3">Product</span>
+                                }
+                            </td>
+
+                            <td>@(GetVendorName(i.VendorId) ?? "-")</td>
+
+                            <td>
+                                @if (i.VatCategory == VatCategory.Standard)
+                                {
+                                    <span class="badge rounded-pill bg-dark px-3">Standard</span>
+                                }
+                                else if (i.VatCategory == VatCategory.Zero)
+                                {
+                                    <span class="badge rounded-pill bg-info text-dark px-3">Zero</span>
+                                }
+                                else
+                                {
+                                    <span class="badge rounded-pill bg-secondary px-3">Exempt</span>
+                                }
+                            </td>
+
+                            <td class="text-end">@($"{vatPct:0.##}%")</td>
+                            <td class="text-end">@i.CostPrice.ToString("0.00")</td>
+                            <td class="text-end">@i.SellingPrice.ToString("0.00")</td>
+
+                            <td class="text-end fw-semibold @(profit>=0 ? "text-success" : "text-danger")">
+                                @profit.ToString("0.00")
+                            </td>
+
+                            <td class="text-end">
+                                <button class="btn btn-sm btn-outline-primary me-2" type="button"
+                                        @onclick="async () => await EditItem(i.ItemId)">
+                                    Edit
+                                </button>
+                                <button class="btn btn-sm btn-outline-danger" type="button"
+                                        @onclick="async () => await DeleteItem(i.ItemId)">
+                                    Delete
+                                </button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+
+            @if (!FilteredRows().Any() && !_loading)
+            {
+                <div class="text-center text-muted py-5">
+                    No items found for this company.
+                </div>
+            }
+        </div>
+    </div>
+
+    @if (_showForm)
+    {
+        <div class="modal fade show d-block" tabindex="-1">
+            <div class="modal-dialog modal-lg modal-dialog-centered">
+                <div class="modal-content border-0 shadow">
+
+                    <div class="modal-header bg-primary text-white">
+                        <h5 class="modal-title">@(_edit.ItemId == 0 ? "Add Item" : "Edit Item")</h5>
+                        <button type="button" class="btn btn-sm btn-light" @onclick="CloseForm" disabled="@_saving">Close</button>
+                    </div>
+
+                    <div class="modal-body">
+
+                        @if (!string.IsNullOrWhiteSpace(_formError))
+                        {
+                            <div class="alert alert-danger soft-card soft-shadow p-3">@_formError</div>
+                        }
+
+                        <EditForm Model="_vm" OnValidSubmit="SaveItem">
+                            <DataAnnotationsValidator />
+                            <ValidationSummary />
+
+                            <div class="row g-3">
+                                <div class="col-12 col-md-8">
+                                    <label class="form-label">Item Name <span class="text-danger">*</span></label>
+                                    <InputText class="form-control" @bind-Value="_vm.Name" placeholder="e.g., Laptop Dell Inspiron" />
+                                </div>
+
+                                <div class="col-12 col-md-4">
+                                    <label class="form-label">Type</label>
+                                    <InputSelect class="form-select" @bind-Value="_vm.ItemType">
+                                        <option value="Product">Product</option>
+                                        <option value="Service">Service</option>
+                                    </InputSelect>
+                                </div>
+
+                                <!-- Vendor -->
+                                <div class="col-12 col-md-6">
+                                    <label class="form-label">Vendor <span class="text-danger">*</span></label>
+                                    <InputSelect class="form-select" @bind-Value="_vm.VendorId">
+                                        <option value="">-- Select Vendor --</option>
+                                        @foreach (var v in _vendors)
+                                        {
+                                            <option value="@v.VendorId">@v.VendorName</option>
+                                        }
+                                    </InputSelect>
+                                    <div class="muted small mt-1">Purchase page will show items only for this vendor.</div>
+                                </div>
+
+                                <div class="col-12 col-md-6">
+                                    <label class="form-label">Unit</label>
+                                    <InputText class="form-control" @bind-Value="_vm.Unit" />
+                                </div>
+
+                                <div class="col-12 col-md-4">
+                                    <label class="form-label">SKU / Code</label>
+                                    <InputText class="form-control" @bind-Value="_vm.SKU" placeholder="optional" />
+                                </div>
+
+                                <!-- ✅ NEW: VAT CATEGORY -->
+                                <div class="col-12 col-md-4">
+                                    <label class="form-label">VAT Category</label>
+                                    <InputSelect class="form-select" @bind-Value="_vm.VatCategory">
+                                        <option value="@VatCategory.Standard">Standard (5%)</option>
+                                        <option value="@VatCategory.Zero">Zero Rated (0%)</option>
+                                        <option value="@VatCategory.Exempt">Exempt</option>
+                                    </InputSelect>
+                                    <div class="muted small mt-1">
+                                        Used for UAE FTA VAT Return Boxes (Box 1/2/3).
+                                    </div>
+                                </div>
+
+                                <!-- VAT % -->
+                                <div class="col-12 col-md-4">
+                                    <label class="form-label">VAT <span class="text-muted">(%)</span></label>
+                                    <InputNumber class="form-control" @bind-Value="_vm.VatPercent" disabled="@(_vm.VatCategory != VatCategory.Standard)" />
+
+                                    <div class="d-flex gap-2 mt-2">
+                                        <button type="button" class="btn btn-sm btn-outline-secondary"
+                                                @onclick="() => _vm.SetVatPercent(0m)"
+                                                disabled="@(_vm.VatCategory != VatCategory.Standard)">
+                                            0%
+                                        </button>
+
+                                        <button type="button" class="btn btn-sm btn-outline-secondary"
+                                                @onclick="() => _vm.SetVatPercent(5m)"
+                                                disabled="@(_vm.VatCategory != VatCategory.Standard)">
+                                            5%
+                                        </button>
+                                    </div>
+
+                                    @if (_vm.VatCategory != VatCategory.Standard)
+                                    {
+                                        <div class="text-muted small mt-2">
+                                            VAT is forced to <b>0%</b> for Zero Rated / Exempt items.
+                                        </div>
+                                    }
+                                </div>
+
+                                <div class="col-12 col-md-4">
+                                    <label class="form-label">Current VAT Preview</label>
+                                    <div class="p-2 rounded-3 border bg-light fw-semibold">@($"{_vm.VatPercent:0.##}%")</div>
+                                </div>
+
+                                <div class="col-12 col-md-6">
+                                    <label class="form-label">Cost Price</label>
+                                    <InputNumber class="form-control" @bind-Value="_vm.CostPrice" />
+                                </div>
+
+                                <div class="col-12 col-md-6">
+                                    <label class="form-label">Selling Price</label>
+                                    <InputNumber class="form-control" @bind-Value="_vm.SellingPrice" />
+                                </div>
+
+                                <div class="col-12">
+                                    <div class="p-3 rounded-4 bg-light border">
+                                        <div class="small text-muted">Profit Preview</div>
+                                        <div class="fw-bold">@ProfitPreview()</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="d-flex justify-content-end gap-2 mt-4">
+                                <button type="button" class="btn btn-outline-secondary" @onclick="CloseForm" disabled="@_saving">Cancel</button>
+                                <button type="submit" class="btn btn-primary" disabled="@_saving">
+                                    @(_saving ? "Saving..." : "Save")
+                                </button>
+                            </div>
+                        </EditForm>
+
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="modal-backdrop fade show"></div>
+    }
+</div>
+
+@code {
+    private int _companyId;
+    private bool _loading;
+    private bool _saving;
+
+    private List<Item> _rows = new();
+    private List<Vendor> _vendors = new();
+
+    private string _search = "";
+    private string _typeFilter = "";
+
+    private bool _showForm;
+    private Item _edit = new();
+    private ItemVm _vm = new();
+
+    private string? _toast;
+    private string? _formError;
+    private string? _pageError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _loading = true;
+        try
+        {
+            await CurrentCompany.RefreshAsync();
+            _companyId = CurrentCompany.CompanyId;
+
+            if (_companyId <= 0)
+            {
+                _pageError = "CompanyId not found in login claim. Logout and login again.";
+                return;
+            }
+
+            await LoadVendors();
+            await LoadRows();
+        }
+        catch (Exception ex)
+        {
+            _pageError = ex.InnerException?.Message ?? ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task Reload()
+    {
+        _toast = null;
+        _pageError = null;
+        await LoadVendors();
+        await LoadRows();
+    }
+
+    private async Task LoadVendors()
+    {
+        _vendors = await Db.Vendors.AsNoTracking()
+            .Where(x => x.CompanyId == _companyId)
+            .OrderBy(x => x.VendorName)
+            .ToListAsync();
+    }
+
+    private async Task LoadRows()
+    {
+        _rows = await Db.Items.AsNoTracking()
+            .Where(x => x.CompanyId == _companyId)
+            .OrderByDescending(x => x.ItemId)
+            .ToListAsync();
+    }
+
+    private IEnumerable<Item> FilteredRows()
+    {
+        var q = _rows.AsEnumerable();
+
+        if (!string.IsNullOrWhiteSpace(_typeFilter))
+            q = q.Where(x => (x.ItemType ?? "Product").Trim() == _typeFilter);
+
+        if (!string.IsNullOrWhiteSpace(_search))
+        {
+            var s = _search.Trim().ToLowerInvariant();
+            q = q.Where(x =>
+                (x.Name ?? "").ToLowerInvariant().Contains(s) ||
+                (x.SKU ?? "").ToLowerInvariant().Contains(s));
+        }
+
+        return q;
+    }
+
+    private string? GetVendorName(int? vendorId)
+    {
+        if (!vendorId.HasValue) return null;
+        return _vendors.FirstOrDefault(x => x.VendorId == vendorId.Value)?.VendorName;
+    }
+
+    private void NewItem()
+    {
+        _toast = null;
+        _formError = null;
+
+        _edit = new Item
+            {
+                CompanyId = _companyId,
+                ItemType = "Product",
+                Unit = "Nos",
+                VatCategory = VatCategory.Standard,  // ✅ default
+                VatRate = 0.05m,
+                IsActive = true
+            };
+
+        _vm = ItemVm.FromEntity(_edit);
+        _showForm = true;
+    }
+
+    private async Task EditItem(int id)
+    {
+        _toast = null;
+        _formError = null;
+
+        var item = await Db.Items.FirstOrDefaultAsync(x => x.ItemId == id && x.CompanyId == _companyId);
+        if (item == null)
+        {
+            _formError = "Item not found for this company.";
+            return;
+        }
+
+        _edit = item;
+        _vm = ItemVm.FromEntity(_edit);
+
+        _showForm = true;
+    }
+
+    private void CloseForm() => _showForm = false;
+
+    private async Task SaveItem()
+    {
+        _saving = true;
+        _formError = null;
+
+        try
+        {
+            _vm.Name = (_vm.Name ?? "").Trim();
+            if (string.IsNullOrWhiteSpace(_vm.Name))
+            {
+                _formError = "Item Name is required.";
+                return;
+            }
+
+            if ((_vm.ItemType ?? "Product") == "Product" && !_vm.VendorId.HasValue)
+            {
+                _formError = "Vendor is required for Product items.";
+                return;
+            }
+
+            _vm.Unit = string.IsNullOrWhiteSpace(_vm.Unit) ? "Nos" : _vm.Unit.Trim();
+
+            if (_vm.VatPercent < 0) _vm.VatPercent = 0;
+            if (_vm.VatPercent > 100) _vm.VatPercent = 100;
+
+            _vm.ApplyToEntity(_edit, _companyId);
+
+            if (_edit.ItemId == 0) Db.Items.Add(_edit);
+            else Db.Items.Update(_edit);
+
+            await Db.SaveChangesAsync();
+            await LoadRows();
+
+            _toast = "Item saved successfully.";
+            _showForm = false;
+        }
+        catch (Exception ex)
+        {
+            _formError = ex.InnerException?.Message ?? ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task DeleteItem(int id)
+    {
+        var item = await Db.Items.FirstOrDefaultAsync(x => x.ItemId == id && x.CompanyId == _companyId);
+        if (item == null)
+        {
+            _toast = "Item already deleted / not found.";
+            return;
+        }
+
+        Db.Items.Remove(item);
+        await Db.SaveChangesAsync();
+
+        await LoadRows();
+        _toast = "Item deleted.";
+    }
+
+    private string ProfitPreview()
+    {
+        var profit = _vm.SellingPrice - _vm.CostPrice;
+        var pct = _vm.CostPrice <= 0 ? 0 : (profit / _vm.CostPrice) * 100m;
+        return $"Gross Profit: {profit:0.00}  |  Profit %: {pct:0.##}%";
+    }
+
+    private sealed class ItemVm
+    {
+        public int ItemId { get; set; }
+        public string? Name { get; set; }
+        public string? ItemType { get; set; } = "Product";
+        public int? VendorId { get; set; }
+
+        public string? SKU { get; set; }
+        public string Unit { get; set; } = "Nos";
+
+        // ✅ NEW
+        private VatCategory _vatCategory = VatCategory.Standard;
+        public VatCategory VatCategory
+        {
+            get => _vatCategory;
+            set
+            {
+                _vatCategory = value;
+
+                // auto-force VAT% to 0 for Zero/Exempt
+                if (_vatCategory != VatCategory.Standard)
+                    VatPercent = 0m;
+                else if (VatPercent == 0m)
+                    VatPercent = 5m; // friendly default
+            }
+        }
+
+        public decimal VatPercent { get; set; } = 5m; // UI shows 5 not 0.05
+        public decimal CostPrice { get; set; }
+        public decimal SellingPrice { get; set; }
+
+        public void SetVatPercent(decimal v)
+        {
+            if (VatCategory != VatCategory.Standard) return;
+            VatPercent = v;
+        }
+
+        public static ItemVm FromEntity(Item e)
+        {
+            var vm = new ItemVm
+                {
+                    ItemId = e.ItemId,
+                    Name = e.Name,
+                    ItemType = e.ItemType ?? "Product",
+                    VendorId = e.VendorId,
+                    SKU = e.SKU,
+                    Unit = string.IsNullOrWhiteSpace(e.Unit) ? "Nos" : e.Unit,
+                    VatPercent = e.VatRate * 100m,
+                    CostPrice = e.CostPrice,
+                    SellingPrice = e.SellingPrice,
+                };
+
+            // set after VatPercent to allow setter logic
+            vm.VatCategory = e.VatCategory;
+
+            // if category is not Standard, keep VAT 0
+            if (vm.VatCategory != VatCategory.Standard)
+                vm.VatPercent = 0m;
+
+            return vm;
+        }
+
+        public void ApplyToEntity(Item e, int companyId)
+        {
+            e.CompanyId = companyId;
+            e.Name = (Name ?? "").Trim();
+            e.ItemType = (ItemType ?? "Product").Trim();
+            e.VendorId = VendorId;
+            e.SKU = string.IsNullOrWhiteSpace(SKU) ? null : SKU.Trim();
+            e.Unit = string.IsNullOrWhiteSpace(Unit) ? "Nos" : Unit.Trim();
+
+            e.VatCategory = VatCategory;
+
+            // ✅ Standard uses VatPercent, Zero/Exempt must store 0
+            e.VatRate = (VatCategory == VatCategory.Standard) ? (VatPercent / 100m) : 0m;
+
+            e.CostPrice = CostPrice;
+            e.SellingPrice = SellingPrice;
+            e.IsActive = true;
+        }
+    }
+}

@@ -1,0 +1,821 @@
+﻿@page "/construction/purchase-bills/create"
+@page "/construction/purchase-bills/{Id:int}"
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.EntityFrameworkCore
+@using System.Globalization
+@using System.Linq.Expressions
+@using UaeEInvoice.Data
+@using UaeEInvoice.Services
+@using UaeEInvoice.Services.Auth
+@attribute [Authorize]
+
+@inject AppDbContext Db
+@inject NavigationManager Nav
+@inject ICurrentCompany CurrentCompany
+@inject DocSequenceService Seq
+@inject ConstructionPurchasePostingService Posting
+
+<PageTitle>Construction Purchase Bill</PageTitle>
+
+<style>
+    /* ---------- Ultra Premium (scoped) ---------- */
+    .cpbe {
+        --bg0: #0b1220;
+        --bg1: #0a0f1a;
+        --card: rgba(255,255,255,.92);
+        --line: rgba(15,23,42,.10);
+        --mut: #6b7280;
+        --ink: #0f172a;
+        --ring: rgba(13,110,253,.22);
+    }
+
+    .cpbe-bg {
+        padding: 22px 12px 34px 12px;
+        background: radial-gradient(900px 450px at 15% 10%, rgba(13,110,253,.14), transparent 60%), radial-gradient(900px 450px at 85% 15%, rgba(111,66,193,.12), transparent 60%), radial-gradient(700px 420px at 55% 90%, rgba(32,201,151,.10), transparent 60%), linear-gradient(180deg, var(--bg0) 0%, var(--bg1) 100%);
+        min-height: calc(100vh - 56px);
+    }
+
+    .cpbe-shell {
+        max-width: 1260px;
+        margin: 0 auto;
+    }
+
+    .hero {
+        border-radius: 22px;
+        padding: 18px 18px;
+        color: #eaf1ff;
+        background: radial-gradient(800px 420px at 12% 10%, rgba(13,110,253,.26), transparent 55%), radial-gradient(780px 420px at 88% 20%, rgba(111,66,193,.20), transparent 55%), linear-gradient(135deg, rgba(255,255,255,.06), rgba(255,255,255,.02));
+        border: 1px solid rgba(255,255,255,.10);
+        box-shadow: 0 18px 50px rgba(0,0,0,.18);
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+        margin-bottom: 12px;
+    }
+
+    .title {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+    }
+
+    .icon {
+        width: 46px;
+        height: 46px;
+        border-radius: 16px;
+        display: grid;
+        place-items: center;
+        background: rgba(255,255,255,.10);
+        border: 1px solid rgba(255,255,255,.14);
+        box-shadow: inset 0 0 0 1px rgba(255,255,255,.06);
+        flex: 0 0 auto;
+    }
+
+    .h1 {
+        margin: 0;
+        font-weight: 900;
+        letter-spacing: .2px;
+        font-size: 20px;
+        line-height: 1.25;
+    }
+
+    .sub {
+        margin-top: 4px;
+        opacity: .86;
+        font-size: 12.5px;
+    }
+
+    .mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    }
+
+    .btnx {
+        border-radius: 999px !important;
+        padding: .58rem 1.05rem !important;
+        font-weight: 900 !important;
+        letter-spacing: .2px;
+    }
+
+    .glass {
+        background: rgba(255,255,255,.10);
+        border: 1px solid rgba(255,255,255,.14);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+    }
+
+    .cardx {
+        border-radius: 18px;
+        border: 1px solid var(--line);
+        background: linear-gradient(180deg, var(--card), #fbfdff);
+        box-shadow: 0 16px 40px rgba(0,0,0,.10);
+    }
+
+        .cardx .head {
+            padding: 12px 14px;
+            border-bottom: 1px solid rgba(15,23,42,.08);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+            .cardx .head .t {
+                font-weight: 900;
+                color: var(--ink);
+            }
+
+            .cardx .head .s {
+                font-size: 12px;
+                color: var(--mut);
+            }
+
+        .cardx .body {
+            padding: 14px;
+        }
+
+    label.form-label {
+        font-size: 12px;
+        color: var(--mut);
+        margin-bottom: 6px;
+    }
+
+    .form-control, .form-select {
+        border-radius: 14px;
+        border: 1px solid rgba(15,23,42,.14);
+        box-shadow: none;
+    }
+
+        .form-control:focus, .form-select:focus {
+            border-color: rgba(13,110,253,.35);
+            box-shadow: 0 0 0 .25rem var(--ring);
+        }
+
+    .chip {
+        border-radius: 999px;
+        padding: .22rem .6rem;
+        font-size: 12px;
+        font-weight: 900;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        border: 1px solid rgba(15,23,42,.10);
+        background: rgba(255,255,255,.70);
+        color: var(--ink);
+    }
+
+    .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 99px;
+        background: #adb5bd;
+    }
+
+        .dot.ok {
+            background: #20c997;
+        }
+
+        .dot.draft {
+            background: #6c757d;
+        }
+
+    .table thead th {
+        font-size: 11px;
+        letter-spacing: .09em;
+        text-transform: uppercase;
+        color: var(--mut);
+        border-bottom: 1px solid rgba(15,23,42,.10) !important;
+        background: #f8fafc;
+    }
+
+    .table tbody td {
+        border-bottom: 1px solid rgba(15,23,42,.08);
+        color: var(--ink);
+        vertical-align: middle;
+    }
+
+    .totalbox {
+        border: 1px solid rgba(15,23,42,.10);
+        border-radius: 16px;
+        padding: 12px;
+        background: #fff;
+        min-width: 320px;
+    }
+
+    .rowx {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 6px 0;
+    }
+
+        .rowx .k {
+            color: var(--mut);
+            font-size: 13px;
+        }
+
+        .rowx .v {
+            font-weight: 900;
+        }
+
+    .grand {
+        border-top: 1px dashed rgba(15,23,42,.25);
+        margin-top: 8px;
+        padding-top: 8px;
+    }
+
+    .mut {
+        color: var(--mut);
+        font-size: 12px;
+    }
+</style>
+
+<div class="cpbe cpbe-bg">
+    <div class="cpbe-shell">
+
+        <!-- HERO -->
+        <div class="hero">
+            <div class="title">
+                <div class="icon">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                        <path d="M4 20V8l8-4 8 4v12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+                        <path d="M9 20v-6h6v6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+                    </svg>
+                </div>
+                <div>
+                    <h3 class="h1">Construction Purchase Bill</h3>
+                    <div class="sub">
+                        CompanyId: <b>@_companyId</b> •
+                        Bill: <span class="mono">@(_bill.BillNo ?? "-")</span> •
+                        Status:
+                        @if (_bill.Status == "Posted")
+                        {
+                            <span class="chip ms-1"><span class="dot ok"></span>Posted</span>
+                        }
+                        else
+                        {
+                            <span class="chip ms-1"><span class="dot draft"></span>Draft</span>
+                        }
+                    </div>
+                </div>
+            </div>
+
+            <div class="d-flex gap-2 flex-wrap">
+                <button class="btn btn-light btnx glass" type="button" @onclick="BackToList">← Back</button>
+                <button class="btn btn-primary btnx" type="button" @onclick="Save" disabled="@_saving">Save</button>
+                <button class="btn btn-dark btnx" type="button" @onclick="Post" disabled="@(!_canPost || _saving)">Post</button>
+            </div>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(_err))
+        {
+            <div class="alert alert-danger py-2">@_err</div>
+        }
+        @if (!string.IsNullOrWhiteSpace(_msg))
+        {
+            <div class="alert alert-success py-2">@_msg</div>
+        }
+
+        <!-- HEADER -->
+        <div class="cardx mb-3">
+            <div class="head">
+                <div>
+                    <div class="t">Bill Header</div>
+                    <div class="s">Store → Inventory In • DirectToSite → No stock (Project cost)</div>
+                </div>
+                <div class="d-flex gap-2 flex-wrap">
+                    <span class="chip"><span class="dot"></span>@_bill.ReceiveMode</span>
+                    <span class="chip"><span class="dot"></span>Vendor: @(_bill.VendorId > 0 ? "Selected" : "Required")</span>
+                </div>
+            </div>
+
+            <div class="body">
+                <div class="row g-3">
+                    <div class="col-12 col-md-3">
+                        <label class="form-label">Bill No</label>
+                        <input class="form-control mono" value="@_bill.BillNo" disabled />
+                    </div>
+
+                    <div class="col-12 col-md-3">
+                        <label class="form-label">Bill Date</label>
+                        <input class="form-control" type="date" @bind="_bill.BillDate" />
+                    </div>
+
+                    <div class="col-12 col-md-3">
+                        <label class="form-label">Receive Mode</label>
+                        <select class="form-select" @bind="_bill.ReceiveMode" @bind:after="AfterModeChanged">
+                            <option value="Store">Store (Inventory)</option>
+                            <option value="DirectToSite">Direct to Site (No inventory)</option>
+                        </select>
+                    </div>
+
+                    <div class="col-12 col-md-3">
+                        <label class="form-label">Vendor Invoice No</label>
+                        <input class="form-control" @bind="_bill.VendorInvoiceNo" />
+                    </div>
+
+                    <div class="col-12 col-md-6">
+                        <label class="form-label">Vendor</label>
+                        <select class="form-select" @bind="_bill.VendorId" @bind:after="AfterVendorChanged">
+                            <option value="0">-- select vendor --</option>
+                            @foreach (var v in _vendors)
+                            {
+                                <option value="@v.Id">@v.Name</option>
+                            }
+                        </select>
+                        <div class="mut mt-1">TRN: @(_bill.VendorTRN ?? "-")</div>
+                    </div>
+
+                    <div class="col-12 col-md-6">
+                        <label class="form-label">Project @(_bill.ReceiveMode == "DirectToSite" ? "(required)" : "(optional)")</label>
+                        <select class="form-select" @bind="_bill.ProjectId" @bind:after="AfterProjectChanged">
+                            <option value="">-- none --</option>
+                            @foreach (var p in _projects)
+                            {
+                                <option value="@p.Id">@p.Text</option>
+                            }
+                        </select>
+                        <div class="mut mt-1">Selected: @(_bill.ProjectName ?? "-")</div>
+                    </div>
+
+                    <div class="col-12 col-md-3">
+                        <label class="form-label">Due Date</label>
+                        <input class="form-control" type="date" @bind="_bill.DueDate" />
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- LINES -->
+        <div class="cardx">
+            <div class="head">
+                <div>
+                    <div class="t">Lines</div>
+                    <div class="s">Choose item, qty, rate. VAT auto-calculates totals.</div>
+                </div>
+                <button class="btn btn-outline-primary btnx" type="button" @onclick="AddLine">+ Add line</button>
+            </div>
+
+            <div class="body">
+                <div class="table-responsive">
+                    <table class="table align-middle mb-0">
+                        <thead>
+                            <tr>
+                                <th style="min-width:280px;">Item</th>
+                                <th class="text-end" style="min-width:90px;">Qty</th>
+                                <th class="text-end" style="min-width:110px;">Rate</th>
+                                <th class="text-end" style="min-width:90px;">VAT %</th>
+                                <th class="text-end" style="min-width:110px;">Net</th>
+                                <th class="text-end" style="min-width:110px;">VAT</th>
+                                <th class="text-end" style="min-width:130px;">Total</th>
+                                <th class="text-end" style="min-width:110px;"></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @for (int i = 0; i < _bill.Lines.Count; i++)
+                            {
+                                var ln = _bill.Lines[i];
+
+                                <tr>
+                                    <td>
+                                        <select class="form-select" @bind="ln.ItemId" @bind:after="@(() => AfterItemChanged(i))">
+                                            <option value="0">-- select item --</option>
+                                            @foreach (var it in _items)
+                                            {
+                                                <option value="@it.Id">@it.Name</option>
+                                            }
+                                        </select>
+                                        <div class="mut mt-1">@ln.ItemName</div>
+                                    </td>
+
+                                    <td class="text-end">
+                                        <input class="form-control text-end" type="number" step="0.01"
+                                               @bind-value="ln.Qty"
+                                               @bind-value:event="oninput"
+                                               @bind-value:after="Recalc" />
+                                    </td>
+
+                                    <td class="text-end">
+                                        <input class="form-control text-end" type="number" step="0.01"
+                                               @bind-value="ln.Rate"
+                                               @bind-value:event="oninput"
+                                               @bind-value:after="Recalc" />
+                                    </td>
+
+                                    <td class="text-end">
+                                        <input class="form-control text-end" type="number" step="0.01"
+                                               @bind-value="ln.VatRate"
+                                               @bind-value:event="oninput"
+                                               @bind-value:after="Recalc" />
+                                    </td>
+
+                                    <td class="text-end">@ln.LineNet.ToString("N2")</td>
+                                    <td class="text-end">@ln.LineVat.ToString("N2")</td>
+                                    <td class="text-end fw-bold">@ln.LineTotal.ToString("N2")</td>
+
+                                    <td class="text-end">
+                                        <button class="btn btn-outline-danger btnx" type="button" @onclick="@(() => RemoveLine(i))">
+                                            Remove
+                                        </button>
+                                    </td>
+                                </tr>
+                            }
+
+                            @if (_bill.Lines.Count == 0)
+                            {
+                                <tr>
+                                    <td colspan="8" class="text-center text-muted py-4">Add at least one line.</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="d-flex justify-content-end mt-3">
+                    <div class="totalbox">
+                        <div class="rowx"><div class="k">SubTotal</div><div class="v">@_bill.SubTotal.ToString("N2")</div></div>
+                        <div class="rowx"><div class="k">VAT</div><div class="v">@_bill.VatTotal.ToString("N2")</div></div>
+                        <div class="rowx grand"><div class="k"><b>Grand Total</b></div><div class="v"><b>@_bill.GrandTotal.ToString("N2")</b></div></div>
+                    </div>
+                </div>
+
+                <div class="mut mt-2">
+                    Store mode: stock will increase (when inventory posting is wired). DirectToSite: no stock, only project costing.
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private int _companyId;
+    private bool _saving;
+    private string? _err;
+    private string? _msg;
+
+    private ConstructionPurchaseBill _bill = new();
+
+    private List<VendorVm> _vendors = new();
+    private List<ProjectVm> _projects = new();
+    private List<ItemVm> _items = new();
+
+    private bool _canPost => !_saving
+        && _bill.ConstructionPurchaseBillId > 0
+        && _bill.Status != "Posted"
+        && _bill.VendorId > 0
+        && _bill.Lines.Count > 0
+        && (_bill.ReceiveMode != "DirectToSite" || (_bill.ProjectId.HasValue && _bill.ProjectId.Value > 0))
+        && _bill.GrandTotal > 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CurrentCompany.RefreshAsync();
+        _companyId = CurrentCompany.CompanyId;
+
+        await LoadLookupsSmart();  // ✅ FIXED
+        await LoadBill();
+        Recalc();
+    }
+
+    private void BackToList() => Nav.NavigateTo("/construction/purchase-bills");
+
+    // ==========================================================
+    // ✅ SMART LOOKUPS (fixes your Vendor Name / EF.Property error)
+    // ==========================================================
+    private async Task LoadLookupsSmart()
+    {
+        _vendors = await TryLoadVendorsSmart();
+        _projects = await TryLoadProjectsSmart();
+
+        // Items (your Item model is strongly typed, so no EF.Property needed)
+        _items = await Db.Set<Item>().AsNoTracking()
+            .Where(x => x.CompanyId == _companyId && x.IsActive)
+            .OrderBy(x => x.Name)
+            .Select(x => new ItemVm
+                {
+                    Id = x.ItemId,
+                    Name = x.Name,
+                    Cost = x.CostPrice,
+                    VatPct = x.VatRate <= 1 ? x.VatRate * 100m : x.VatRate
+                })
+            .ToListAsync();
+    }
+
+    private async Task<List<VendorVm>> TryLoadVendorsSmart()
+    {
+        // Try your real vendor fields (because your Vendor entity doesn't have "Name")
+        var idKeys = new[] { "VendorId", "SupplierId", "Id" };
+        var nameKeys = new[] { "Name", "VendorName", "SupplierName", "VName", "AccountName" };
+        var trnKeys = new[] { "TRN", "VendorTRN", "VatNo", "VATNo", "TaxNo", "TRNNo" };
+        var companyKeys = new[] { "CompanyId", "CompId", "CompanyID" };
+
+        var set = Db.Set<Vendor>().AsNoTracking();
+
+        // attempt combos until one works
+        foreach (var nameKey in nameKeys)
+        {
+            foreach (var idKey in idKeys)
+            {
+                foreach (var trnKey in trnKeys.Concat(new[] { "" })) // "" = no TRN field
+                {
+                    try
+                    {
+                        IQueryable<Vendor> q = set;
+
+                        // company filter (try multiple names)
+                        bool filtered = false;
+                        foreach (var ck in companyKeys)
+                        {
+                            try
+                            {
+                                q = q.Where(v => EF.Property<int>(v, ck) == _companyId);
+                                filtered = true;
+                                break;
+                            }
+                            catch { }
+                        }
+
+                        // If no company field found, still proceed (better than crash)
+                        var list = await q
+                            .OrderBy(v => EF.Property<string>(v, nameKey))
+                            .Select(v => new VendorVm
+                                {
+                                    Id = EF.Property<int>(v, idKey),
+                                    Name = EF.Property<string>(v, nameKey),
+                                    TRN = string.IsNullOrWhiteSpace(trnKey) ? null : EF.Property<string>(v, trnKey)
+                                })
+                            .ToListAsync();
+
+                        // success
+                        return list
+                            .Where(x => x.Id > 0 && !string.IsNullOrWhiteSpace(x.Name))
+                            .ToList();
+                    }
+                    catch
+                    {
+                        // try next combination
+                    }
+                }
+            }
+        }
+
+        return new();
+    }
+
+    private async Task<List<ProjectVm>> TryLoadProjectsSmart()
+    {
+        // In case your ConstructionProject property names differ
+        var idKeys = new[] { "ConstructionProjectId", "ProjectId", "Id" };
+        var codeKeys = new[] { "Code", "ProjectCode", "SiteCode" };
+        var nameKeys = new[] { "Name", "ProjectName", "SiteName", "Title" };
+
+        var set = Db.Set<ConstructionProject>().AsNoTracking();
+
+        // Try with CompanyId filter first
+        try
+        {
+            set = set.Where(p => EF.Property<int>(p, "CompanyId") == _companyId);
+        }
+        catch { }
+
+        foreach (var idKey in idKeys)
+        {
+            foreach (var nameKey in nameKeys)
+            {
+                foreach (var codeKey in codeKeys.Concat(new[] { "" }))
+                {
+                    try
+                    {
+                        var rows = await set
+                            .OrderBy(p => EF.Property<string>(p, nameKey))
+                            .Select(p => new ProjectVm
+                                {
+                                    Id = EF.Property<int>(p, idKey),
+                                    Text = (string.IsNullOrWhiteSpace(codeKey)
+                                        ? (EF.Property<string>(p, nameKey) ?? "")
+                                        : ((EF.Property<string>(p, codeKey) ?? "") + " - " + (EF.Property<string>(p, nameKey) ?? "")))
+                                })
+                            .ToListAsync();
+
+                        return rows.Where(x => x.Id > 0).ToList();
+                    }
+                    catch { }
+                }
+            }
+        }
+
+        return new();
+    }
+
+    private async Task LoadBill()
+    {
+        if (Id <= 0)
+        {
+            _bill = new ConstructionPurchaseBill
+                {
+                    CompanyId = _companyId,
+                    BillDate = DateTime.Today,
+                    ReceiveMode = "Store",
+                    Status = "Draft",
+                };
+
+            var (no, seq) = await Seq.NextAsync(_companyId, "CPB", "CPB");
+            _bill.BillNo = no;
+            _bill.BillNoSeq = seq;
+
+            AddLine();
+            return;
+        }
+
+        var existing = await Db.ConstructionPurchaseBills
+            .Include(x => x.Lines)
+            .FirstOrDefaultAsync(x => x.CompanyId == _companyId && x.ConstructionPurchaseBillId == Id);
+
+        if (existing == null)
+        {
+            _err = "Bill not found.";
+            _bill = new ConstructionPurchaseBill { CompanyId = _companyId };
+            return;
+        }
+
+        _bill = existing;
+        if (_bill.Lines.Count == 0) AddLine();
+    }
+
+    // ---- bind:after handlers (NO duplicate onchange/oninput) ----
+    private void AfterModeChanged()
+    {
+        _msg = null;
+        _err = null;
+    }
+
+    private void AfterVendorChanged()
+    {
+        var v = _vendors.FirstOrDefault(x => x.Id == _bill.VendorId);
+        if (v != null)
+        {
+            _bill.VendorName = v.Name;
+            _bill.VendorTRN = v.TRN;
+        }
+    }
+
+    private void AfterProjectChanged()
+    {
+        var p = _projects.FirstOrDefault(x => x.Id == _bill.ProjectId);
+        _bill.ProjectName = p?.Text;
+    }
+
+    private void AfterItemChanged(int index)
+    {
+        if (index < 0 || index >= _bill.Lines.Count) return;
+
+        var ln = _bill.Lines[index];
+        var it = _items.FirstOrDefault(x => x.Id == ln.ItemId);
+        if (it != null)
+        {
+            ln.ItemName = it.Name;
+            if (ln.Rate <= 0) ln.Rate = it.Cost;
+            if (ln.VatRate <= 0) ln.VatRate = it.VatPct;
+        }
+        Recalc();
+    }
+
+    private void AddLine()
+    {
+        _bill.Lines.Add(new ConstructionPurchaseBillLine
+            {
+                CompanyId = _companyId,
+                Qty = 1,
+                VatRate = 5m
+            });
+        Recalc();
+    }
+
+    private void RemoveLine(int index)
+    {
+        if (index < 0 || index >= _bill.Lines.Count) return;
+        _bill.Lines.RemoveAt(index);
+        Recalc();
+    }
+
+    private void Recalc()
+    {
+        foreach (var ln in _bill.Lines)
+        {
+            if (ln.Qty < 0) ln.Qty = 0;
+            if (ln.Rate < 0) ln.Rate = 0;
+            if (ln.VatRate < 0) ln.VatRate = 0;
+
+            ln.LineNet = decimal.Round(ln.Qty * ln.Rate, 2);
+            var vr = (ln.VatRate <= 0) ? 0m : (ln.VatRate / 100m);
+            ln.LineVat = decimal.Round(ln.LineNet * vr, 2);
+            ln.LineTotal = decimal.Round(ln.LineNet + ln.LineVat, 2);
+        }
+
+        _bill.SubTotal = decimal.Round(_bill.Lines.Sum(x => x.LineNet), 2);
+        _bill.VatTotal = decimal.Round(_bill.Lines.Sum(x => x.LineVat), 2);
+        _bill.GrandTotal = decimal.Round(_bill.SubTotal + _bill.VatTotal, 2);
+    }
+
+    private async Task Save()
+    {
+        _saving = true;
+        _err = null;
+        _msg = null;
+
+        try
+        {
+            Recalc();
+
+            if (_bill.VendorId <= 0) throw new Exception("Select vendor.");
+            if (_bill.ReceiveMode == "DirectToSite" && (!_bill.ProjectId.HasValue || _bill.ProjectId.Value <= 0))
+                throw new Exception("Direct to Site mode requires Project.");
+            if (_bill.Lines.Count == 0) throw new Exception("Add at least one line.");
+            if (_bill.GrandTotal <= 0) throw new Exception("Total must be greater than 0.");
+
+            _bill.CompanyId = _companyId;
+            _bill.UpdatedAt = DateTime.UtcNow;
+
+            AfterVendorChanged();
+            AfterProjectChanged();
+
+            foreach (var ln in _bill.Lines)
+                ln.CompanyId = _companyId;
+
+            if (_bill.ConstructionPurchaseBillId == 0)
+                Db.ConstructionPurchaseBills.Add(_bill);
+            else
+                Db.ConstructionPurchaseBills.Update(_bill);
+
+            await Db.SaveChangesAsync();
+
+            _msg = "Saved successfully.";
+
+            if (Id <= 0)
+                Nav.NavigateTo($"/construction/purchase-bills/{_bill.ConstructionPurchaseBillId}");
+        }
+        catch (Exception ex)
+        {
+            _err = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task Post()
+    {
+        _saving = true;
+        _err = null;
+        _msg = null;
+
+        try
+        {
+            await Save();
+            await Posting.PostAsync(_companyId, _bill.ConstructionPurchaseBillId);
+
+            var re = await Db.ConstructionPurchaseBills
+                .Include(x => x.Lines)
+                .FirstOrDefaultAsync(x => x.CompanyId == _companyId && x.ConstructionPurchaseBillId == _bill.ConstructionPurchaseBillId);
+
+            if (re != null) _bill = re;
+
+            _msg = "Posted to Accounts (and Inventory if Store mode is wired).";
+        }
+        catch (Exception ex)
+        {
+            _err = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private sealed class VendorVm
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = "";
+        public string? TRN { get; set; }
+    }
+
+    private sealed class ProjectVm
+    {
+        public int? Id { get; set; }
+        public string Text { get; set; } = "";
+    }
+
+    private sealed class ItemVm
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = "";
+        public decimal Cost { get; set; }
+        public decimal VatPct { get; set; }
+    }
+}

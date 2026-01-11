@@ -1,0 +1,459 @@
+﻿@page "/settings/invoice-templates"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+
+@using UaeEInvoice.Data
+@using UaeEInvoice.Services
+@inject InvoiceTemplateService TemplateSvc
+@inject NavigationManager Nav
+
+<PageTitle>Invoice Templates</PageTitle>
+
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+
+<div class="tpl container-xxl py-4">
+    <div class="hero mb-3">
+        <div class="d-flex align-items-start justify-content-between flex-wrap gap-3">
+            <div>
+                <div class="kicker">TEMPLATE STUDIO</div>
+                <h2 class="title mb-1">Invoice Templates</h2>
+                <div class="sub">Pick from 50 premium samples or build your own. Clone, edit, and use per invoice.</div>
+            </div>
+
+            <div class="d-flex gap-2">
+                <button class="btn btn-glass" @onclick="Reload" disabled="@_loading">
+                    <i class="bi bi-arrow-clockwise me-1"></i> Refresh
+                </button>
+                <button class="btn btn-primary btn-prem" @onclick="GoNew">
+                    <i class="bi bi-stars me-1"></i> Create your own template
+                </button>
+            </div>
+        </div>
+
+        <div class="filters mt-3">
+            <div class="row g-2 align-items-end">
+                <div class="col-12 col-md-5">
+                    <label class="form-label mut">Search</label>
+                    <input class="form-control ip" placeholder="Search by name / industry..."
+                           @bind="_search" @bind:event="oninput" />
+                </div>
+
+                <div class="col-6 col-md-3">
+                    <label class="form-label mut">Industry</label>
+                    <select class="form-select ip" @bind="_industry">
+                        <option>All</option>
+                        @foreach (var x in _industryOptions)
+                        {
+                            <option value="@x">@x</option>
+                        }
+                    </select>
+                </div>
+
+                <div class="col-6 col-md-2">
+                    <label class="form-label mut">Style</label>
+                    <select class="form-select ip" @bind="_baseKey">
+                        <option value="All">All</option>
+                        <option value="modern">Modern</option>
+                        <option value="classic">Classic</option>
+                        <option value="compact">Compact</option>
+                        <option value="elegant">Elegant</option>
+                        <option value="construction">Construction</option>
+                    </select>
+                </div>
+
+                <div class="col-12 col-md-2">
+                    <button class="btn btn-outline-light w-100 btn-filter" @onclick="Reload" disabled="@_loading">
+                        <i class="bi bi-funnel me-1"></i> Apply
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_err))
+    {
+        <div class="alert alert-danger py-2">@_err</div>
+    }
+
+    @if (_loading)
+    {
+        <div class="sk row g-3">
+            @for (int i = 0; i < 8; i++)
+            {
+                <div class="col-12 col-md-6 col-lg-4">
+                    <div class="sk-card"></div>
+                </div>
+            }
+        </div>
+    }
+    else
+    {
+        <div class="row g-3">
+            @foreach (var t in _items)
+            {
+                var settings = InvoiceTemplateSettings.FromJson(t.SettingsJson);
+
+                <div class="col-12 col-md-6 col-lg-4">
+                    <div class="cardx">
+                        <div class="top">
+                            <div class="d-flex align-items-center justify-content-between gap-2">
+                                <div class="nm">@t.Name</div>
+                                <div class="badges">
+                                    @if (t.IsSystem)
+                                    {
+                                        <span class="badge bg-dark-subtle text-light border border-light-subtle">Sample</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge bg-success-subtle text-success border border-success-subtle">My</span>
+                                    }
+                                </div>
+                            </div>
+                            <div class="mut small">@((t.IndustryTag ?? "General")) • @t.BaseKey</div>
+                        </div>
+
+                        <div class="thumb">
+                            <div class="thumb-scale">
+                                <Components.InvoiceTemplatePreview Settings="settings" />
+                            </div>
+                        </div>
+
+                        <div class="actions">
+                            <button class="btn btn-sm btn-glass" @onclick="() => Preview(t.InvoiceTemplateId)">
+                                <i class="bi bi-eye me-1"></i> Preview
+                            </button>
+
+                            @if (t.IsSystem)
+                            {
+                                <button class="btn btn-sm btn-primary btn-prem" @onclick="() => Clone(t.InvoiceTemplateId)">
+                                    <i class="bi bi-files me-1"></i> Clone
+                                </button>
+                            }
+                            else
+                            {
+                                <button class="btn btn-sm btn-primary btn-prem" @onclick="() => Edit(t.InvoiceTemplateId)">
+                                    <i class="bi bi-pencil-square me-1"></i> Edit
+                                </button>
+
+                                <button class="btn btn-sm btn-outline-danger" @onclick="() => Delete(t.InvoiceTemplateId)">
+                                    <i class="bi bi-trash3 me-1"></i> Remove
+                                </button>
+                            }
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+
+        @if (_items.Count == 0)
+        {
+            <div class="empty mt-4">
+                <div class="ic"><i class="bi bi-layout-text-window-reverse"></i></div>
+                <div class="h">No templates found</div>
+                <div class="p">Try changing filters or create your own.</div>
+                <button class="btn btn-primary btn-prem" @onclick="GoNew">
+                    <i class="bi bi-stars me-1"></i> Create your own template
+                </button>
+            </div>
+        }
+    }
+
+    <!-- Preview Modal -->
+    @if (_previewId is not null)
+    {
+        <div class="modalx-backdrop" @onclick="ClosePreview">
+            <div class="modalx" @onclick:stopPropagation="true">
+                <div class="modalx-h">
+                    <div>
+                        <div class="modalx-t">Template Preview</div>
+                        <div class="mut small">Live render preview</div>
+                    </div>
+                    <button class="btn btn-sm btn-glass" @onclick="ClosePreview">
+                        <i class="bi bi-x-lg"></i>
+                    </button>
+                </div>
+
+                <div class="modalx-b">
+                    <Components.InvoiceTemplatePreview Settings="_previewSettings" />
+                </div>
+
+                <div class="modalx-f">
+                    <button class="btn btn-glass" @onclick="ClosePreview">Close</button>
+                    @if (_previewIsSystem)
+                    {
+                        <button class="btn btn-primary btn-prem" @onclick="() => Clone(_previewId!.Value)">
+                            <i class="bi bi-files me-1"></i> Clone to My Templates
+                        </button>
+                    }
+                    else
+                    {
+                        <button class="btn btn-primary btn-prem" @onclick="() => Edit(_previewId!.Value)">
+                            <i class="bi bi-pencil-square me-1"></i> Edit Template
+                        </button>
+                    }
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private bool _loading = true;
+    private string? _err;
+
+    private string? _search;
+    private string _industry = "All";
+    private string _baseKey = "All";
+
+    private List<string> _industryOptions = new();
+    private List<InvoiceTemplate> _items = new();
+
+    private int? _previewId;
+    private InvoiceTemplateSettings _previewSettings = new();
+    private bool _previewIsSystem;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Reload();
+    }
+
+    private async Task Reload()
+    {
+        _loading = true;
+        _err = null;
+
+        try
+        {
+            _items = await TemplateSvc.GetLibraryAsync(_search, _industry, _baseKey);
+
+            _industryOptions = _items
+                .Select(x => x.IndustryTag)
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Distinct()
+                .OrderBy(x => x)
+                .Cast<string>()
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            _err = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void GoNew() => Nav.NavigateTo("/settings/invoice-templates/new");
+
+    private async Task Clone(int templateId)
+    {
+        try
+        {
+            var newId = await TemplateSvc.CloneToCompanyAsync(templateId);
+            // ✅ FIX route
+            Nav.NavigateTo($"/settings/invoice-templates/{newId}");
+        }
+        catch (Exception ex)
+        {
+            _err = ex.Message;
+        }
+    }
+
+    // ✅ FIX: your editor route is /settings/invoice-templates/{Id:int}
+    // private void Edit(int id) => Nav.NavigateTo($"/settings/invoice-templates/{id}");
+    private void Edit(int id)
+    {
+        // ✅ FIX route
+        Nav.NavigateTo($"/settings/invoice-templates/{id}");
+    }
+
+    private async Task Delete(int id)
+    {
+        try
+        {
+            await TemplateSvc.SoftDeleteAsync(id);
+            await Reload();
+        }
+        catch (Exception ex)
+        {
+            _err = ex.Message;
+        }
+    }
+
+    private async Task Preview(int id)
+    {
+        var t = await TemplateSvc.GetAsync(id);
+        if (t == null) return;
+
+        _previewId = id;
+        _previewIsSystem = t.IsSystem;
+        _previewSettings = InvoiceTemplateSettings.FromJson(t.SettingsJson);
+    }
+
+    private void ClosePreview() => _previewId = null;
+}
+
+
+<style>
+/* Ultra premium page (scoped) */
+.tpl {
+    --ring: rgba(59,130,246,.25);
+    --glass: rgba(255,255,255,.06);
+    --brd: rgba(255,255,255,.10);
+    --txt: #e5e7eb;
+    --mut: rgba(229,231,235,.75);
+    color: var(--txt);
+}
+
+.hero{
+    border-radius: 24px;
+    padding: 22px;
+    background:
+        radial-gradient(900px 420px at 12% 10%, rgba(59,130,246,.18), transparent 60%),
+        radial-gradient(800px 360px at 88% 20%, rgba(139,92,246,.14), transparent 60%),
+        linear-gradient(180deg, #0b1220, #070b13);
+    border: 1px solid var(--brd);
+    box-shadow: 0 18px 55px rgba(0,0,0,.35);
+}
+.kicker{ font-size: 12px; letter-spacing:.22em; font-weight:900; opacity:.82; }
+.title{ font-weight: 900; letter-spacing:.02em; }
+.sub{ color: var(--mut); }
+
+.filters .ip{
+    background: rgba(255,255,255,.04);
+    border: 1px solid rgba(255,255,255,.10);
+    color: var(--txt);
+}
+.filters .ip:focus{
+    box-shadow: 0 0 0 .22rem var(--ring);
+    border-color: rgba(59,130,246,.35);
+}
+.mut{ color: var(--mut); }
+
+.btn-glass{
+    background: rgba(255,255,255,.06);
+    border: 1px solid rgba(255,255,255,.12);
+    color: var(--txt);
+}
+.btn-glass:hover{ background: rgba(255,255,255,.09); }
+
+.btn-prem{
+    border: 0;
+    background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+    box-shadow: 0 14px 30px rgba(59,130,246,.25);
+}
+.btn-prem:hover{ filter: brightness(1.05); }
+
+.btn-filter{
+    border-color: rgba(255,255,255,.18);
+    color: var(--txt);
+}
+
+.cardx{
+    border-radius: 22px;
+    overflow:hidden;
+    border: 1px solid rgba(255,255,255,.10);
+    background: rgba(255,255,255,.03);
+    box-shadow: 0 18px 55px rgba(0,0,0,.25);
+    transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease;
+}
+.cardx:hover{
+    transform: translateY(-3px);
+    border-color: rgba(59,130,246,.35);
+    box-shadow: 0 22px 65px rgba(0,0,0,.34);
+}
+.cardx .top{ padding: 14px 14px 10px; }
+.cardx .nm{ font-weight: 900; }
+.cardx .thumb{
+    padding: 10px 14px 0;
+}
+.thumb{
+    height: 220px;
+    overflow:hidden;
+}
+.thumb-scale{
+    transform: scale(.56);
+    transform-origin: top left;
+    width: 180%;
+}
+.actions{
+    display:flex; gap: 8px;
+    padding: 12px 14px 14px;
+    border-top: 1px solid rgba(255,255,255,.08);
+    background: rgba(0,0,0,.12);
+}
+    /* ✅ Ensure thumb area stays white and readable */
+    .thumb {
+        background: #fff;
+        border-radius: 18px;
+    }
+
+    .thumb-scale {
+        background: #fff !important;
+        color: #0f172a !important;
+    }
+
+.empty{
+    text-align:center;
+    padding: 26px;
+    border-radius: 24px;
+    border: 1px solid rgba(255,255,255,.10);
+    background: rgba(255,255,255,.03);
+}
+.empty .ic{
+    width: 56px; height: 56px; border-radius: 18px;
+    display:inline-flex; align-items:center; justify-content:center;
+    background: rgba(255,255,255,.05);
+    border: 1px solid rgba(255,255,255,.10);
+    font-size: 22px;
+    margin-bottom: 10px;
+}
+.empty .h{ font-weight: 900; font-size: 18px; }
+.empty .p{ color: rgba(229,231,235,.75); margin-bottom: 12px; }
+
+/* skeleton */
+.sk-card{
+    height: 320px;
+    border-radius: 22px;
+    background: linear-gradient(90deg, rgba(255,255,255,.04), rgba(255,255,255,.08), rgba(255,255,255,.04));
+    animation: shimmer 1.2s infinite;
+    border: 1px solid rgba(255,255,255,.10);
+}
+@@keyframes shimmer{
+    0% { background-position: 0 0; }
+    100% { background-position: 400px 0; }
+}
+
+/* modal */
+.modalx-backdrop{
+    position: fixed; inset:0;
+    background: rgba(0,0,0,.62);
+    display:flex; align-items:center; justify-content:center;
+    padding: 18px;
+    z-index: 2000;
+}
+.modalx{
+    width: min(980px, 100%);
+    max-height: 92vh;
+    overflow:auto;
+    border-radius: 24px;
+    border: 1px solid rgba(255,255,255,.12);
+    background:
+        radial-gradient(900px 420px at 10% 10%, rgba(59,130,246,.14), transparent 60%),
+        linear-gradient(180deg, #0b1220, #070b13);
+    box-shadow: 0 25px 85px rgba(0,0,0,.55);
+}
+.modalx-h, .modalx-f{
+    display:flex; align-items:center; justify-content:space-between;
+    padding: 14px 16px;
+    border-bottom: 1px solid rgba(255,255,255,.10);
+}
+.modalx-f{
+    border-top: 1px solid rgba(255,255,255,.10);
+    border-bottom: 0;
+    justify-content:flex-end;
+    gap: 10px;
+}
+.modalx-b{ padding: 16px; }
+.modalx-t{ font-weight: 900; font-size: 18px; }
+</style>

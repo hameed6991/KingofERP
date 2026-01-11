@@ -1,0 +1,680 @@
+﻿@page "/purchase-create"
+@using System.Data
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Authorization
+@using UaeEInvoice.Data
+@using UaeEInvoice.Services
+@using UaeEInvoice.Services.Auth
+
+@inject AppDbContext Db
+@inject LedgerService Ledger
+@inject InventoryPostingService Stock
+@inject NavigationManager Nav
+@inject ICurrentCompany CurrentCompany
+@inject AccountRoleService Roles
+
+@attribute [Authorize(Roles = "Admin,Purchase")]
+
+<PageTitle>New Purchase</PageTitle>
+
+<style>
+    .hero {
+        border-radius: 22px;
+        border: 1px solid rgba(0,0,0,.06);
+        background: linear-gradient(135deg, rgba(13,110,253,.14), rgba(255,255,255,0));
+        padding: 18px;
+    }
+
+    .soft-card {
+        border: 1px solid rgba(0,0,0,.06);
+        border-radius: 22px;
+    }
+
+    .soft-shadow {
+        box-shadow: 0 10px 30px rgba(0,0,0,.06);
+    }
+
+    .table thead th {
+        font-size: .78rem;
+        letter-spacing: .08em;
+        color: rgba(0,0,0,.55);
+    }
+
+    .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: .45rem;
+        padding: .30rem .75rem;
+        border-radius: 999px;
+        border: 1px solid rgba(0,0,0,.08);
+        background: #fff;
+        font-size: .85rem;
+        white-space: nowrap;
+    }
+
+    .muted {
+        color: rgba(0,0,0,.55);
+    }
+</style>
+
+<div class="container-xxl py-4">
+
+    <div class="hero mb-3">
+        <div class="d-flex align-items-start justify-content-between flex-wrap gap-2">
+            <div>
+                <h2 class="mb-1 fw-bold">New Purchase</h2>
+                <div class="muted">Record purchase invoice from vendor (for VAT input + stock).</div>
+                <div class="d-flex flex-wrap gap-2 mt-2">
+                    <span class="chip">🏢 CompanyId: @_companyId</span>
+                    <span class="chip">🧾 Currency: AED</span>
+                    <span class="chip">📌 Lines: @_lines.Count</span>
+                </div>
+            </div>
+
+            <div class="d-flex gap-2">
+                <button class="btn btn-outline-secondary" type="button" @onclick="GoBack" disabled="@_loading">Back</button>
+                <button class="btn btn-primary" type="button" @onclick="Save" disabled="@_loading">
+                    @(_loading ? "Saving..." : "Save Purchase")
+                </button>
+            </div>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_toast))
+    {
+        <div class="alert alert-success soft-card soft-shadow p-3">@_toast</div>
+    }
+    @if (!string.IsNullOrWhiteSpace(_error))
+    {
+        <div class="alert alert-danger soft-card soft-shadow p-3">@_error</div>
+    }
+
+    <div class="card soft-card soft-shadow mb-3">
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-12 col-md-3">
+                    <label class="form-label">Purchase No</label>
+                    <!-- ✅ Auto-generated. Final number is confirmed on Save inside SERIALIZABLE transaction -->
+                    <input class="form-control" value="@_purchaseNo" readonly />
+                    <div class="form-text">Auto sequence: PI-000001, PI-000002 ... (per company)</div>
+                </div>
+
+                <div class="col-12 col-md-3">
+                    <label class="form-label">Purchase Date</label>
+                    <input type="date" class="form-control"
+                           value="@_purchaseDate.ToString("yyyy-MM-dd")"
+                           @onchange="PurchaseDateChanged" />
+                </div>
+
+                <div class="col-12 col-md-3">
+                    <label class="form-label">Due Date</label>
+                    <input type="date" class="form-control"
+                           value="@_dueDate.ToString("yyyy-MM-dd")"
+                           @onchange="PurchaseDueDateChanged" />
+                    <div class="form-text">Default: Purchase Date + @_defaultCreditDays days</div>
+                </div>
+
+                <div class="col-12 col-md-3">
+                    <label class="form-label">Vendor <span class="text-danger">*</span></label>
+                    <select class="form-select" value="@_vendorId" @onchange="VendorChanged" disabled="@_loading">
+                        <option value="0">-- Select Vendor --</option>
+                        @foreach (var v in _vendors)
+                        {
+                            <option value="@v.Id">@v.Display</option>
+                        }
+                    </select>
+
+                    @if (!string.IsNullOrWhiteSpace(_vendorTrn))
+                    {
+                        <div class="text-muted small mt-1">TRN: @_vendorTrn</div>
+                    }
+                    @if (_vendorId > 0)
+                    {
+                        <div class="text-muted small mt-1">Items for this vendor: <b>@_items.Count</b></div>
+                    }
+                </div>
+
+                <div class="col-12 col-md-6">
+                    <label class="form-label">Vendor Invoice No (Optional)</label>
+                    <input class="form-control" @bind="_vendorInvoiceNo" @bind:event="onchange" placeholder="Supplier bill number" />
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card soft-card soft-shadow">
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <div class="fw-semibold">Purchase Lines</div>
+                <button class="btn btn-sm btn-outline-primary" type="button" @onclick="AddLine" disabled="@_loading">+ Add Line</button>
+            </div>
+
+            @if (_vendorId <= 0)
+            {
+                <div class="alert alert-info soft-card p-3">
+                    Please select a vendor first. Then items dropdown will load vendor-wise items.
+                </div>
+            }
+
+            <div class="table-responsive">
+                <table class="table align-middle">
+                    <thead>
+                        <tr class="text-uppercase small text-muted">
+                            <th style="min-width:320px;">Item</th>
+                            <th class="text-end" style="width:110px;">Qty</th>
+                            <th class="text-end" style="width:150px;">Rate</th>
+                            <th class="text-end" style="width:140px;">VAT %</th>
+                            <th class="text-end" style="width:140px;">VAT</th>
+                            <th class="text-end" style="width:160px;">Total</th>
+                            <th class="text-end" style="width:90px;"></th>
+                        </tr>
+                    </thead>
+
+                    <tbody>
+                        @for (int i = 0; i < _lines.Count; i++)
+                        {
+                            var idx = i;
+                            <tr @key="_lines[idx].RowId">
+                                <td>
+                                    <select class="form-select" value="@_lines[idx].ItemId"
+                                            @onchange="async e => await ItemChanged(idx, e)"
+                                            disabled="@(_vendorId <= 0)">
+                                        <option value="0">-- Select Item --</option>
+
+                                        @foreach (var it in _items)
+                                        {
+                                            <option value="@it.Id">@it.Display</option>
+                                        }
+                                    </select>
+
+                                    @if (_vendorId > 0 && _items.Count == 0)
+                                    {
+                                        <div class="text-danger small mt-1">
+                                            No items mapped to this vendor. Go to Items → set vendor for items.
+                                        </div>
+                                    }
+                                </td>
+
+                                <td class="text-end">
+                                    <input type="number" class="form-control text-end" step="1" min="1"
+                                           value="@_lines[idx].Qty"
+                                           @onchange="async e => await QtyChanged(idx, e)" />
+                                </td>
+
+                                <td class="text-end">
+                                    <input type="number" class="form-control text-end" step="0.01" min="0"
+                                           value="@_lines[idx].Rate.ToString("0.00")"
+                                           @onchange="async e => await RateChanged(idx, e)" />
+                                </td>
+
+                                <td class="text-end">
+                                    <input type="number" class="form-control text-end" step="0.01" min="0" max="100"
+                                           value="@_lines[idx].VatPercent.ToString("0.##")"
+                                           @onchange="async e => await VatPercentChanged(idx, e)" />
+                                    <div class="small text-muted">Example: 5 = 5%</div>
+                                </td>
+
+                                <td class="text-end">@_lines[idx].LineVat.ToString("0.00")</td>
+
+                                <td class="text-end"><b>@_lines[idx].LineTotal.ToString("0.00")</b></td>
+
+                                <td class="text-end">
+                                    <button class="btn btn-sm btn-outline-danger"
+                                            type="button"
+                                            title="Remove line"
+                                            @onclick="() => RemoveLine(idx)"
+                                            disabled="@(_lines.Count <= 1)">
+                                        X
+                                    </button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+
+            <hr />
+
+            <div class="d-flex justify-content-end">
+                <div style="min-width:320px;">
+                    <div class="d-flex justify-content-between py-1">
+                        <div class="text-muted">Subtotal</div>
+                        <div class="fw-semibold">@_subTotal.ToString("0.00")</div>
+                    </div>
+                    <div class="d-flex justify-content-between py-1">
+                        <div class="text-muted">VAT</div>
+                        <div class="fw-semibold">@_vatTotal.ToString("0.00")</div>
+                    </div>
+                    <div class="d-flex justify-content-between py-2 border-top mt-2">
+                        <div class="fw-bold">Grand Total</div>
+                        <div class="fw-bold fs-5">@_grandTotal.ToString("0.00")</div>
+                    </div>
+                    <div class="small text-muted mt-1">Currency: AED</div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+</div>
+
+@code {
+    private bool _loading;
+    private string? _error;
+    private string? _toast;
+
+    private int _companyId;
+
+    private string _purchaseNo = "";
+    private DateTime _purchaseDate = DateTime.Today;
+
+    private DateTime _dueDate = DateTime.Today.AddDays(30);
+    private bool _dueDateManual = false;
+    private int _defaultCreditDays = 30;
+
+    private int _vendorId;
+    private string _vendorName = "";
+    private string? _vendorTrn;
+    private string? _vendorInvoiceNo;
+
+    private decimal _subTotal;
+    private decimal _vatTotal;
+    private decimal _grandTotal;
+
+    private List<SelectVm> _vendors = new();
+    private List<SelectVm> _items = new(); // vendor-wise items only
+
+    private List<LineVm> _lines = new() { new LineVm { Qty = 1, VatPercent = 5m } };
+
+    protected override async Task OnInitializedAsync()
+    {
+        _loading = true;
+        _error = null;
+
+        try
+        {
+            await CurrentCompany.RefreshAsync();
+            _companyId = CurrentCompany.CompanyId;
+
+            if (_companyId <= 0)
+                throw new Exception("CompanyId not found from login. Please logout & login again.");
+
+            Db.ChangeTracker.Clear();
+
+            _vendors = await Db.Vendors.AsNoTracking()
+                .Where(x => x.CompanyId == _companyId)
+                .OrderBy(x => x.VendorName)
+                .Select(x => new SelectVm { Id = x.VendorId, Display = x.VendorName ?? ("Vendor #" + x.VendorId) })
+                .ToListAsync();
+
+            _items = new List<SelectVm>();
+
+            // ✅ Preview number for UI (final number will be re-confirmed on Save)
+            _purchaseNo = await NextPurchaseNoPreviewAsync();
+
+            _purchaseDate = DateTime.Today;
+            _dueDate = _purchaseDate.AddDays(_defaultCreditDays);
+            _dueDateManual = false;
+
+            RecalcAll();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.InnerException?.Message ?? ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void GoBack() => Nav.NavigateTo("/purchases");
+
+    private Task PurchaseDateChanged(ChangeEventArgs e)
+    {
+        if (DateTime.TryParse(e?.Value?.ToString(), out var dt))
+        {
+            _purchaseDate = dt.Date;
+            if (!_dueDateManual) _dueDate = _purchaseDate.AddDays(_defaultCreditDays);
+        }
+        return Task.CompletedTask;
+    }
+
+    private Task PurchaseDueDateChanged(ChangeEventArgs e)
+    {
+        if (DateTime.TryParse(e?.Value?.ToString(), out var dt))
+        {
+            _dueDate = dt.Date;
+            _dueDateManual = true;
+        }
+        return Task.CompletedTask;
+    }
+
+    private async Task VendorChanged(ChangeEventArgs e)
+    {
+        _vendorId = ParseInt(e?.Value);
+        _vendorName = "";
+        _vendorTrn = null;
+
+        _items = new List<SelectVm>();
+        foreach (var ln in _lines)
+        {
+            ln.ItemId = 0;
+            ln.ItemName = null;
+            ln.Rate = 0;
+            ln.VatPercent = 5m;
+            ln.LineNet = ln.LineVat = ln.LineTotal = 0;
+        }
+
+        if (_vendorId > 0)
+        {
+            var v = await Db.Vendors.AsNoTracking()
+                .FirstOrDefaultAsync(x => x.CompanyId == _companyId && x.VendorId == _vendorId);
+
+            if (v != null)
+            {
+                _vendorName = v.VendorName ?? "";
+                _vendorTrn = v.TRN;
+            }
+
+            _items = await Db.Items.AsNoTracking()
+                .Where(x => x.CompanyId == _companyId && x.IsActive && x.VendorId == _vendorId)
+                .OrderBy(x => x.Name)
+                .Select(x => new SelectVm { Id = x.ItemId, Display = x.Name ?? ("Item #" + x.ItemId) })
+                .ToListAsync();
+        }
+
+        RecalcAll();
+    }
+
+    private void AddLine()
+    {
+        _lines.Add(new LineVm { Qty = 1, VatPercent = 5m });
+        RecalcAll();
+    }
+
+    private void RemoveLine(int i)
+    {
+        if (_lines.Count <= 1) return;
+        if (i < 0 || i >= _lines.Count) return;
+        _lines.RemoveAt(i);
+        RecalcAll();
+    }
+
+    private async Task ItemChanged(int i, ChangeEventArgs e)
+    {
+        if (i < 0 || i >= _lines.Count) return;
+
+        var id = ParseInt(e?.Value);
+        _lines[i].ItemId = id;
+        _lines[i].ItemName = null;
+
+        if (_vendorId <= 0)
+        {
+            _error = "Select Vendor first.";
+            return;
+        }
+
+        if (id > 0)
+        {
+            var it = await Db.Items.AsNoTracking()
+                .FirstOrDefaultAsync(x => x.CompanyId == _companyId && x.ItemId == id && x.VendorId == _vendorId);
+
+            if (it == null)
+            {
+                _lines[i].ItemId = 0;
+                _lines[i].ItemName = null;
+                _error = "Selected item does not belong to this vendor.";
+                Recalc(i);
+                return;
+            }
+
+            _lines[i].ItemName = it.Name ?? "";
+            if (it.CostPrice > 0) _lines[i].Rate = it.CostPrice;
+
+            var pct = (it.VatRate <= 0 ? 0.05m : it.VatRate) * 100m;
+            _lines[i].VatPercent = ClampPct(pct);
+        }
+
+        Recalc(i);
+    }
+
+    private Task QtyChanged(int i, ChangeEventArgs e)
+    {
+        if (i < 0 || i >= _lines.Count) return Task.CompletedTask;
+        var n = ParseInt(e?.Value);
+        if (n <= 0) n = 1;
+        _lines[i].Qty = n;
+        Recalc(i);
+        return Task.CompletedTask;
+    }
+
+    private Task RateChanged(int i, ChangeEventArgs e)
+    {
+        if (i < 0 || i >= _lines.Count) return Task.CompletedTask;
+        var d = ParseDec(e?.Value);
+        if (d < 0) d = 0;
+        _lines[i].Rate = d;
+        Recalc(i);
+        return Task.CompletedTask;
+    }
+
+    private Task VatPercentChanged(int i, ChangeEventArgs e)
+    {
+        if (i < 0 || i >= _lines.Count) return Task.CompletedTask;
+        var d = ParseDec(e?.Value);
+        _lines[i].VatPercent = ClampPct(d);
+        Recalc(i);
+        return Task.CompletedTask;
+    }
+
+    private void Recalc(int i)
+    {
+        if (i < 0 || i >= _lines.Count) return;
+
+        var ln = _lines[i];
+
+        var qty = ln.Qty <= 0 ? 1 : ln.Qty;
+        var rate = ln.Rate < 0 ? 0 : ln.Rate;
+
+        var net = qty * rate;
+        var vatRate = ClampPct(ln.VatPercent) / 100m;
+        var vat = net * vatRate;
+
+        ln.LineNet = Round2(net);
+        ln.LineVat = Round2(vat);
+        ln.LineTotal = Round2(net + vat);
+
+        RecalcAll();
+    }
+
+    private void RecalcAll()
+    {
+        foreach (var ln in _lines)
+        {
+            if (ln.Qty <= 0) ln.Qty = 1;
+            ln.VatPercent = ClampPct(ln.VatPercent);
+        }
+
+        _subTotal = Round2(_lines.Sum(x => x.LineNet));
+        _vatTotal = Round2(_lines.Sum(x => x.LineVat));
+        _grandTotal = Round2(_lines.Sum(x => x.LineTotal));
+    }
+
+    private static decimal ClampPct(decimal p)
+    {
+        if (p < 0) return 0m;
+        if (p > 100m) return 100m;
+        return p;
+    }
+
+    private decimal Round2(decimal v) => Math.Round(v, 2, MidpointRounding.AwayFromZero);
+
+    private async Task Save()
+    {
+        _toast = null;
+        _error = null;
+
+        if (_loading) return;
+        _loading = true;
+
+        try
+        {
+            if (_companyId <= 0) throw new Exception("Company setup not found.");
+            if (_vendorId <= 0) throw new Exception("Please select vendor.");
+
+            if (_dueDate.Date < _purchaseDate.Date)
+                throw new Exception("Due Date cannot be before Purchase Date.");
+
+            // recalc all lines
+            for (int i = 0; i < _lines.Count; i++) Recalc(i);
+
+            var validLines = _lines.Where(x => x.ItemId > 0 && x.Qty > 0).ToList();
+            if (validLines.Count == 0)
+                throw new Exception("Please add at least 1 item line.");
+
+            // ensure vendor-wise items only
+            var itemIds = validLines.Select(x => x.ItemId).Distinct().ToList();
+            var invalid = await Db.Items.AsNoTracking()
+                .AnyAsync(x => x.CompanyId == _companyId && itemIds.Contains(x.ItemId) && x.VendorId != _vendorId);
+
+            if (invalid)
+                throw new Exception("Some selected items do not belong to selected vendor.");
+
+            // Resolve accounts
+            var ap = await Roles.RequirePrimaryAccountNoAsync(_companyId, AccountRoleKeys.AP, "Accounts Payable (AP)");
+            var invAcc = await Roles.RequirePrimaryAccountNoAsync(_companyId, AccountRoleKeys.INVENTORY, "Inventory");
+            var vatIn = await Roles.RequirePrimaryAccountNoAsync(_companyId, AccountRoleKeys.VAT_INPUT, "VAT Input");
+
+            // ✅ SERIALIZABLE = safe per-company numbering
+            using var tx = await Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+
+            // ✅ IMPORTANT:
+            // Your PurchaseInvoice model must contain: public int PurchaseNoSeq { get; set; }
+            // And UNIQUE index: (CompanyId, PurchaseNoSeq)
+            var nextSeq = await NextPurchaseSeqAsync();
+            var finalPurchaseNo = FormatPurchaseNo(nextSeq);
+
+            var purchase = new PurchaseInvoice
+                {
+                    CompanyId = _companyId,
+                    PurchaseNoSeq = nextSeq,                     // ✅ NEW (required)
+                    PurchaseNo = finalPurchaseNo,                // ✅ PI-000001, PI-000002...
+                    PurchaseDate = _purchaseDate.Date,
+                    DueDate = _dueDate.Date,
+                    VendorId = _vendorId,
+                    VendorName = _vendorName ?? "",
+                    VendorTRN = _vendorTrn,
+                    VendorInvoiceNo = string.IsNullOrWhiteSpace(_vendorInvoiceNo) ? null : _vendorInvoiceNo.Trim(),
+                    SubTotal = _subTotal,
+                    VatTotal = _vatTotal,
+                    GrandTotal = _grandTotal
+                };
+
+            Db.PurchaseInvoices.Add(purchase);
+            await Db.SaveChangesAsync();
+
+            foreach (var ln in validLines)
+            {
+                Db.PurchaseInvoiceLines.Add(new PurchaseInvoiceLine
+                    {
+                        CompanyId = _companyId,
+                        PurchaseInvoiceId = purchase.PurchaseInvoiceId,
+                        ItemId = ln.ItemId,
+                        ItemName = ln.ItemName ?? "",
+                        Qty = ln.Qty,
+                        Rate = ln.Rate,
+                        VatRate = ClampPct(ln.VatPercent) / 100m,
+                        LineNet = ln.LineNet,
+                        LineVat = ln.LineVat,
+                        LineTotal = ln.LineTotal
+                    });
+            }
+
+            await Stock.PostAsync(
+                companyId: _companyId,
+                txnDate: _purchaseDate.Date,
+                txnType: InventoryPostingService.TxnPurchase,
+                refNo: finalPurchaseNo,
+                notes: _vendorName,
+                lines: validLines.Select(ln => new InventoryPostingService.StockLine(ln.ItemId, ln.ItemName ?? "", ln.Qty, ln.Rate)),
+                validateStockForOut: false
+            );
+
+            await Db.SaveChangesAsync();
+
+            // Ledger: Inventory Dr, AP Cr
+            await Ledger.PostAsync(_companyId, purchase.PurchaseDate, "PINV", finalPurchaseNo,
+                debitAccountNo: invAcc, creditAccountNo: ap, amount: purchase.SubTotal,
+                narration: $"Purchase {finalPurchaseNo} Inventory", refId: purchase.PurchaseInvoiceId);
+
+            if (purchase.VatTotal > 0)
+            {
+                await Ledger.PostAsync(_companyId, purchase.PurchaseDate, "PINV", finalPurchaseNo,
+                    debitAccountNo: vatIn, creditAccountNo: ap, amount: purchase.VatTotal,
+                    narration: $"Purchase {finalPurchaseNo} VAT Input", refId: purchase.PurchaseInvoiceId);
+            }
+
+            await tx.CommitAsync();
+
+            _toast = $"Purchase saved: {finalPurchaseNo}";
+            Nav.NavigateTo("/purchases");
+        }
+        catch (Exception ex)
+        {
+            _error = ex.InnerException?.Message ?? ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    // ----------------- Numbering (Per Company Sequence) -----------------
+
+    private async Task<int> NextPurchaseSeqAsync()
+    {
+        // SERIALIZABLE TX will protect this Max+1 from duplicates
+        var lastSeq = await Db.PurchaseInvoices
+            .Where(x => x.CompanyId == _companyId)
+            .MaxAsync(x => (int?)x.PurchaseNoSeq) ?? 0;
+
+        return lastSeq + 1;
+    }
+
+    private async Task<string> NextPurchaseNoPreviewAsync()
+    {
+        // Just for UI display; final confirmed inside Save() transaction
+        var lastSeq = await Db.PurchaseInvoices.AsNoTracking()
+            .Where(x => x.CompanyId == _companyId)
+            .MaxAsync(x => (int?)x.PurchaseNoSeq) ?? 0;
+
+        return FormatPurchaseNo(lastSeq + 1);
+    }
+
+    private static string FormatPurchaseNo(int seq) => $"PI-{seq:000000}";
+
+    // ----------------- Helpers -----------------
+
+    private int ParseInt(object? v) => int.TryParse(v?.ToString(), out var n) ? n : 0;
+    private decimal ParseDec(object? v) => decimal.TryParse(v?.ToString(), out var n) ? n : 0m;
+
+    private class SelectVm { public int Id { get; set; } public string Display { get; set; } = ""; }
+
+    private class LineVm
+    {
+        public Guid RowId { get; } = Guid.NewGuid();
+
+        public int ItemId { get; set; }
+        public string? ItemName { get; set; }
+
+        public int Qty { get; set; } = 1;
+        public decimal Rate { get; set; }
+
+        public decimal VatPercent { get; set; } = 5m;
+
+        public decimal LineNet { get; set; }
+        public decimal LineVat { get; set; }
+        public decimal LineTotal { get; set; }
+    }
+}

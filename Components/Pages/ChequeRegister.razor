@@ -1,0 +1,705 @@
+﻿@page "/cheques/register"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@implements IAsyncDisposable
+
+@using Microsoft.EntityFrameworkCore
+@using UaeEInvoice.Data
+@using UaeEInvoice.Services.Auth
+@using UaeEInvoice.Services.Cheques
+@using Microsoft.JSInterop
+
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject ICurrentCompany CurrentCompany
+@inject ChequeAccountingService Cheques
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+
+<style>
+    .hero {
+        background: radial-gradient(1200px 500px at 15% 15%, rgba(13,110,253,.10), transparent 65%), radial-gradient(1100px 500px at 85% 10%, rgba(111,66,193,.10), transparent 60%), linear-gradient(180deg, rgba(248,249,250,1) 0%, rgba(255,255,255,1) 60%);
+        border: 1px solid rgba(0,0,0,.06);
+        border-radius: 18px;
+        box-shadow: 0 10px 30px rgba(0,0,0,.05);
+    }
+
+    .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: .5rem;
+        padding: .35rem .65rem;
+        border-radius: 999px;
+        border: 1px solid rgba(0,0,0,.08);
+        background: #fff;
+        font-size: .85rem;
+    }
+
+    .kpi-card {
+        border: 1px solid rgba(0,0,0,.06);
+        border-radius: 16px;
+        box-shadow: 0 10px 25px rgba(0,0,0,.04);
+    }
+
+    .soft-input {
+        border-radius: 12px;
+    }
+
+    .soft-btn {
+        border-radius: 12px;
+    }
+
+    .status-badge {
+        border-radius: 999px;
+        padding: .25rem .6rem;
+        font-weight: 600;
+        font-size: .8rem;
+    }
+</style>
+
+<div class="container-xxl py-4">
+
+    <!-- HERO -->
+    <div class="hero p-3 p-md-4 mb-3">
+        <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+            <div>
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <h2 class="mb-0 fw-bold">Cheque Register</h2>
+
+                    <span class="chip">
+                        📌 Draft → Printed → HandOver/Deposit → Clear/Bounce/Void
+                    </span>
+
+                    <span class="chip">
+                        ⚡ Auto refresh: <b>@_countdown</b>s
+                    </span>
+                </div>
+
+                <div class="text-muted mt-1">
+                    Premium workflow screen with safe status rules + service postings.
+                </div>
+
+                <div class="text-muted small mt-2">
+                    Last refresh: @_lastRefreshText
+                </div>
+            </div>
+
+            <div class="d-flex gap-2">
+                <button class="btn btn-outline-secondary soft-btn"
+                        @onclick="RefreshClicked"
+                        disabled="@(_loading || _acting)">
+                    <i class="bi bi-arrow-clockwise me-1"></i> Refresh
+                </button>
+            </div>
+        </div>
+
+        <!-- KPI row -->
+        <div class="row g-3 mt-2">
+            <div class="col-12 col-md-3">
+                <div class="kpi-card p-3 bg-white">
+                    <div class="text-muted small">Showing</div>
+                    <div class="fs-3 fw-bold">@Filtered.Count</div>
+                    <div class="text-muted">filtered results</div>
+                </div>
+            </div>
+            <div class="col-12 col-md-3">
+                <div class="kpi-card p-3 bg-white">
+                    <div class="text-muted small">PDC due next 7 days</div>
+                    <div class="fs-3 fw-bold">@_due7Count</div>
+                    <div class="text-muted">not cleared</div>
+                </div>
+            </div>
+            <div class="col-12 col-md-3">
+                <div class="kpi-card p-3 bg-white">
+                    <div class="text-muted small">Cleared today</div>
+                    <div class="fs-3 fw-bold">@_clearedTodayCount</div>
+                    <div class="text-muted">cashflow affected</div>
+                </div>
+            </div>
+            <div class="col-12 col-md-3">
+                <div class="kpi-card p-3 bg-white">
+                    <div class="text-muted small">Bounced this month</div>
+                    <div class="fs-3 fw-bold">@_bouncedMonthCount</div>
+                    <div class="text-muted">follow-up needed</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_err))
+    {
+        <div class="alert alert-danger">@_err</div>
+    }
+    @if (!string.IsNullOrWhiteSpace(_msg))
+    {
+        <div class="alert alert-success">@_msg</div>
+    }
+
+    <!-- FILTERS -->
+    <div class="card kpi-card p-3 mb-3">
+        <div class="row g-2 align-items-end">
+            <div class="col-12 col-md-2">
+                <label class="form-label text-muted mb-1">Direction</label>
+                <select class="form-select soft-input" @bind="_fDirection">
+                    <option value="">All</option>
+                    <option value="Outgoing">Outgoing</option>
+                    <option value="Incoming">Incoming</option>
+                </select>
+            </div>
+
+            <div class="col-12 col-md-2">
+                <label class="form-label text-muted mb-1">Status</label>
+                <select class="form-select soft-input" @bind="_fStatus">
+                    <option value="">All</option>
+                    @foreach (var s in Enum.GetValues<ChequeStatus>())
+                    {
+                        <option value="@s">@s</option>
+                    }
+                </select>
+            </div>
+
+            <div class="col-12 col-md-2">
+                <label class="form-label text-muted mb-1">Type</label>
+                <select class="form-select soft-input" @bind="_fType">
+                    <option value="">All</option>
+                    <option value="Normal">Normal</option>
+                    <option value="PDC">PDC</option>
+                </select>
+            </div>
+
+            <div class="col-12 col-md-2">
+                <label class="form-label text-muted mb-1">From</label>
+                <input type="date" class="form-control soft-input" @bind="_from" />
+            </div>
+
+            <div class="col-12 col-md-2">
+                <label class="form-label text-muted mb-1">To</label>
+                <input type="date" class="form-control soft-input" @bind="_to" />
+            </div>
+
+            <div class="col-12 col-md-2">
+                <label class="form-label text-muted mb-1">Party contains</label>
+                <input class="form-control soft-input" @bind="_party" placeholder="Vendor/Customer/Payee" />
+            </div>
+
+            <div class="col-12 col-md-2">
+                <label class="form-label text-muted mb-1">BankAccountNo</label>
+                <input class="form-control soft-input" type="number" @bind="_bankAccNo" placeholder="1010" />
+            </div>
+
+            <div class="col-12 col-md-10 d-flex gap-2 justify-content-md-end">
+                <button class="btn btn-outline-secondary soft-btn"
+                        @onclick="ClearFilters"
+                        disabled="@(_loading || _acting)">
+                    Clear
+                </button>
+                <button class="btn btn-primary soft-btn"
+                        @onclick="ApplyClicked"
+                        disabled="@(_loading || _acting)">
+                    <i class="bi bi-funnel me-1"></i>
+                    @(_loading ? "Loading..." : "Apply")
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- GRID -->
+    <div class="card kpi-card p-3">
+        <div class="table-responsive">
+            <table class="table table-sm align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Date</th>
+                        <th>Cheque Date</th>
+                        <th>Dir</th>
+                        <th>Type</th>
+                        <th>Status</th>
+                        <th>Cheque No</th>
+                        <th>Bank</th>
+                        <th>Payee</th>
+                        <th class="text-end">Amount</th>
+                        <th class="text-end" style="width:520px;">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var c in Filtered)
+                    {
+                        <tr>
+                            <td>@c.IssueDate.ToString("yyyy-MM-dd")</td>
+                            <td>@c.ChequeDate.ToString("yyyy-MM-dd")</td>
+                            <td>@c.Direction</td>
+                            <td>@c.Type</td>
+                            <td>
+                                <span class="status-badge @GetStatusCss(c.Status)">
+                                    @c.Status
+                                </span>
+                            </td>
+                            <td class="fw-semibold">@c.ChequeNo</td>
+                            <td>@c.BankAccountNo</td>
+                            <td>@c.PayeeName</td>
+                            <td class="text-end">@c.Amount.ToString("0.00")</td>
+                            <td class="text-end">
+                                <button class="btn btn-outline-primary btn-sm soft-btn me-1"
+                                        disabled="@(_acting || c.Status != ChequeStatus.Draft)"
+                                        @onclick="() => ActPrint(c.ChequeTransactionId)">
+                                    Print
+                                </button>
+
+                                <button class="btn btn-outline-secondary btn-sm soft-btn me-1"
+                                        disabled="@(_acting || !CanHandOverOrDeposit(c))"
+                                        @onclick="() => ActHandOverOrDeposit(c.ChequeTransactionId)">
+                                    @(c.Direction == ChequeDirection.Outgoing ? "Hand Over" : "Deposit")
+                                </button>
+
+                                <button class="btn btn-outline-success btn-sm soft-btn me-1"
+                                        disabled="@(_acting || !CanClear(c))"
+                                        @onclick="() => OpenClear(c.ChequeTransactionId)">
+                                    Clear
+                                </button>
+
+                                <button class="btn btn-outline-warning btn-sm soft-btn me-1"
+                                        disabled="@(_acting || !CanBounce(c))"
+                                        @onclick="() => OpenBounce(c.ChequeTransactionId)">
+                                    Bounce
+                                </button>
+
+                                <button class="btn btn-outline-danger btn-sm soft-btn me-1"
+                                        disabled="@(_acting || !CanVoid(c))"
+                                        @onclick="() => OpenVoid(c.ChequeTransactionId)">
+                                    Void
+                                </button>
+
+                                <button class="btn btn-outline-dark btn-sm soft-btn"
+                                        disabled="@_acting"
+                                        @onclick="() => OpenLinked(c)">
+                                    View Link
+                                </button>
+                            </td>
+                        </tr>
+                    }
+
+                    @if (Filtered.Count == 0)
+                    {
+                        <tr>
+                            <td colspan="10" class="text-muted">No cheques found.</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- DRAWERS -->
+    @if (_clearId.HasValue)
+    {
+        <div class="card kpi-card p-3 mt-3">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <div class="fw-bold">Mark Cleared</div>
+                    <div class="text-muted small">This will post clearing → bank for PDC.</div>
+                </div>
+            </div>
+            <div class="row g-2 align-items-end mt-1">
+                <div class="col-12 col-md-3">
+                    <label class="form-label text-muted mb-1">Clear Date</label>
+                    <input type="date" class="form-control soft-input" @bind="_clearDate" />
+                </div>
+                <div class="col-12 col-md-9 d-flex gap-2 justify-content-end">
+                    <button class="btn btn-success soft-btn" @onclick="DoClear" disabled="@_acting">Save</button>
+                    <button class="btn btn-outline-secondary soft-btn" @onclick="CloseDrawers" disabled="@_acting">Cancel</button>
+                </div>
+            </div>
+        </div>
+    }
+
+    @if (_bounceId.HasValue)
+    {
+        <div class="card kpi-card p-3 mt-3">
+            <div class="fw-bold">Mark Bounced</div>
+            <div class="text-muted small">Optionally post bank charges + reverse clearing.</div>
+
+            <div class="row g-2 align-items-end mt-1">
+                <div class="col-12 col-md-3">
+                    <label class="form-label text-muted mb-1">Bounce Date</label>
+                    <input type="date" class="form-control soft-input" @bind="_bounceDate" />
+                </div>
+                <div class="col-12 col-md-3">
+                    <label class="form-label text-muted mb-1">Bank Charge Amount</label>
+                    <input type="number" class="form-control soft-input" step="0.01" @bind="_bankChargeAmt" />
+                </div>
+                <div class="col-12 col-md-6 d-flex gap-2 justify-content-end">
+                    <button class="btn btn-warning soft-btn" @onclick="DoBounce" disabled="@_acting">Save</button>
+                    <button class="btn btn-outline-secondary soft-btn" @onclick="CloseDrawers" disabled="@_acting">Cancel</button>
+                </div>
+            </div>
+        </div>
+    }
+
+    @if (_voidId.HasValue)
+    {
+        <div class="card kpi-card p-3 mt-3">
+            <div class="fw-bold">Void Cheque</div>
+            <div class="text-muted small">Voiding will prevent further workflow actions.</div>
+
+            <div class="row g-2 align-items-end mt-1">
+                <div class="col-12 col-md-8">
+                    <label class="form-label text-muted mb-1">Reason</label>
+                    <input class="form-control soft-input" @bind="_voidReason" placeholder="Reason for void" />
+                </div>
+                <div class="col-12 col-md-4 d-flex gap-2 justify-content-end">
+                    <button class="btn btn-danger soft-btn" @onclick="DoVoid" disabled="@_acting">Void</button>
+                    <button class="btn btn-outline-secondary soft-btn" @onclick="CloseDrawers" disabled="@_acting">Cancel</button>
+                </div>
+            </div>
+        </div>
+    }
+
+</div>
+
+@code {
+    // ✅ prevents overlapping loads (auto refresh + user clicks)
+    private readonly SemaphoreSlim _loadLock = new(1, 1);
+
+    private CancellationTokenSource? _cts;
+    private Task? _autoTask;
+
+    private int _companyId;
+    private bool _loading;
+    private bool _acting;
+
+    private string? _err;
+    private string? _msg;
+
+    private DateTime _lastRefresh = DateTime.MinValue;
+    private string _lastRefreshText = "-";
+
+    // auto refresh UI
+    private int _autoEverySeconds = 5;
+    private int _countdown = 5;
+
+    // Data
+    private List<ChequeTransaction> _rows = new();
+    private List<ChequeTransaction> Filtered => _rows;
+
+    // KPI
+    private int _due7Count, _clearedTodayCount, _bouncedMonthCount;
+
+    // filters
+    private string _fDirection = "";
+    private string _fStatus = "";
+    private string _fType = "";
+    private DateTime _from = DateTime.Today.AddMonths(-1);
+    private DateTime _to = DateTime.Today.AddDays(7);
+    private string _party = "";
+    private int? _bankAccNo = 1010;
+
+    // action drawers
+    private int? _clearId;
+    private DateTime _clearDate = DateTime.Today;
+
+    private int? _bounceId;
+    private DateTime _bounceDate = DateTime.Today;
+    private decimal _bankChargeAmt;
+
+    private int? _voidId;
+    private string _voidReason = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CurrentCompany.RefreshAsync();
+        _companyId = CurrentCompany.CompanyId;
+
+        await SafeLoadAsync(isAuto: false);
+
+        StartAutoRefresh();
+    }
+
+    private void StartAutoRefresh()
+    {
+        _cts = new CancellationTokenSource();
+        var token = _cts.Token;
+
+        _countdown = _autoEverySeconds;
+
+        _autoTask = Task.Run(async () =>
+        {
+            try
+            {
+                using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
+
+                while (await timer.WaitForNextTickAsync(token))
+                {
+                    if (_acting) continue; // don't refresh during actions
+
+                    _countdown--;
+                    if (_countdown <= 0)
+                    {
+                        _countdown = _autoEverySeconds;
+                        await InvokeAsync(() => SafeLoadAsync(isAuto: true));
+                    }
+                    else
+                    {
+                        await InvokeAsync(StateHasChanged);
+                    }
+                }
+            }
+            catch (OperationCanceledException) { }
+        }, token);
+    }
+
+    private async Task SafeLoadAsync(bool isAuto)
+    {
+        // ✅ non-blocking: if already loading, skip auto refresh
+        if (!_loadLock.Wait(0))
+            return;
+
+        try
+        {
+            _loading = true;
+            if (!isAuto)
+                _err = _msg = null;
+
+            await CurrentCompany.RefreshAsync();
+            _companyId = CurrentCompany.CompanyId;
+
+            await using var db = await DbFactory.CreateDbContextAsync();
+
+            var q = db.Set<ChequeTransaction>()
+                      .AsNoTracking()
+                      .Where(x => x.CompanyId == _companyId);
+
+            if (!string.IsNullOrWhiteSpace(_fDirection))
+            {
+                if (_fDirection == "Outgoing") q = q.Where(x => x.Direction == ChequeDirection.Outgoing);
+                if (_fDirection == "Incoming") q = q.Where(x => x.Direction == ChequeDirection.Incoming);
+            }
+
+            if (!string.IsNullOrWhiteSpace(_fType))
+            {
+                if (_fType == "Normal") q = q.Where(x => x.Type == ChequeType.Normal);
+                if (_fType == "PDC") q = q.Where(x => x.Type == ChequeType.PDC);
+            }
+
+            if (!string.IsNullOrWhiteSpace(_fStatus) && Enum.TryParse<ChequeStatus>(_fStatus, out var st))
+                q = q.Where(x => x.Status == st);
+
+            q = q.Where(x => x.ChequeDate.Date >= _from.Date && x.ChequeDate.Date <= _to.Date);
+
+            if (!string.IsNullOrWhiteSpace(_party))
+                q = q.Where(x => (x.PayeeName ?? "").Contains(_party));
+
+            if (_bankAccNo.HasValue && _bankAccNo.Value > 0)
+                q = q.Where(x => x.BankAccountNo == _bankAccNo.Value);
+
+            _rows = await q.OrderByDescending(x => x.ChequeDate)
+                           .ThenByDescending(x => x.ChequeTransactionId)
+                           .ToListAsync();
+
+            // KPI quick calc (on filtered rows)
+            var today = DateTime.Today;
+            _due7Count = _rows.Count(x => x.Type == ChequeType.PDC && x.Status != ChequeStatus.Cleared && x.Status != ChequeStatus.Voided && x.ChequeDate.Date >= today && x.ChequeDate.Date <= today.AddDays(7));
+            _clearedTodayCount = _rows.Count(x => x.Status == ChequeStatus.Cleared && x.ClearDate.HasValue && x.ClearDate.Value.Date == today);
+
+            var monthStart = new DateTime(today.Year, today.Month, 1);
+            var monthEnd = monthStart.AddMonths(1);
+            _bouncedMonthCount = _rows.Count(x => x.Status == ChequeStatus.Bounced && x.IssueDate >= monthStart && x.IssueDate < monthEnd);
+
+            _lastRefresh = DateTime.Now;
+            _lastRefreshText = _lastRefresh.ToString("dd-MMM-yyyy HH:mm:ss");
+        }
+        catch (Exception ex)
+        {
+            _err = ex.InnerException?.Message ?? ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+            _loadLock.Release();
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private Task ApplyClicked() => SafeLoadAsync(isAuto: false);
+
+    private Task RefreshClicked() => SafeLoadAsync(isAuto: false);
+
+    private async Task ClearFilters()
+    {
+        _fDirection = "";
+        _fStatus = "";
+        _fType = "";
+        _from = DateTime.Today.AddMonths(-1);
+        _to = DateTime.Today.AddDays(7);
+        _party = "";
+        _bankAccNo = null;
+
+        await SafeLoadAsync(isAuto: false);
+    }
+
+    private void CloseDrawers()
+    {
+        _clearId = _bounceId = _voidId = null;
+    }
+
+    // --- rules ---
+    private static bool CanHandOverOrDeposit(ChequeTransaction c) => c.Status == ChequeStatus.Printed;
+
+    private static bool CanClear(ChequeTransaction c)
+        => c.Status == ChequeStatus.HandedOver || c.Status == ChequeStatus.Deposited || c.Status == ChequeStatus.Presented;
+
+    private static bool CanBounce(ChequeTransaction c) => CanClear(c);
+
+    private static bool CanVoid(ChequeTransaction c)
+        => c.Status != ChequeStatus.Cleared && c.Status != ChequeStatus.Voided;
+
+    private static string GetStatusCss(ChequeStatus st) => st switch
+    {
+        ChequeStatus.Draft => "bg-secondary text-white",
+        ChequeStatus.Printed => "bg-primary text-white",
+        ChequeStatus.HandedOver => "bg-info text-dark",
+        ChequeStatus.Deposited => "bg-info text-dark",
+        ChequeStatus.Presented => "bg-primary text-white",
+        ChequeStatus.Cleared => "bg-success text-white",
+        ChequeStatus.Bounced => "bg-warning text-dark",
+        ChequeStatus.Voided => "bg-danger text-white",
+        _ => "bg-dark text-white"
+    };
+
+    // --- actions ---
+    private async Task ActPrint(int id)
+    {
+        if (!await JS.InvokeAsync<bool>("confirm", "Mark as PRINTED?")) return;
+
+        _acting = true;
+        _err = _msg = null;
+        try
+        {
+            await Cheques.MarkPrinted(id);
+            _msg = "Marked Printed.";
+            CloseDrawers();
+            await SafeLoadAsync(isAuto: false);
+        }
+        catch (Exception ex) { _err = ex.InnerException?.Message ?? ex.Message; }
+        finally { _acting = false; }
+    }
+
+    private async Task ActHandOverOrDeposit(int id)
+    {
+        if (!await JS.InvokeAsync<bool>("confirm", "Mark as HandedOver/Deposited?")) return;
+
+        _acting = true;
+        _err = _msg = null;
+        try
+        {
+            await Cheques.MarkDepositedOrHandedOver(id);
+            _msg = "Marked deposited/handed over.";
+            CloseDrawers();
+            await SafeLoadAsync(isAuto: false);
+        }
+        catch (Exception ex) { _err = ex.InnerException?.Message ?? ex.Message; }
+        finally { _acting = false; }
+    }
+
+    private void OpenClear(int id)
+    {
+        _clearId = id;
+        _clearDate = DateTime.Today;
+        _bounceId = _voidId = null;
+    }
+
+    private async Task DoClear()
+    {
+        if (!_clearId.HasValue) return;
+
+        _acting = true;
+        _err = _msg = null;
+        try
+        {
+            await Cheques.MarkCleared(_clearId.Value, _clearDate.Date);
+            _msg = "Marked cleared.";
+            CloseDrawers();
+            await SafeLoadAsync(isAuto: false);
+        }
+        catch (Exception ex) { _err = ex.InnerException?.Message ?? ex.Message; }
+        finally { _acting = false; }
+    }
+
+    private void OpenBounce(int id)
+    {
+        _bounceId = id;
+        _bounceDate = DateTime.Today;
+        _bankChargeAmt = 0m;
+        _clearId = _voidId = null;
+    }
+
+    private async Task DoBounce()
+    {
+        if (!_bounceId.HasValue) return;
+
+        _acting = true;
+        _err = _msg = null;
+        try
+        {
+            await Cheques.MarkBounced(_bounceId.Value, _bounceDate.Date, _bankChargeAmt);
+            _msg = "Marked bounced.";
+            CloseDrawers();
+            await SafeLoadAsync(isAuto: false);
+        }
+        catch (Exception ex) { _err = ex.InnerException?.Message ?? ex.Message; }
+        finally { _acting = false; }
+    }
+
+    private void OpenVoid(int id)
+    {
+        _voidId = id;
+        _voidReason = "";
+        _clearId = _bounceId = null;
+    }
+
+    private async Task DoVoid()
+    {
+        if (!_voidId.HasValue) return;
+
+        if (string.IsNullOrWhiteSpace(_voidReason))
+        {
+            _err = "Reason is required.";
+            return;
+        }
+
+        if (!await JS.InvokeAsync<bool>("confirm", "Void this cheque?")) return;
+
+        _acting = true;
+        _err = _msg = null;
+        try
+        {
+            await Cheques.VoidCheque(_voidId.Value, _voidReason.Trim());
+            _msg = "Cheque voided.";
+            CloseDrawers();
+            await SafeLoadAsync(isAuto: false);
+        }
+        catch (Exception ex) { _err = ex.InnerException?.Message ?? ex.Message; }
+        finally { _acting = false; }
+    }
+
+    private void OpenLinked(ChequeTransaction c)
+    {
+        if (c.InvoiceId.HasValue)
+            Nav.NavigateTo($"/invoice-view/{c.InvoiceId.Value}");
+        else if (c.PurchaseInvoiceId.HasValue)
+            Nav.NavigateTo($"/purchase-invoice-view/{c.PurchaseInvoiceId.Value}");
+        else
+            _msg = "No linked invoice/bill found.";
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            _cts?.Cancel();
+            if (_autoTask != null) await _autoTask;
+        }
+        catch { }
+        finally
+        {
+            _cts?.Dispose();
+        }
+    }
+}

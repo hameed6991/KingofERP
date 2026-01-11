@@ -1,0 +1,316 @@
+﻿@inherits LayoutComponentBase
+@implements IDisposable
+
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.Components.Routing
+@using UaeEInvoice.Services.Auth
+
+@inject ICurrentCompany CurrentCompany
+@inject ICompanySetupGate SetupGate
+@inject CompanyFeatureService FeatureSvc
+@inject NavigationManager Nav
+
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+
+<div class="d-flex flex-column min-vh-100">
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark sticky-top">
+        <div class="container-fluid">
+            <a class="navbar-brand fw-semibold" href="/">King Of ERP</a>
+
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#topNav"
+                    aria-controls="topNav" aria-expanded="false" aria-label="Toggle navigation">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+
+            <div class="collapse navbar-collapse" id="topNav">
+                <ul class="navbar-nav me-auto mb-2 mb-lg-0 align-items-lg-center">
+
+                    @* ✅ SETUP MODE: show ONLY setup *@
+                    @if (_isAuthenticated && _companyId > 0 && !_setupComplete)
+                    {
+                        <li class="nav-item">
+                            <NavLink class="nav-link" href="/company-setup" Match="NavLinkMatch.All">
+                                Company Setup <span class="badge bg-warning text-dark ms-1">Required</span>
+                            </NavLink>
+                        </li>
+                    }
+                    else
+                    {
+                        @* ✅ Normal mode: show based on features *@
+
+                        @if (Has(FeatureKeys.HOME))
+                        {
+                            <li class="nav-item">
+                                <NavLink class="nav-link" href="/dashboard" Match="NavLinkMatch.All">Home</NavLink>
+                            </li>
+                        }
+
+                        @if (Has(FeatureKeys.COMPANY_SETUP))
+                        {
+                            <li class="nav-item">
+                                <NavLink class="nav-link" href="/company-update">Company</NavLink>
+                            </li>
+                        }
+
+                        @if (Has(FeatureKeys.MASTERS))
+                        {
+                            <li class="nav-item dropdown">
+                                <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+                                    Masters
+                                </a>
+                                <ul class="dropdown-menu">
+                                    <li><NavLink class="dropdown-item" href="/employees">Employees</NavLink></li>
+                                    <li><NavLink class="dropdown-item" href="/customers">Customers</NavLink></li>
+                                    <li><NavLink class="dropdown-item" href="/vendors">Vendors</NavLink></li>
+                                    <li><NavLink class="dropdown-item" href="/items">Items</NavLink></li>
+                                    <li><hr class="dropdown-divider" /></li>
+                                    <li><NavLink class="dropdown-item" href="/inventory">Inventory</NavLink></li>
+                                    <li><NavLink class="dropdown-item" href="/masters/import">Bulk Upload</NavLink></li>
+                                </ul>
+                            </li>
+                        }
+
+                        @if (Has(FeatureKeys.SALES))
+                        {
+                            <li class="nav-item dropdown">
+                                <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+                                    Sales
+                                </a>
+                                <ul class="dropdown-menu">
+                                    <li><NavLink class="dropdown-item" href="/invoice-create">Create Invoice</NavLink></li>
+                                    <li><NavLink class="dropdown-item" href="/invoices">Invoices</NavLink></li>
+                                    <li><hr class="dropdown-divider" /></li>
+
+                                    @* ✅ ADDED: Invoice Templates (above Accounts Receivable) *@
+                                    <li>
+                                        <NavLink class="dropdown-item" href="/settings/invoice-templates">
+                                            Invoice Templates
+                                        </NavLink>
+                                    </li>
+
+                                    <li><NavLink class="dropdown-item" href="/accounts-receivable">Accounts Receivable</NavLink></li>
+                                </ul>
+                            </li>
+                        }
+
+                        @if (Has(FeatureKeys.PURCHASE))
+                        {
+                            <li class="nav-item dropdown">
+                                <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+                                    Purchase
+                                </a>
+                                <ul class="dropdown-menu">
+                                    <li><NavLink class="dropdown-item" href="/purchase-create">New Purchase</NavLink></li>
+                                    <li><NavLink class="dropdown-item" href="/purchases">Purchases</NavLink></li>
+                                    <li><hr class="dropdown-divider" /></li>
+                                    <li><NavLink class="dropdown-item" href="/accounts-payable">Accounts Payable</NavLink></li>
+                                </ul>
+                            </li>
+                        }
+
+                        @if (Has(FeatureKeys.ACCOUNTING))
+                        {
+                            <li class="nav-item dropdown">
+                                <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+                                    Accounting
+                                </a>
+                                <ul class="dropdown-menu">
+                                    <li><NavLink class="dropdown-item" href="/profit-loss">Profit &amp; Loss</NavLink></li>
+                                    <li><NavLink class="dropdown-item" href="/trial-balance">Trial Balance</NavLink></li>
+                                    <li><NavLink class="dropdown-item" href="/balance-sheet">Balance Sheet</NavLink></li>
+                                    <li><NavLink class="dropdown-item" href="/journal-create">Journal Entry</NavLink></li>
+                                    <li><NavLink class="dropdown-item" href="/cashflow-indirect">Cashflow</NavLink></li>
+                                    <li><NavLink class="dropdown-item" href="/pettycash">Petty Cash</NavLink></li>
+                                    <li><NavLink class="dropdown-item" href="/einvoice-outbox">E-Invoice</NavLink></li>
+
+                                    @if (Has(FeatureKeys.CHEQUES))
+                                    {
+                                        <li><hr class="dropdown-divider" /></li>
+                                        <li><h6 class="dropdown-header">Cheques / PDC</h6></li>
+                                        <li><NavLink class="dropdown-item" href="/cheques/books">Cheque Books</NavLink></li>
+                                        <li><NavLink class="dropdown-item" href="/cheques/register">Cheque Register</NavLink></li>
+                                        <li><NavLink class="dropdown-item" href="/cheques/pdc-dashboard">PDC Dashboard</NavLink></li>
+                                    }
+                                </ul>
+                            </li>
+                        }
+
+                        @if (Has(FeatureKeys.AI))
+                        {
+                            <li class="nav-item dropdown">
+                                <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+                                    AI Features
+                                </a>
+                                <ul class="dropdown-menu">
+                                    <li><NavLink class="dropdown-item" href="/account-roles">Account Roles</NavLink></li>
+                                    <li><NavLink class="dropdown-item" href="/recurring">Recurring</NavLink></li>
+                                    <li><hr class="dropdown-divider" /></li>
+                                    <li><NavLink class="dropdown-item" href="/cash-forecast">Cash Forecast</NavLink></li>
+                                    <li><NavLink class="dropdown-item" href="/ai-ask">Ask Your Account</NavLink></li>
+                                    <li><NavLink class="dropdown-item" href="/cashflow-copilot">Cashflow Copilot</NavLink></li>
+                                    <li><NavLink class="dropdown-item" href="/bank-reconcile">Bank Reco</NavLink></li>
+                                </ul>
+                            </li>
+                        }
+
+                        @if (Has(FeatureKeys.REPORTS))
+                        {
+                            <li class="nav-item dropdown">
+                                <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+                                    Reports
+                                </a>
+                                <ul class="dropdown-menu">
+                                    <li><NavLink class="dropdown-item" href="/aging-center">Ageing Reports</NavLink></li>
+                                    <li><NavLink class="dropdown-item" href="/vat-sales-report">VAT Reports</NavLink></li>
+                                    <li><NavLink class="dropdown-item" href="/vat-return">VAT Return</NavLink></li>
+                                    <li><NavLink class="dropdown-item" href="/vat-return-fta">VAT Return FTA</NavLink></li>
+                                    <li><NavLink class="dropdown-item" href="/vat-reconciliation">VAT Reconciliation</NavLink></li>
+                                </ul>
+                            </li>
+                        }
+
+                        @if (Has(FeatureKeys.CRM))
+                        {
+                            <li class="nav-item dropdown">
+                                <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+                                    CRM
+                                </a>
+                                <ul class="dropdown-menu">
+                                    <li><NavLink class="dropdown-item" href="/crm/customers">Customer Hub</NavLink></li>
+                                    <li><NavLink class="dropdown-item" href="/crm/tasks">Task</NavLink></li>
+                                </ul>
+                            </li>
+                        }
+
+                        @if (Has(FeatureKeys.BI))
+                        {
+                            <li class="nav-item dropdown">
+                                <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+                                    Insights &amp; Analytics (BI)
+                                </a>
+                                <ul class="dropdown-menu">
+                                    <li><NavLink class="dropdown-item" href="/insights">Insights</NavLink></li>
+                                    <li><NavLink class="dropdown-item" href="/insights/sales-trend">Sales Trend</NavLink></li>
+                                    <li><NavLink class="dropdown-item" href="/insights/finance-health">Finance Health</NavLink></li>
+                                    <li><NavLink class="dropdown-item" href="/insights/customer-sales">Customer Sales</NavLink></li>
+                                    <li><NavLink class="dropdown-item" href="/insights/ar-collection">AR Collection</NavLink></li>
+                                </ul>
+                            </li>
+                        }
+
+                        @if (Has(FeatureKeys.ADMIN))
+                        {
+                            <AuthorizeView Roles="Admin">
+                                <li class="nav-item dropdown">
+                                    <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+                                        Admin
+                                    </a>
+                                    <ul class="dropdown-menu">
+                                        <li><NavLink class="dropdown-item" href="/admin/company-features">Company Features</NavLink></li>
+                                        <li><NavLink class="dropdown-item" href="/admin/users/create">Users List</NavLink></li>
+                                    </ul>
+                                </li>
+                            </AuthorizeView>
+                        }
+                    }
+
+                </ul>
+
+                <AuthorizeView>
+                    <Authorized Context="auth">
+                        <div class="d-flex align-items-center gap-3">
+                            <span class="text-white-50 small">@auth.User.Identity?.Name</span>
+                            <a class="btn btn-outline-light btn-sm" href="/logout">Logout</a>
+                        </div>
+                    </Authorized>
+                </AuthorizeView>
+            </div>
+        </div>
+    </nav>
+
+    <main class="flex-grow-1">
+        @Body
+    </main>
+</div>
+
+@code {
+    private HashSet<string> _enabled = new(StringComparer.OrdinalIgnoreCase);
+    private EventHandler<LocationChangedEventArgs>? _navHandler;
+
+    private bool _setupComplete;
+    private bool _isAuthenticated;
+    private int _companyId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshAllAsync();
+
+        _navHandler = async (_, __) => await RefreshAllAsync();
+        Nav.LocationChanged += _navHandler;
+    }
+
+    private async Task RefreshAllAsync()
+    {
+        try
+        {
+            var st = await SetupGate.GetStatusAsync(forceRefresh: true);
+
+            _setupComplete = st.IsSetupComplete;
+            _isAuthenticated = st.IsAuthenticated;
+            _companyId = st.CompanyId;
+
+            // current path
+            var rel = Nav.ToBaseRelativePath(Nav.Uri);
+            rel = (rel ?? "").Trim('/');
+            var pathOnly = rel.Split('?', '#')[0];
+
+            // allow these always
+            bool isAllowed =
+                pathOnly.Equals("company-setup", StringComparison.OrdinalIgnoreCase) ||
+                pathOnly.Equals("login", StringComparison.OrdinalIgnoreCase) ||
+                pathOnly.Equals("login-2fa", StringComparison.OrdinalIgnoreCase) ||
+                pathOnly.Equals("access-denied", StringComparison.OrdinalIgnoreCase) ||
+                pathOnly.Equals("logout", StringComparison.OrdinalIgnoreCase) ||
+                pathOnly.StartsWith("account/enable-2fa", StringComparison.OrdinalIgnoreCase);
+
+            // logged in but claim missing -> safe logout
+            if (_isAuthenticated && _companyId <= 0 && !isAllowed)
+            {
+                Nav.NavigateTo("/logout", replace: true);
+                return;
+            }
+
+            // ✅ setup incomplete => force setup page
+            if (_isAuthenticated && _companyId > 0 && !_setupComplete && !isAllowed)
+            {
+                Nav.NavigateTo("/company-setup", replace: true);
+                return;
+            }
+
+            // ✅ Only load features after setup complete
+            if (_isAuthenticated && _companyId > 0 && _setupComplete)
+            {
+                _enabled = await FeatureSvc.GetEnabledKeysAsync(_companyId);
+            }
+            else
+            {
+                _enabled = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            }
+        }
+        catch
+        {
+            _enabled = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            _setupComplete = false;
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private bool Has(string key) => _enabled.Contains(key);
+
+    public void Dispose()
+    {
+        if (_navHandler != null)
+            Nav.LocationChanged -= _navHandler;
+    }
+}

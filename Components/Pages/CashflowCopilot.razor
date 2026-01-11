@@ -1,0 +1,1204 @@
+﻿@page "/cashflow-copilot"
+
+@using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.JSInterop
+@using UaeEInvoice.Services.Auth
+@using UaeEInvoice.Services.CashflowCopilot
+
+@inject ICurrentCompany CurrentCompany
+@inject CashflowCopilotService Copilot
+@inject IJSRuntime JS
+
+<style>
+    /* Ultra Premium Dark */
+    :root {
+        --cf-bg1: #0b1020;
+        --cf-bg2: #0a1a2f;
+        --cf-card: rgba(255,255,255,0.06);
+        --cf-card2: rgba(255,255,255,0.09);
+        --cf-border: rgba(255,255,255,0.10);
+        --cf-text: rgba(255,255,255,0.92);
+        --cf-muted: rgba(255,255,255,0.65);
+        --cf-accent: #2f7bff;
+        --cf-good: #18c964;
+        --cf-warn: #f5a524;
+        --cf-bad: #f31260;
+        --cf-radius: 18px;
+    }
+
+    .cf-wrap {
+        background: radial-gradient(1200px 600px at 20% 5%, rgba(47,123,255,0.25), transparent 60%), radial-gradient(900px 500px at 85% 15%, rgba(243,18,96,0.18), transparent 55%), linear-gradient(160deg, var(--cf-bg1), var(--cf-bg2));
+        border-radius: 22px;
+        padding: 22px;
+        border: 1px solid rgba(255,255,255,0.08);
+        box-shadow: 0 30px 90px rgba(0,0,0,0.45);
+        color: var(--cf-text);
+    }
+
+    .cf-hero {
+        display: flex;
+        justify-content: space-between;
+        gap: 14px;
+        align-items: flex-start;
+        flex-wrap: wrap;
+        margin-bottom: 14px;
+    }
+
+    .cf-title {
+        font-size: 40px;
+        font-weight: 800;
+        letter-spacing: .2px;
+        line-height: 1.1;
+        margin: 0;
+    }
+
+    .cf-sub {
+        color: var(--cf-muted);
+        margin-top: 6px;
+    }
+
+    .cf-meta {
+        color: var(--cf-muted);
+        font-size: 13px;
+    }
+
+    .cf-btn {
+        border-radius: 14px;
+        padding: 10px 14px;
+        border: 1px solid rgba(255,255,255,0.18);
+        background: rgba(255,255,255,0.06);
+        color: var(--cf-text);
+        font-weight: 700;
+    }
+
+        .cf-btn.primary {
+            background: linear-gradient(135deg, rgba(47,123,255,0.95), rgba(47,123,255,0.55));
+            border: 1px solid rgba(47,123,255,0.55);
+        }
+
+        .cf-btn:disabled {
+            opacity: .55;
+            cursor: not-allowed;
+        }
+
+    .cf-card {
+        background: linear-gradient(180deg, var(--cf-card2), var(--cf-card));
+        border: 1px solid var(--cf-border);
+        border-radius: var(--cf-radius);
+        box-shadow: 0 18px 60px rgba(0,0,0,0.25);
+    }
+
+        .cf-card .card-body {
+            padding: 16px;
+        }
+
+    .cf-kpi {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        min-height: 104px;
+    }
+
+        .cf-kpi .k {
+            color: var(--cf-muted);
+            font-weight: 700;
+            font-size: 13px;
+        }
+
+        .cf-kpi .v {
+            font-size: 32px;
+            font-weight: 900;
+            letter-spacing: .2px;
+        }
+
+        .cf-kpi .s {
+            color: var(--cf-muted);
+            font-size: 12px;
+        }
+
+    .cf-filters .form-label {
+        color: var(--cf-muted);
+        font-weight: 700;
+        font-size: 12px;
+    }
+
+    .cf-filters .form-control {
+        background: rgba(255,255,255,0.06);
+        border: 1px solid rgba(255,255,255,0.14);
+        color: var(--cf-text);
+        border-radius: 14px;
+        padding: 10px 12px;
+    }
+
+    .cf-tabs {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        padding: 10px;
+        background: rgba(255,255,255,0.05);
+        border: 1px solid rgba(255,255,255,0.10);
+        border-radius: 16px;
+        align-items: center;
+    }
+
+    .cf-tab {
+        border: 1px solid rgba(255,255,255,0.14);
+        background: rgba(255,255,255,0.06);
+        color: var(--cf-text);
+        font-weight: 800;
+        border-radius: 14px;
+        padding: 10px 12px;
+        cursor: pointer;
+        user-select: none;
+        white-space: nowrap;
+    }
+
+        .cf-tab.active {
+            background: linear-gradient(135deg, rgba(47,123,255,0.95), rgba(47,123,255,0.45));
+            border-color: rgba(47,123,255,0.50);
+        }
+
+    .cf-chart {
+        padding: 14px;
+    }
+
+    .cf-chart-head {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        align-items: flex-start;
+        margin-bottom: 10px;
+        flex-wrap: wrap;
+    }
+
+    .cf-chart-title {
+        font-weight: 900;
+        font-size: 18px;
+    }
+
+    .cf-chart-sub {
+        color: var(--cf-muted);
+        font-size: 12px;
+        font-weight: 700;
+    }
+
+    .cf-canvas {
+        background: rgba(255,255,255,0.04);
+        border: 1px solid rgba(255,255,255,0.10);
+        border-radius: 16px;
+        padding: 12px;
+        height: 260px;
+    }
+
+        .cf-canvas.tall {
+            height: 320px;
+        }
+
+        .cf-canvas canvas {
+            width: 100% !important;
+            height: 100% !important;
+        }
+
+    .cf-alerts .badge {
+        border-radius: 999px;
+        padding: 10px 12px;
+        font-weight: 900;
+        border: 1px solid rgba(255,255,255,0.12);
+    }
+
+    .cf-table {
+        color: var(--cf-text);
+    }
+
+        .cf-table thead th {
+            color: var(--cf-muted);
+            font-weight: 900;
+            font-size: 12px;
+            border-color: rgba(255,255,255,0.08) !important;
+        }
+
+        .cf-table td {
+            border-color: rgba(255,255,255,0.08) !important;
+        }
+
+    .cf-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 10px 12px;
+        background: rgba(255,255,255,0.04);
+        border: 1px solid rgba(255,255,255,0.10);
+        border-radius: 14px;
+        align-items: center;
+    }
+
+    .cf-muted {
+        color: var(--cf-muted);
+    }
+
+    .cf-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 10px;
+        border-radius: 999px;
+        border: 1px solid rgba(255,255,255,0.12);
+        background: rgba(255,255,255,0.06);
+        font-weight: 900;
+        font-size: 12px;
+        white-space: nowrap;
+    }
+
+        .cf-chip.good {
+            border-color: rgba(24,201,100,.35);
+        }
+
+        .cf-chip.warn {
+            border-color: rgba(245,165,36,.35);
+        }
+
+        .cf-chip.bad {
+            border-color: rgba(243,18,96,.35);
+        }
+
+    .cf-mini {
+        font-size: 12px;
+        color: var(--cf-muted);
+        font-weight: 700;
+    }
+</style>
+
+<div class="container-xxl py-4">
+    <div class="cf-wrap">
+
+        <div class="cf-hero">
+            <div>
+                <h2 class="cf-title">Smart Cashflow Copilot</h2>
+                <div class="cf-sub">Forecast + alerts + insights (premium).</div>
+                <div class="cf-meta mt-1">CompanyId: <b>@_companyId</b></div>
+            </div>
+
+            <div class="d-flex gap-2 flex-wrap">
+                <button class="cf-btn" type="button" @onclick="Reload" disabled="@_loading">
+                    @(_loading ? "Loading..." : "Reload")
+                </button>
+            </div>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(_error))
+        {
+            <div class="alert alert-danger">@_error</div>
+        }
+
+        <!-- MODULE TABS (NEW) -->
+        <div class="cf-card mb-3">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                    <div class="fw-bold">Cashflow Suite</div>
+                    <div class="cf-tabs">
+                        <button type="button" class="cf-tab @(_module=="FORECAST" ? "active" : "")" @onclick="@(()=>SetModule("FORECAST"))">
+                            Forecast (Copilot)
+                        </button>
+                        <button type="button" class="cf-tab @(_module=="ACTUALS" ? "active" : "")" @onclick="@(()=>SetModule("ACTUALS"))">
+                            Actuals (Intelligence)
+                        </button>
+                        <button type="button" class="cf-tab @(_module=="GAP" ? "active" : "")" @onclick="@(()=>SetModule("GAP"))">
+                            Profit vs Cash Gap
+                        </button>
+                        <button type="button" class="cf-tab @(_module=="CATS" ? "active" : "")" @onclick="@(()=>SetModule("CATS"))">
+                            Category Breakdown
+                        </button>
+                    </div>
+                </div>
+
+                <div class="cf-mini mt-2">
+                    Tip: Forecast uses your existing Copilot logic. New tabs reuse the same response to stay error-free.
+                </div>
+            </div>
+        </div>
+
+        <!-- Filters (keep same logic) -->
+        <div class="cf-card cf-filters mb-3">
+            <div class="card-body">
+                <div class="row g-2 align-items-end">
+                    <div class="col-12 col-md-3">
+                        <label class="form-label">From</label>
+                        <InputDate class="form-control" @bind-Value="_fromDate" />
+                    </div>
+
+                    <div class="col-12 col-md-3">
+                        <label class="form-label">To</label>
+                        <InputDate class="form-control" @bind-Value="_toDate" />
+                    </div>
+
+                    <div class="col-12 col-md-4">
+                        <button class="cf-btn primary w-100" type="button" @onclick="RunForecast" disabled="@_loading">
+                            @(_loading ? "Running..." : "Run Forecast")
+                        </button>
+                    </div>
+
+                    <div class="col-12 col-md-2 d-flex gap-2">
+                        <button class="cf-btn w-100" type="button" @onclick="SetNext30" disabled="@_loading">Next 30</button>
+                        <button class="cf-btn w-100" type="button" @onclick="SetThisMonth" disabled="@_loading">This Month</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        @if (_resp != null)
+        {
+            <!-- KPI (keep same) -->
+            <div class="row g-3 mb-3">
+                <div class="col-12 col-lg-3">
+                    <div class="cf-card h-100">
+                        <div class="card-body cf-kpi">
+                            <div class="k">Opening Cash</div>
+                            <div class="v">@Fmt(_resp.OpeningCash)</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-12 col-lg-3">
+                    <div class="cf-card h-100">
+                        <div class="card-body cf-kpi">
+                            <div class="k">Total IN (A+E)</div>
+                            <div class="v">@Fmt(_resp.TotalActualIn + _resp.TotalExpectedIn)</div>
+                            <div class="s">A: @Fmt(_resp.TotalActualIn) | E: @Fmt(_resp.TotalExpectedIn)</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-12 col-lg-3">
+                    <div class="cf-card h-100">
+                        <div class="card-body cf-kpi">
+                            <div class="k">Total OUT (A+E)</div>
+                            <div class="v">@Fmt(_resp.TotalActualOut + _resp.TotalExpectedOut)</div>
+                            <div class="s">A: @Fmt(_resp.TotalActualOut) | E: @Fmt(_resp.TotalExpectedOut)</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-12 col-lg-3">
+                    <div class="cf-card h-100">
+                        <div class="card-body cf-kpi">
+                            <div class="k">Worst Balance</div>
+                            <div class="v">@Fmt(_resp.WorstBalance)</div>
+                            <div class="s">@_resp.WorstBalanceDate.ToString("dd-MMM-yyyy")</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            @* ============================
+               MODULE: FORECAST (existing)
+               ============================ *@
+            @if (_module == "FORECAST")
+            {
+                <!-- Charts + Tabs (existing) -->
+                <div class="cf-card mb-3">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+                            <div class="fw-bold">Charts</div>
+
+                            <div class="cf-tabs">
+                                <button type="button" class="cf-tab @(_chartView=="BAL" ? "active" : "")"
+                                        @onclick="@(()=>SetChartView("BAL"))">
+                                    Balance Trend
+                                </button>
+
+                                <button type="button" class="cf-tab @(_chartView=="INOUT" ? "active" : "")"
+                                        @onclick="@(()=>SetChartView("INOUT"))">
+                                    IN vs OUT
+                                </button>
+
+                                <button type="button" class="cf-tab @(_chartView=="EXP" ? "active" : "")"
+                                        @onclick="@(()=>SetChartView("EXP"))">
+                                    Expense Donut
+                                </button>
+
+                                <button type="button" class="cf-tab @(_chartView=="RISK" ? "active" : "")"
+                                        @onclick="@(()=>SetChartView("RISK"))">
+                                    Risk Radar
+                                </button>
+                            </div>
+                        </div>
+
+                        @if (_chartView == "BAL")
+                        {
+                            <div class="cf-chart">
+                                <div class="cf-chart-head">
+                                    <div>
+                                        <div class="cf-chart-title">Cash Balance Trend</div>
+                                        <div class="cf-chart-sub">Line/Area • highlights crisis days (balance &lt; 0)</div>
+                                    </div>
+                                    <div class="d-flex gap-2 flex-wrap">
+                                        <span class="cf-chip @CashHealthChipClass()">
+                                            Cash Health: @CashHealthLabel()
+                                        </span>
+                                        <span class="cf-chip">
+                                            Net (A+E): @Fmt(NetAll)
+                                        </span>
+                                    </div>
+                                </div>
+                                <div class="cf-canvas">
+                                    <canvas id="@BalanceCanvasId" @key="BalanceCanvasId"></canvas>
+                                </div>
+                            </div>
+                        }
+                        else if (_chartView == "INOUT")
+                        {
+                            <div class="cf-chart">
+                                <div class="cf-chart-head">
+                                    <div>
+                                        <div class="cf-chart-title">IN vs OUT</div>
+                                        <div class="cf-chart-sub">Bar • identify heavy inflow/outflow days</div>
+                                    </div>
+                                    <div class="d-flex gap-2 flex-wrap">
+                                        <span class="cf-chip good">Actual IN: @Fmt(_resp.TotalActualIn)</span>
+                                        <span class="cf-chip bad">Actual OUT: @Fmt(_resp.TotalActualOut)</span>
+                                    </div>
+                                </div>
+                                <div class="cf-canvas">
+                                    <canvas id="@InOutCanvasId" @key="InOutCanvasId"></canvas>
+                                </div>
+                            </div>
+                        }
+                        else if (_chartView == "EXP")
+                        {
+                            <div class="cf-chart">
+                                <div class="cf-chart-head">
+                                    <div>
+                                        <div class="cf-chart-title">Expense Breakdown</div>
+                                        <div class="cf-chart-sub">Donut • Top 7 categories</div>
+                                    </div>
+                                    <div class="d-flex gap-2 flex-wrap">
+                                        <span class="cf-chip">Top categories: @TopExpenseCount</span>
+                                    </div>
+                                </div>
+                                <div class="cf-canvas tall">
+                                    <canvas id="@ExpenseCanvasId" @key="ExpenseCanvasId"></canvas>
+                                </div>
+
+                                <div class="mt-2 cf-muted" style="font-size:12px;font-weight:700;">
+                                    Source: Your existing Copilot risk data (TopExpenseCategories).
+                                </div>
+                            </div>
+                        }
+                        else if (_chartView == "RISK")
+                        {
+                            <div class="cf-chart">
+                                <div class="cf-chart-head">
+                                    <div>
+                                        <div class="cf-chart-title">Risk Radar (AR vs AP)</div>
+                                        <div class="cf-chart-sub">Diverging bar • + = Receivables, - = Payables</div>
+                                    </div>
+                                    <div class="d-flex gap-2 flex-wrap">
+                                        <span class="cf-chip good">AR (Top): @Fmt(TopARSum)</span>
+                                        <span class="cf-chip warn">AP (Top): @Fmt(TopAPSum)</span>
+                                    </div>
+                                </div>
+
+                                <div class="cf-canvas tall">
+                                    <canvas id="@RiskCanvasId" @key="RiskCanvasId"></canvas>
+                                </div>
+
+                                <div class="row g-3 mt-2">
+                                    <div class="col-12 col-lg-6">
+                                        <div class="cf-row">
+                                            <div class="fw-bold">Top Receivables</div>
+                                            <div class="cf-muted">Action now</div>
+                                        </div>
+                                        <div class="mt-2 d-grid gap-2">
+                                            @if (_risk?.TopReceivables?.Count > 0)
+                                            {
+                                                @foreach (var x in _risk.TopReceivables)
+                                                {
+                                                    <div class="cf-row">
+                                                        <div class="text-truncate" title="@x.Title">@x.Title</div>
+                                                        <div class="fw-bold">@Fmt(x.Amount)</div>
+                                                    </div>
+                                                }
+                                            }
+                                            else
+                                            {
+                                                <div class="cf-muted">No receivables found.</div>
+                                            }
+                                        </div>
+                                    </div>
+
+                                    <div class="col-12 col-lg-6">
+                                        <div class="cf-row">
+                                            <div class="fw-bold">Top Payables</div>
+                                            <div class="cf-muted">Plan payments</div>
+                                        </div>
+                                        <div class="mt-2 d-grid gap-2">
+                                            @if (_risk?.TopPayables?.Count > 0)
+                                            {
+                                                @foreach (var x in _risk.TopPayables)
+                                                {
+                                                    <div class="cf-row">
+                                                        <div class="text-truncate" title="@x.Title">@x.Title</div>
+                                                        <div class="fw-bold">@Fmt(x.Amount)</div>
+                                                    </div>
+                                                }
+                                            }
+                                            else
+                                            {
+                                                <div class="cf-muted">No payables found.</div>
+                                            }
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                </div>
+
+                <!-- Alerts (existing) -->
+                <div class="cf-card cf-alerts mb-3">
+                    <div class="card-body">
+                        <div class="fw-bold mb-2">Alerts (Auto)</div>
+                        @if (_resp.Alerts.Count > 0)
+                        {
+                            <div class="d-flex flex-wrap gap-2">
+                                @foreach (var a in _resp.Alerts)
+                                {
+                                    <span class="badge @AlertBadgeClass(a.Severity)">
+                                        @a.Severity.ToUpperInvariant() • @a.Date.ToString("dd-MMM") • @a.Message
+                                    </span>
+                                }
+                            </div>
+                            <div class="cf-muted mt-2" style="font-size:12px;font-weight:700;">
+                                Showing top @_resp.Alerts.Count alerts.
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="cf-muted">No alerts in this period.</div>
+                        }
+                    </div>
+                </div>
+
+                <!-- Daily rows (existing) -->
+                <div class="cf-card">
+                    <div class="card-body">
+                        <div class="fw-bold mb-2">Daily Forecast</div>
+
+                        <div class="table-responsive">
+                            <table class="table cf-table align-middle">
+                                <thead class="text-uppercase">
+                                    <tr>
+                                        <th style="width:140px;">Date</th>
+                                        <th class="text-end" style="width:140px;">Actual IN</th>
+                                        <th class="text-end" style="width:140px;">Expected IN</th>
+                                        <th class="text-end" style="width:140px;">Actual OUT</th>
+                                        <th class="text-end" style="width:140px;">Expected OUT</th>
+                                        <th class="text-end" style="width:160px;">Running</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var r in _resp.Rows)
+                                    {
+                                        <tr class="@RunningRowClass(r.Running)">
+                                            <td>@r.Date.ToString("dd-MM-yyyy")</td>
+                                            <td class="text-end">@Fmt(r.ActualIn)</td>
+                                            <td class="text-end">@Fmt(r.ExpectedIn)</td>
+                                            <td class="text-end">@Fmt(r.ActualOut)</td>
+                                            <td class="text-end">@Fmt(r.ExpectedOut)</td>
+                                            <td class="text-end fw-bold">@Fmt(r.Running)</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+
+                    </div>
+                </div>
+            }
+
+            @* ============================
+               MODULE: ACTUALS (NEW)
+               ============================ *@
+            else if (_module == "ACTUALS")
+            {
+                <div class="cf-card mb-3">
+                    <div class="card-body">
+                        <div class="cf-chart-head">
+                            <div>
+                                <div class="cf-chart-title">Actuals (Cashflow Intelligence)</div>
+                                <div class="cf-chart-sub">Real cash movement (Actual IN/OUT only) • quick health snapshot</div>
+                            </div>
+                            <div class="d-flex gap-2 flex-wrap">
+                                <span class="cf-chip good">Actual IN: @Fmt(_resp.TotalActualIn)</span>
+                                <span class="cf-chip bad">Actual OUT: @Fmt(_resp.TotalActualOut)</span>
+                                <span class="cf-chip @ActualNetChipClass()">Net (Actual): @Fmt(NetActual)</span>
+                            </div>
+                        </div>
+
+                        <div class="row g-3 mt-1">
+                            <div class="col-12 col-lg-6">
+                                <div class="cf-card">
+                                    <div class="card-body">
+                                        <div class="fw-bold">Actual IN vs OUT (Bars)</div>
+                                        <div class="cf-mini mb-2">Only Actual values (Expected ignored here)</div>
+                                        <div class="cf-canvas">
+                                            <canvas id="@ActualInOutCanvasId" @key="ActualInOutCanvasId"></canvas>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="col-12 col-lg-6">
+                                <div class="cf-card">
+                                    <div class="card-body">
+                                        <div class="fw-bold">Actual Daily Net</div>
+                                        <div class="cf-mini mb-2">Net = Actual IN − Actual OUT</div>
+                                        <div class="table-responsive">
+                                            <table class="table cf-table align-middle mb-0">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Date</th>
+                                                        <th class="text-end">IN</th>
+                                                        <th class="text-end">OUT</th>
+                                                        <th class="text-end">NET</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    @foreach (var d in ActualDailyNetTop10)
+                                                    {
+                                                        <tr>
+                                                            <td>@d.Date.ToString("dd-MMM")</td>
+                                                            <td class="text-end">@Fmt(d.In)</td>
+                                                            <td class="text-end">@Fmt(d.Out)</td>
+                                                            <td class="text-end fw-bold">@Fmt(d.Net)</td>
+                                                        </tr>
+                                                    }
+                                                </tbody>
+                                            </table>
+                                        </div>
+
+                                        <div class="cf-mini mt-2">
+                                            Showing last 10 days from selected range.
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+            }
+
+            @* ============================
+               MODULE: PROFIT vs CASH GAP (NEW)
+               NOTE: No new DB logic here to stay error-free.
+               We show "Cash gap drivers" using AR/AP + Expected timing.
+               ============================ *@
+            else if (_module == "GAP")
+            {
+                <div class="cf-card mb-3">
+                    <div class="card-body">
+                        <div class="cf-chart-head">
+                            <div>
+                                <div class="cf-chart-title">Profit vs Cash Gap (Indicator)</div>
+                                <div class="cf-chart-sub">Why cash feels “not matching” — explained using timing + AR/AP pressure</div>
+                            </div>
+                            <div class="d-flex gap-2 flex-wrap">
+                                <span class="cf-chip @GapRiskChipClass()">Gap Risk: @GapRiskLabel()</span>
+                                <span class="cf-chip">Uncollected AR (Top): @Fmt(TopARSum)</span>
+                                <span class="cf-chip">Upcoming AP (Top): @Fmt(TopAPSum)</span>
+                            </div>
+                        </div>
+
+                        <div class="row g-3">
+                            <div class="col-12 col-lg-4">
+                                <div class="cf-card h-100">
+                                    <div class="card-body cf-kpi">
+                                        <div class="k">Net Cashflow (Actual)</div>
+                                        <div class="v">@Fmt(NetActual)</div>
+                                        <div class="s">Actual IN − Actual OUT</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="col-12 col-lg-4">
+                                <div class="cf-card h-100">
+                                    <div class="card-body cf-kpi">
+                                        <div class="k">Next 7 Days Net (Expected)</div>
+                                        <div class="v">@Fmt(Next7NetExpected)</div>
+                                        <div class="s">Expected IN − Expected OUT (next 7 days)</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="col-12 col-lg-4">
+                                <div class="cf-card h-100">
+                                    <div class="card-body cf-kpi">
+                                        <div class="k">Runway Signal</div>
+                                        <div class="v">@RunwaySignal</div>
+                                        <div class="s">Based on current trend (simple)</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="mt-3">
+                            <div class="fw-bold mb-2">Gap Drivers (Drilldown)</div>
+                            <div class="row g-3">
+                                <div class="col-12 col-lg-6">
+                                    <div class="cf-row">
+                                        <div class="fw-bold">AR (Money stuck in customers)</div>
+                                        <div class="cf-muted">Collect faster</div>
+                                    </div>
+
+                                    <div class="mt-2 d-grid gap-2">
+                                        @if (_risk?.TopReceivables?.Count > 0)
+                                        {
+                                            @foreach (var x in _risk.TopReceivables.Take(8))
+                                            {
+                                                <div class="cf-row">
+                                                    <div class="text-truncate" title="@x.Title">@x.Title</div>
+                                                    <div class="fw-bold">@Fmt(x.Amount)</div>
+                                                </div>
+                                            }
+                                        }
+                                        else
+                                        {
+                                            <div class="cf-muted">No AR items available.</div>
+                                        }
+                                    </div>
+                                </div>
+
+                                <div class="col-12 col-lg-6">
+                                    <div class="cf-row">
+                                        <div class="fw-bold">AP (Vendor pressure)</div>
+                                        <div class="cf-muted">Plan payments</div>
+                                    </div>
+
+                                    <div class="mt-2 d-grid gap-2">
+                                        @if (_risk?.TopPayables?.Count > 0)
+                                        {
+                                            @foreach (var x in _risk.TopPayables.Take(8))
+                                            {
+                                                <div class="cf-row">
+                                                    <div class="text-truncate" title="@x.Title">@x.Title</div>
+                                                    <div class="fw-bold">@Fmt(x.Amount)</div>
+                                                </div>
+                                            }
+                                        }
+                                        else
+                                        {
+                                            <div class="cf-muted">No AP items available.</div>
+                                        }
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="cf-mini mt-3">
+                                Next step (when you’re ready): connect “Profit” from your FinanceHealth KPIs and show a true Profit-vs-Cash bridge.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            }
+
+            @* ============================
+               MODULE: CATEGORY BREAKDOWN (NEW)
+               Uses existing _risk.TopExpenseCategories to stay error-free.
+               ============================ *@
+            else if (_module == "CATS")
+            {
+                <div class="cf-card mb-3">
+                    <div class="card-body">
+                        <div class="cf-chart-head">
+                            <div>
+                                <div class="cf-chart-title">Category Breakdown</div>
+                                <div class="cf-chart-sub">Where money is going (Expense categories) • plus AR/AP buckets</div>
+                            </div>
+                            <div class="d-flex gap-2 flex-wrap">
+                                <span class="cf-chip">Expense cats: @TopExpenseCount</span>
+                                <span class="cf-chip good">AR (Top): @Fmt(TopARSum)</span>
+                                <span class="cf-chip warn">AP (Top): @Fmt(TopAPSum)</span>
+                            </div>
+                        </div>
+
+                        <div class="row g-3">
+                            <div class="col-12 col-lg-6">
+                                <div class="cf-card">
+                                    <div class="card-body">
+                                        <div class="fw-bold">Expense Donut (Top Categories)</div>
+                                        <div class="cf-mini mb-2">Reuses your existing expense donut logic</div>
+                                        <div class="cf-canvas tall">
+                                            <canvas id="@CatsExpenseCanvasId" @key="CatsExpenseCanvasId"></canvas>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="col-12 col-lg-6">
+                                <div class="cf-card">
+                                    <div class="card-body">
+                                        <div class="fw-bold">Category Table (Top Expenses)</div>
+                                        <div class="table-responsive">
+                                            <table class="table cf-table align-middle mb-0">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Category</th>
+                                                        <th class="text-end">Amount</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    @if (_risk?.TopExpenseCategories?.Count > 0)
+                                                    {
+                                                        @foreach (var x in _risk.TopExpenseCategories.Take(12))
+                                                        {
+                                                            <tr>
+                                                                <td class="fw-semibold">@x.Title</td>
+                                                                <td class="text-end fw-bold">@Fmt(x.Amount)</td>
+                                                            </tr>
+                                                        }
+                                                    }
+                                                    else
+                                                    {
+                                                        <tr>
+                                                            <td colspan="2" class="cf-muted">No expense categories available.</td>
+                                                        </tr>
+                                                    }
+                                                </tbody>
+                                            </table>
+                                        </div>
+
+                                        <div class="cf-mini mt-2">
+                                            Next step: add IN categories (Receipts by method/customer/type) using a mapping table.
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+            }
+        }
+    </div>
+</div>
+
+@code {
+    private bool _loading;
+    private string? _error;
+
+    private int _companyId;
+
+    private DateTime _fromDate = DateTime.Today;
+    private DateTime _toDate = DateTime.Today.AddDays(30);
+
+    private CashflowResponseDto? _resp;
+    private RiskRadarDto? _risk;
+
+    // MODULE state (NEW)
+    private string _module = "FORECAST";
+
+    // Chart tab state (existing)
+    private string _chartView = "BAL";
+    private int _chartNonce = 1;
+    private bool _needChartRender;
+
+    private string BalanceCanvasId => $"cfBal_{_chartNonce}";
+    private string InOutCanvasId => $"cfInOut_{_chartNonce}";
+    private string ExpenseCanvasId => $"cfExp_{_chartNonce}";
+    private string RiskCanvasId => $"cfRisk_{_chartNonce}";
+
+    // NEW canvases for other modules
+    private string ActualInOutCanvasId => $"cfAInOut_{_chartNonce}";
+    private string CatsExpenseCanvasId => $"cfCatsExp_{_chartNonce}";
+
+    protected override void OnInitialized()
+    {
+        _companyId = CurrentCompany.CompanyId;
+        if (_companyId <= 0)
+            _error = "Company not resolved. Please login again / check CompanyId claim.";
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // First render auto forecast
+        if (firstRender && _companyId > 0)
+        {
+            await RunForecast();
+            return;
+        }
+
+        if (_needChartRender)
+        {
+            _needChartRender = false;
+            await RenderChartsForCurrentModuleAsync();
+        }
+    }
+
+    private async Task Reload() => await RunForecast();
+
+    private void SetNext30()
+    {
+        _fromDate = DateTime.Today;
+        _toDate = DateTime.Today.AddDays(30);
+    }
+
+    private void SetThisMonth()
+    {
+        var today = DateTime.Today;
+        _fromDate = new DateTime(today.Year, today.Month, 1);
+        _toDate = _fromDate.AddMonths(1).AddDays(-1);
+    }
+
+    private void SetModule(string m)
+    {
+        _module = m;
+
+        // keep old forecast chart tab as-is
+        // when switching module, re-render charts for that module
+        _chartNonce++;
+        _needChartRender = true;
+        StateHasChanged();
+    }
+
+    private void SetChartView(string v)
+    {
+        _chartView = v;
+        _chartNonce++;          // force new canvas id
+        _needChartRender = true;
+        StateHasChanged();
+    }
+
+    private async Task RunForecast()
+    {
+        if (_companyId <= 0)
+        {
+            _error = "CompanyId invalid (0).";
+            _resp = null;
+            return;
+        }
+
+        _loading = true;
+        _error = null;
+
+        try
+        {
+            // ✅ KEEP OLD LOGIC
+            _resp = await Copilot.GetForecastAsync(_companyId, _fromDate, _toDate);
+
+            // ✅ KEEP OLD LOGIC
+            _risk = await Copilot.GetRiskRadarAsync(_companyId, _toDate);
+
+            _chartNonce++;
+            _needChartRender = true;
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            _resp = null;
+            _risk = null;
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task RenderChartsForCurrentModuleAsync()
+    {
+        if (_resp == null) return;
+
+        // Forecast charts (existing)
+        if (_module == "FORECAST")
+        {
+            await RenderActiveForecastChartAsync();
+            return;
+        }
+
+        // Actuals charts (new)
+        if (_module == "ACTUALS")
+        {
+            var labels = _resp.Rows.Select(r => r.Date.ToString("dd-MMM")).ToArray();
+            var aIn = _resp.Rows.Select(r => (double)r.ActualIn).ToArray();
+            var aOut = _resp.Rows.Select(r => (double)r.ActualOut).ToArray();
+
+            await JS.InvokeVoidAsync("uaeCharts.renderInOutBars",
+                ActualInOutCanvasId, labels, aIn, aOut);
+
+            return;
+        }
+
+        // Category breakdown charts (new) - reuse expense donut
+        if (_module == "CATS")
+        {
+            var exp = _risk?.TopExpenseCategories ?? new List<RiskLineDto>();
+            var eLabels = exp.Select(x => x.Title).ToArray();
+            var eVals = exp.Select(x => (double)x.Amount).ToArray();
+
+            await JS.InvokeVoidAsync("uaeCharts.renderExpenseDonut",
+                CatsExpenseCanvasId, eLabels, eVals);
+
+            return;
+        }
+
+        // GAP module - no chart (keeps it error-free)
+    }
+
+    private async Task RenderActiveForecastChartAsync()
+    {
+        if (_resp == null) return;
+
+        var labels = _resp.Rows.Select(r => r.Date.ToString("dd-MMM")).ToArray();
+
+        if (_chartView == "BAL")
+        {
+            var running = _resp.Rows.Select(r => (double)r.Running).ToArray();
+            var zero = _resp.Rows.Select(_ => 0d).ToArray();
+
+            await JS.InvokeVoidAsync("uaeCharts.renderBalanceTrend",
+                BalanceCanvasId, labels, running, zero);
+        }
+        else if (_chartView == "INOUT")
+        {
+            var totalIn = _resp.Rows.Select(r => (double)(r.ActualIn + r.ExpectedIn)).ToArray();
+            var totalOut = _resp.Rows.Select(r => (double)(r.ActualOut + r.ExpectedOut)).ToArray();
+
+            await JS.InvokeVoidAsync("uaeCharts.renderInOutBars",
+                InOutCanvasId, labels, totalIn, totalOut);
+        }
+        else if (_chartView == "EXP")
+        {
+            var exp = _risk?.TopExpenseCategories ?? new List<RiskLineDto>();
+            var eLabels = exp.Select(x => x.Title).ToArray();
+            var eVals = exp.Select(x => (double)x.Amount).ToArray();
+
+            await JS.InvokeVoidAsync("uaeCharts.renderExpenseDonut",
+                ExpenseCanvasId, eLabels, eVals);
+        }
+        else if (_chartView == "RISK")
+        {
+            var ar = (_risk?.TopReceivables ?? new List<RiskLineDto>()).Take(5).ToList();
+            var ap = (_risk?.TopPayables ?? new List<RiskLineDto>()).Take(5).ToList();
+
+            var rLabels = ar.Select(x => x.Title).Concat(ap.Select(x => x.Title)).ToArray();
+            var rVals = ar.Select(x => (double)x.Amount)
+                          .Concat(ap.Select(x => -(double)x.Amount))
+                          .ToArray();
+
+            await JS.InvokeVoidAsync("uaeCharts.renderRiskDivergingBars",
+                RiskCanvasId, rLabels, rVals);
+        }
+    }
+
+    // ========= Computed helpers (no DB calls; error-free) =========
+    private decimal NetActual => (_resp?.TotalActualIn ?? 0m) - (_resp?.TotalActualOut ?? 0m);
+    private decimal NetAll => ((_resp?.TotalActualIn ?? 0m) + (_resp?.TotalExpectedIn ?? 0m)) - ((_resp?.TotalActualOut ?? 0m) + (_resp?.TotalExpectedOut ?? 0m));
+
+    private decimal TopARSum => (_risk?.TopReceivables?.Sum(x => x.Amount) ?? 0m);
+    private decimal TopAPSum => (_risk?.TopPayables?.Sum(x => x.Amount) ?? 0m);
+    private int TopExpenseCount => (_risk?.TopExpenseCategories?.Count ?? 0);
+
+    private decimal Next7NetExpected
+    {
+        get
+        {
+            if (_resp == null) return 0m;
+            var start = DateTime.Today.Date;
+            var end = start.AddDays(7);
+
+            var rows = _resp.Rows.Where(r => r.Date.Date >= start && r.Date.Date < end).ToList();
+            var expIn = rows.Sum(r => r.ExpectedIn);
+            var expOut = rows.Sum(r => r.ExpectedOut);
+            return expIn - expOut;
+        }
+    }
+
+    private string RunwaySignal
+    {
+        get
+        {
+            if (_resp == null) return "-";
+            // simple signal: if worst balance is negative => "At Risk"
+            if (_resp.WorstBalance < 0) return "AT RISK";
+            if (_resp.WorstBalance < 500) return "TIGHT";
+            return "STABLE";
+        }
+    }
+
+    private string ActualNetChipClass()
+    {
+        if (NetActual < 0) return "bad";
+        if (NetActual < 500) return "warn";
+        return "good";
+    }
+
+    private string GapRiskChipClass()
+    {
+        // simple: if AR + AP pressure is large compared to net
+        var pressure = TopARSum + TopAPSum;
+        if (pressure <= 0) return "good";
+        if (_resp == null) return "warn";
+        var baseVal = Math.Max(1m, Math.Abs(NetAll));
+        var ratio = pressure / baseVal;
+
+        if (ratio >= 3m) return "bad";
+        if (ratio >= 1.5m) return "warn";
+        return "good";
+    }
+
+    private string GapRiskLabel()
+    {
+        var c = GapRiskChipClass();
+        if (c == "bad") return "HIGH";
+        if (c == "warn") return "MEDIUM";
+        return "LOW";
+    }
+
+    private string CashHealthChipClass()
+    {
+        if (_resp == null) return "warn";
+        if (_resp.WorstBalance < 0) return "bad";
+        if (_resp.WorstBalance < 500) return "warn";
+        return "good";
+    }
+
+    private string CashHealthLabel()
+    {
+        if (_resp == null) return "-";
+        if (_resp.WorstBalance < 0) return "CRITICAL";
+        if (_resp.WorstBalance < 500) return "TIGHT";
+        return "GOOD";
+    }
+
+    private IEnumerable<(DateTime Date, decimal In, decimal Out, decimal Net)> ActualDailyNetTop10
+    {
+        get
+        {
+            if (_resp == null) return Enumerable.Empty<(DateTime, decimal, decimal, decimal)>();
+            return _resp.Rows
+                .OrderByDescending(r => r.Date)
+                .Take(10)
+                .Select(r => (r.Date, r.ActualIn, r.ActualOut, r.ActualIn - r.ActualOut));
+        }
+    }
+
+    // ========= Formatting / UI helpers =========
+    private static string Fmt(decimal v) => v.ToString("0.00");
+
+    private static string AlertBadgeClass(string? severity)
+    {
+        var s = (severity ?? "").Trim().ToLowerInvariant();
+        if (s == "danger") return "bg-danger";
+        if (s == "warning") return "bg-warning text-dark";
+        if (s == "success") return "bg-success";
+        return "bg-secondary";
+    }
+
+    private static string RunningRowClass(decimal running)
+    {
+        if (running < 0) return "table-danger";
+        if (running < 500) return "table-warning";
+        return "";
+    }
+}

@@ -1,0 +1,483 @@
+﻿@page "/insights/finance-health"
+
+@using Microsoft.EntityFrameworkCore
+@using UaeEInvoice.Data
+@using UaeEInvoice.Services.Analytics
+@using UaeEInvoice.Services.Auth
+
+@inject AnalyticsService Analytics
+@inject ICurrentCompany CurrentCompany
+@inject IJSRuntime JS
+@inject NavigationManager Nav
+@inject IDbContextFactory<AppDbContext> DbFactory
+
+@implements IAsyncDisposable
+
+<style>
+    .shell {
+        min-height: calc(100vh - 90px);
+        background: radial-gradient(900px 450px at 15% 0%, rgba(13,110,253,.12), transparent 60%), radial-gradient(900px 450px at 85% 0%, rgba(25,135,84,.10), transparent 60%), linear-gradient(180deg, rgba(248,249,250,1), rgba(255,255,255,1));
+        border: 1px solid rgba(0,0,0,.07);
+        border-radius: 18px;
+        box-shadow: 0 12px 34px rgba(0,0,0,.06);
+        padding: 18px;
+    }
+
+    .title {
+        font-weight: 900;
+        letter-spacing: -0.6px;
+        margin: 0;
+        font-size: clamp(22px, 2.2vw, 34px);
+        line-height: 1.05;
+    }
+
+    .mut {
+        color: rgba(33,37,41,.65);
+        font-size: 13px;
+    }
+
+    .cardx {
+        border: 1px solid rgba(0,0,0,.07);
+        border-radius: 18px;
+        background: rgba(255,255,255,.78);
+        box-shadow: 0 10px 28px rgba(0,0,0,.05);
+        backdrop-filter: blur(10px);
+        overflow: hidden;
+        padding: 14px;
+    }
+
+    .chartBox {
+        height: 340px;
+    }
+
+    .chartBoxTall {
+        height: 390px;
+    }
+
+    .btn-soft {
+        border-radius: 12px;
+        padding: 10px 12px;
+        font-weight: 800;
+        border: 1px solid rgba(0,0,0,.10);
+        background: rgba(255,255,255,.70);
+    }
+
+    .btn-main {
+        border-radius: 12px;
+        padding: 10px 14px;
+        font-weight: 900;
+    }
+
+    .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        border-radius: 999px;
+        padding: 8px 12px;
+        border: 1px solid rgba(0,0,0,.10);
+        background: rgba(255,255,255,.78);
+        font-weight: 800;
+        box-shadow: 0 8px 22px rgba(0,0,0,.05);
+        backdrop-filter: blur(10px);
+        white-space: nowrap;
+    }
+
+        .pill.good {
+            border-color: rgba(25,135,84,.35);
+        }
+
+        .pill.bad {
+            border-color: rgba(220,53,69,.35);
+        }
+
+    .skeleton {
+        border-radius: 18px;
+        border: 1px solid rgba(0,0,0,.07);
+        background: linear-gradient(90deg, rgba(0,0,0,.04), rgba(0,0,0,.08), rgba(0,0,0,.04));
+        background-size: 200% 100%;
+        animation: shimmer 1.1s infinite linear;
+        height: 340px;
+    }
+
+    @@keyframes shimmer {
+        0% {
+            background-position: 200% 0;
+        }
+
+        100% {
+            background-position: -200% 0;
+        }
+    }
+</style>
+
+<div class="container-xxl py-4">
+    <div class="shell">
+
+        <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
+            <div>
+                <h2 class="title">Finance Health (BI)</h2>
+                <div class="mut">Revenue vs Purchases vs Profit • Aging • VAT snapshot • Top Customers (MTD)</div>
+
+                <div class="d-flex gap-2 flex-wrap mt-3">
+                    <span class="pill"><span class="mut">Company</span> #@CurrentCompany.CompanyId</span>
+                    <span class="pill"><span class="mut">As of</span> @DateTime.Today.ToString("dd MMM yyyy")</span>
+                    <span class="pill"><span class="mut">Range</span> @_days days</span>
+                </div>
+            </div>
+
+            <div class="d-flex gap-2 flex-wrap">
+                <button class="btn btn-soft" type="button" @onclick="GoBack">Back</button>
+
+                <div class="btn-group" role="group" aria-label="days range">
+                    <button class="@RangeBtnClass(30)" type="button" @onclick="() => SetDays(30)">30 Days</button>
+                    <button class="@RangeBtnClass(90)" type="button" @onclick="() => SetDays(90)">90 Days</button>
+                </div>
+
+                <button class="btn btn-primary btn-main" type="button" @onclick="Reload" disabled="@_loading">
+                    @(_loading ? "Loading..." : "Refresh")
+                </button>
+            </div>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(_err))
+        {
+            <div class="alert alert-danger border-0 rounded-4 shadow-sm">
+                <b>Error:</b> @_err
+            </div>
+        }
+
+        <div class="row g-3">
+
+            <!-- Revenue vs Purchases vs Profit -->
+            <div class="col-12">
+                <div class="cardx">
+                    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+                        <div>
+                            <div class="fw-bold">Revenue vs Purchases vs Profit (Last @_days days)</div>
+                            <div class="mut">Profit = Revenue − Purchases</div>
+                        </div>
+
+                        <div class="d-flex gap-2 flex-wrap">
+                            <span class="pill"><span class="mut">Revenue</span> @Fmt(_salesTotal)</span>
+                            <span class="pill"><span class="mut">Purchases</span> @Fmt(_purchaseTotal)</span>
+
+                            <span class="@PillClass(_profitTotal)">
+                                <span class="mut">Profit</span> @Fmt(_profitTotal)
+                            </span>
+
+                            <span class="@PillClass(_profitPct)">
+                                <span class="mut">Profit %</span> @_profitPct.ToString("0.00")%
+                            </span>
+                        </div>
+                    </div>
+
+                    <div class="chartBoxTall">
+                        @if (_loading && !_chartsReady)
+                        {
+                            <div class="skeleton" style="height:390px"></div>
+                        }
+                        else
+                        {
+                            <canvas id="@_lineId" style="width:100%; height:100%"></canvas>
+                        }
+                    </div>
+                </div>
+            </div>
+
+            <!-- AR Aging -->
+            <div class="col-12 col-lg-6">
+                <div class="cardx">
+                    <div class="fw-bold mb-1">AR Aging</div>
+                    <div class="mut mb-2">Where collections are stuck</div>
+
+                    <div class="chartBox">
+                        @if (_loading && !_chartsReady)
+                        {
+                            <div class="skeleton"></div>
+                        }
+                        else
+                        {
+                            <canvas id="@_arId" style="width:100%; height:100%"></canvas>
+                        }
+                    </div>
+                </div>
+            </div>
+
+            <!-- AP Aging -->
+            <div class="col-12 col-lg-6">
+                <div class="cardx">
+                    <div class="fw-bold mb-1">AP Aging</div>
+                    <div class="mut mb-2">Upcoming vendor pressure</div>
+
+                    <div class="chartBox">
+                        @if (_loading && !_chartsReady)
+                        {
+                            <div class="skeleton"></div>
+                        }
+                        else
+                        {
+                            <canvas id="@_apId" style="width:100%; height:100%"></canvas>
+                        }
+                    </div>
+                </div>
+            </div>
+
+            <!-- Top Customers (MTD) -->
+            <div class="col-12 col-lg-6">
+                <div class="cardx">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <div>
+                            <div class="fw-bold">Top Customers (MTD)</div>
+                            <div class="mut">Highest sales customers in current month</div>
+                        </div>
+
+                        <button class="btn btn-soft" type="button" @onclick="GoCustomers">Customers</button>
+                    </div>
+
+                    @if (_topCustomers.Count == 0)
+                    {
+                        <div class="mut">No sales yet this month.</div>
+                    }
+                    else
+                    {
+                        <div class="table-responsive">
+                            <table class="table table-sm align-middle mb-0">
+                                <thead>
+                                    <tr class="mut">
+                                        <th style="width:55px">#</th>
+                                        <th>Customer</th>
+                                        <th class="text-end">Invoices</th>
+                                        <th class="text-end">Sales</th>
+                                        <th style="width:90px"></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @{
+                                        var i = 1;
+                                        foreach (var r in _topCustomers)
+                                        {
+                                            <tr>
+                                                <td class="fw-bold">@i</td>
+
+                                                <!-- ✅ IMPORTANT: property names that match TopCustomerRow -->
+                                                <td class="fw-semibold">@r.CustomerName</td>
+                                                <td class="text-end">@r.InvoiceCount</td>
+                                                <td class="text-end fw-bold">@Fmt(r.SalesTotal)</td>
+
+                                                <td class="text-end">
+                                                    <button class="btn btn-outline-primary btn-sm" type="button"
+                                                            @onclick="() => OpenCustomer(r.CustomerId)">
+                                                        Open
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                            i++;
+                                        }
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </div>
+            </div>
+
+            <!-- VAT -->
+            <div class="col-12 col-lg-6">
+                <div class="cardx">
+                    <div class="fw-bold mb-1">VAT (MTD)</div>
+                    <div class="mut mb-2">Output vs Input vs Net</div>
+
+                    <div class="chartBox">
+                        @if (_loading && !_chartsReady)
+                        {
+                            <div class="skeleton"></div>
+                        }
+                        else
+                        {
+                            <canvas id="@_vatId" style="width:100%; height:100%"></canvas>
+                        }
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+</div>
+
+@code {
+    private bool _loading;
+    private string? _err;
+
+    private int _days = 30;
+
+    private readonly string _lineId = "revPurProfit";
+    private readonly string _arId = "arAgingBar";
+    private readonly string _apId = "apAgingBar";
+    private readonly string _vatId = "vatBar";
+
+    private List<TrendPoint> _sales = new();
+    private List<TrendPoint> _purchases = new();
+
+    private AgingResult _ar = new(new(), 0m);
+    private AgingResult _ap = new(new(), 0m);
+    private ExecKpis? _kpis;
+
+    private List<TopCustomerRow> _topCustomers = new();
+
+    private decimal _salesTotal;
+    private decimal _purchaseTotal;
+    private decimal _profitTotal;
+    private decimal _profitPct;
+
+    private bool _renderRequested;
+    private bool _chartsReady;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Reload();
+    }
+
+    private void GoBack() => Nav.NavigateTo("/insights");
+    private void GoCustomers() => Nav.NavigateTo("/customers");
+
+    private void OpenCustomer(int customerId)
+    {
+        // Drilldown page (MTD)
+        Nav.NavigateTo($"/insights/customer-sales/{customerId}");
+    }
+
+    private async Task SetDays(int d)
+    {
+        _days = d;
+        await Reload();
+    }
+
+    private async Task Reload()
+    {
+        _loading = true;
+        _err = null;
+        _chartsReady = false;
+
+        try
+        {
+            var cid = CurrentCompany.CompanyId;
+            var asOf = DateTime.Today;
+
+            var start = asOf.Date.AddDays(-(_days - 1));
+            var endExcl = asOf.Date.AddDays(1);
+
+            _kpis = await Analytics.GetExecutiveKpis(cid, asOf);
+
+            // ✅ Top Customers (MTD)
+            var mtdFrom = new DateTime(asOf.Year, asOf.Month, 1);
+            var mtdTo = asOf.Date.AddDays(1);
+            _topCustomers = await Analytics.GetTopCustomers(cid, mtdFrom, mtdTo, 10);
+
+            // 1) Sales trend (service already fills missing dates)
+            _sales = await Analytics.GetSalesTrendDaily(cid, _days, asOf);
+
+            // 2) Purchases trend (normalize)
+            await using var db = await DbFactory.CreateDbContextAsync();
+
+            var purRows = await db.PurchaseInvoices.AsNoTracking()
+                .Where(x => x.CompanyId == cid && x.PurchaseDate >= start && x.PurchaseDate < endExcl)
+                .GroupBy(x => x.PurchaseDate.Date)
+                .Select(g => new { Day = g.Key, Value = g.Sum(x => x.GrandTotal), Count = g.Count() })
+                .ToListAsync();
+
+            var purMap = purRows.ToDictionary(x => x.Day.Date);
+            _purchases = new();
+
+            for (var d = start; d < endExcl; d = d.AddDays(1))
+            {
+                if (purMap.TryGetValue(d.Date, out var row))
+                    _purchases.Add(new TrendPoint(d.Date, row.Value, row.Count));
+                else
+                    _purchases.Add(new TrendPoint(d.Date, 0m, 0));
+            }
+
+            // 3) Aging
+            _ar = await Analytics.GetArAging(cid, asOf);
+            _ap = await Analytics.GetApAging(cid, asOf);
+
+            // 4) Totals + Profit
+            _salesTotal = _sales.Sum(x => x.Value);
+            _purchaseTotal = _purchases.Sum(x => x.Value);
+            _profitTotal = _salesTotal - _purchaseTotal;
+            _profitPct = (_salesTotal <= 0m) ? 0m : (_profitTotal / _salesTotal) * 100m;
+
+            _renderRequested = true;
+        }
+        catch (Exception ex)
+        {
+            _err = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+
+        StateHasChanged();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_renderRequested) return;
+        _renderRequested = false;
+
+        var labels = _sales.Select(x => x.Day.ToString("dd-MMM")).ToArray();
+
+        var salesVals = _sales.Select(x => (double)x.Value).ToArray();
+        var purVals = _purchases.Select(x => (double)x.Value).ToArray();
+        var profitVals = _sales.Zip(_purchases, (s, p) => (double)(s.Value - p.Value)).ToArray();
+
+        var datasets = new object[]
+        {
+            new { label = "Revenue",   data = salesVals,  tension = 0.35, pointRadius = 2, fill = true  },
+            new { label = "Purchases", data = purVals,    tension = 0.35, pointRadius = 2, fill = false },
+            new { label = "Profit",    data = profitVals, tension = 0.35, pointRadius = 2, fill = false }
+        };
+
+        await JS.InvokeVoidAsync("biCharts.renderLineMulti", _lineId, labels, datasets, new { currencyPrefix = "AED " });
+
+        var arLabels = _ar.Buckets.Select(b => b.Bucket).ToArray();
+        var arVals = _ar.Buckets.Select(b => (double)b.Amount).ToArray();
+        await JS.InvokeVoidAsync("biCharts.renderBar", _arId, arLabels, arVals, "AR Aging", new { currencyPrefix = "AED " });
+
+        var apLabels = _ap.Buckets.Select(b => b.Bucket).ToArray();
+        var apVals = _ap.Buckets.Select(b => (double)b.Amount).ToArray();
+        await JS.InvokeVoidAsync("biCharts.renderBar", _apId, apLabels, apVals, "AP Aging", new { currencyPrefix = "AED " });
+
+        var vatLabels = new[] { "Output VAT", "Input VAT", "Net VAT" };
+        var vatVals = new[]
+        {
+            (double)(_kpis?.VatOutputMtd ?? 0m),
+            (double)(_kpis?.VatInputMtd ?? 0m),
+            (double)(_kpis?.VatNetMtd ?? 0m)
+        };
+        await JS.InvokeVoidAsync("biCharts.renderBar", _vatId, vatLabels, vatVals, "VAT (MTD)", new { currencyPrefix = "AED " });
+
+        _chartsReady = true;
+        StateHasChanged();
+    }
+
+    private static string Fmt(decimal v) => v.ToString("0.00");
+
+    private string RangeBtnClass(int d)
+        => $"btn btn-outline-primary {(_days == d ? "active" : "")}";
+
+    private string PillClass(decimal v)
+        => $"pill {(v >= 0 ? "good" : "bad")}";
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("biCharts.destroy", _lineId);
+            await JS.InvokeVoidAsync("biCharts.destroy", _arId);
+            await JS.InvokeVoidAsync("biCharts.destroy", _apId);
+            await JS.InvokeVoidAsync("biCharts.destroy", _vatId);
+        }
+        catch { }
+    }
+}

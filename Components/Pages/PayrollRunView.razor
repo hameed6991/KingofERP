@@ -1,0 +1,161 @@
+﻿@page "/payroll-run/{Id:int}"
+@using Microsoft.EntityFrameworkCore
+@using UaeEInvoice.Data
+@inject AppDbContext Db
+@inject NavigationManager Nav
+@inject UaeEInvoice.Services.Payroll.PayrollService PayrollService
+
+<h3>Payroll Run</h3>
+
+@if (!string.IsNullOrWhiteSpace(_error))
+{
+    <div class="alert alert-danger">@_error</div>
+}
+@if (!string.IsNullOrWhiteSpace(_msg))
+{
+    <div class="alert alert-success">@_msg</div>
+}
+
+@if (_run == null)
+{
+    <div>Loading...</div>
+}
+else
+{
+    <div class="card mb-3">
+        <div class="card-body">
+            <div><b>Run No:</b> @_run.RunNo</div>
+            <div><b>Period:</b> @_run.PeriodMonth.ToString("yyyy-MM")</div>
+            <div><b>Status:</b> @_run.Status</div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-body">
+
+            @if (_run.Status == "Draft")
+            {
+                <button class="btn btn-success" @onclick="Approve" disabled="@_busy">Approve</button>
+            }
+            else if (_run.Status == "Approved")
+            {
+                <div class="row g-3 align-items-end">
+
+                    <div class="col-12 col-md-6">
+                        <label class="form-label">Pay From (Cash/Bank)</label>
+                        <select class="form-select" @bind="_cashAccountNo">
+                            @foreach (var a in _cashAccounts)
+                            {
+                                <option value="@a.AccountNo">@a.AccountName (@a.AccountNo)</option>
+                            }
+                        </select>
+                        <div class="text-muted small mt-1">
+                            Pay time will be system time (DateTime.Now).
+                        </div>
+                    </div>
+
+                    <div class="col-12 col-md-3">
+                        <button class="btn btn-primary w-100" @onclick="Pay" disabled="@_busy">Pay</button>
+                    </div>
+
+                </div>
+            }
+            else if (_run.Status == "Paid")
+            {
+                <button class="btn btn-secondary" disabled>Paid</button>
+            }
+
+            <hr />
+            <button class="btn btn-outline-secondary" @onclick="Back" disabled="@_busy">Back</button>
+
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private PayrollRun? _run;
+    private string? _error;
+    private string? _msg;
+    private bool _busy;
+
+    // TODO: later replace with logged-in company id
+    private int _companyId = 1;
+
+    private List<ChartOfAccount> _cashAccounts = new();
+    private int _cashAccountNo;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        _error = _msg = null;
+
+        _run = await Db.PayrollRuns
+            .Include(x => x.Lines)
+            .FirstOrDefaultAsync(x => x.PayrollRunId == Id && x.CompanyId == _companyId);
+
+        if (_run == null) return;
+
+        _cashAccounts = await PayrollService.GetCashBankAccountsAsync(_companyId);
+        _cashAccountNo = _cashAccounts.FirstOrDefault()?.AccountNo ?? 0;
+    }
+
+    private async Task Approve()
+    {
+        _busy = true;
+        _error = _msg = null;
+
+        try
+        {
+            await PayrollService.ApproveAsync(Id, _companyId);
+            _msg = "Payroll approved.";
+            await Load();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task Pay()
+    {
+        _busy = true;
+        _error = _msg = null;
+
+        try
+        {
+            if (_cashAccountNo == 0)
+            {
+                _error = "Select a Cash/Bank account.";
+                return;
+            }
+
+            // ✅ Alternate method: PaidOn = system time
+            var paidOn = DateTime.Now;
+
+            await PayrollService.PayAsync(Id, _companyId, _cashAccountNo, paidOn);
+
+            _msg = $"Payroll paid on {paidOn:yyyy-MM-dd HH:mm}.";
+            await Load();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void Back() => Nav.NavigateTo("/payroll-runs");
+}

@@ -1,0 +1,274 @@
+﻿@using UaeEInvoice.Data
+@using System.Globalization
+@using Microsoft.AspNetCore.Components
+
+<div class="itp-host" style="@HostStyle">
+    <div class="itp-frame" style="@FrameStyle">
+        @if (Settings is null)
+        {
+            <div style="padding:16px;">No settings</div>
+        }
+        else
+        {
+            var s = Settings;
+            var cols = VisibleCols();
+
+            <div class="itp-paper" style="@PaperStyle(s)">
+                @if (s.WatermarkEnabled && !string.IsNullOrWhiteSpace(s.WatermarkText))
+                {
+                    <div class="itp-wm" style="@WatermarkStyle(s)">@s.WatermarkText</div>
+                }
+
+                <!-- Header -->
+                <div style="@HeadStyle">
+                    <div style="display:flex; gap:12px; align-items:flex-start;">
+                        @if (s.ShowLogo)
+                        {
+                            <div style="@LogoStyle(s)">LOGO</div>
+                        }
+                        <div>
+                            <div style="font-weight:900; font-size:18px;">Company Name LLC</div>
+                            <div style="@MutedStyle(s)">Dubai, UAE</div>
+                            @if (s.ShowTRN)
+                            {
+                                <div style="@MutedStyle(s)">TRN: 100123456700003</div>
+                            }
+                        </div>
+                    </div>
+
+                    <div style="text-align:right;">
+                        <div style="@TitleStyle(s)">INVOICE</div>
+                        <div style="@MutedStyle(s)">INV-000123</div>
+                        <div style="@MutedStyle(s)">Date: 11-Jan-2026</div>
+                    </div>
+                </div>
+
+                <hr style="margin:16px 0; border-color:rgba(15,23,42,.10);" />
+
+                <!-- Bill To + QR -->
+                <div style="display:flex; justify-content:space-between; gap:16px; align-items:flex-start;">
+                    <div>
+                        <div style="@CapStyle(s)">BILL TO</div>
+                        <div style="font-weight:800;">Customer Name</div>
+                        <div style="@MutedStyle(s)">TRN: 123456789000003</div>
+                    </div>
+
+                    @if (s.ShowQRCode)
+                    {
+                        <div style="@QrStyle(s)">QR</div>
+                    }
+                </div>
+
+                <!-- Table -->
+                <table style="@TblStyle(s)">
+                    <thead>
+                        @if (s.EnableColumnGroups)
+                        {
+                            var groups = BuildGroups(cols);
+                            if (groups.Count > 0)
+                            {
+                                <tr style="background:#f8fafc;">
+                                    @foreach (var g in groups)
+                                    {
+                                        <th colspan="@g.ColSpan" style="@ThStyle("center")">
+                                            @g.Title
+                                        </th>
+                                    }
+                                </tr>
+                            }
+                        }
+
+                        <tr style="background:#f8fafc;">
+                            @foreach (var c in cols)
+                            {
+                                <th style="@ThStyle(c.Align)">@c.Title</th>
+                            }
+                        </tr>
+                    </thead>
+
+                    <tbody>
+                        <tr>
+                            @foreach (var c in cols)
+                            {
+                                <td style="@TdStyle(c.Align)">
+                                    @((MarkupString)CellHtml(c.Key))
+                                </td>
+                            }
+                        </tr>
+                    </tbody>
+                </table>
+
+                <!-- Totals -->
+                <div style="display:flex; justify-content:flex-end; margin-top:14px;">
+                    <div style="min-width:240px;">
+                        <div style="@TotRowStyle"><span style="@MutedStyle(s)">Subtotal</span><b>500.00</b></div>
+                        <div style="@TotRowStyle"><span style="@MutedStyle(s)">VAT</span><b>25.00</b></div>
+                        <div style="@TotFinalStyle"><span style="font-weight:900;">Total</span><span style="font-weight:900;font-size:18px;">525.00</span></div>
+                    </div>
+                </div>
+
+                @if (s.ShowNotes && !string.IsNullOrWhiteSpace(s.FooterNote))
+                {
+                    <div style="margin-top:14px; color:@s.MutedHex; font-size:12px;">@s.FooterNote</div>
+                }
+
+                @if (s.ShowTerms && !string.IsNullOrWhiteSpace(s.TermsHtml))
+                {
+                    <div style="margin-top:10px; color:@s.MutedHex; font-size:12px;">
+                        <b>Terms:</b> @s.TermsHtml
+                    </div>
+                }
+
+                @if (s.ShowSignature)
+                {
+                    <div style="margin-top:22px; width:220px;">
+                        <div style="height:34px;border-bottom:1px solid rgba(15,23,42,.18);"></div>
+                        <div style="@MutedStyle(s); margin-top:6px;">@s.SignatureLabel</div>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter] public InvoiceTemplateSettings? Settings { get; set; }
+    [Parameter] public bool Compact { get; set; } = false;
+
+    private double Scale => Compact ? 0.52 : 0.74;
+
+    private string HostStyle => $"width:{(820 * Scale):0}px;height:{(1060 * Scale):0}px;";
+    private string FrameStyle =>
+        $"transform:scale({Scale.ToString(CultureInfo.InvariantCulture)});" +
+        "transform-origin:top left; width:820px; height:1060px;";
+
+    private static string PaperStyle(InvoiceTemplateSettings s)
+    {
+        var fs = (s.FontScale <= 0 ? 100 : s.FontScale);
+        return
+            $"background:{s.PaperHex}; border-radius:{Math.Max(10, s.Corner)}px; padding:22px; " +
+            $"color:{s.TextHex}; position:relative; font-size:{fs}%; " +
+            "box-shadow:0 10px 30px rgba(0,0,0,.10);";
+    }
+
+    private static string WatermarkStyle(InvoiceTemplateSettings s)
+    {
+        var op = s.WatermarkOpacity;
+        if (op <= 0) op = 0.06;
+        if (op > 0.30) op = 0.30;
+
+        var accent = string.IsNullOrWhiteSpace(s.AccentHex) ? "#3B82F6" : s.AccentHex;
+
+        return
+            "position:absolute; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:none;" +
+            $"opacity:{op.ToString(CultureInfo.InvariantCulture)};" +
+            $"font-size:84px; font-weight:900; transform:rotate(-18deg); color:{accent};";
+    }
+
+    private static string HeadStyle =>
+        "display:flex; justify-content:space-between; align-items:flex-start; gap:16px;";
+
+    private static string LogoStyle(InvoiceTemplateSettings s) =>
+        $"width:54px;height:54px;border-radius:{Math.Min(16, s.Corner)}px;" +
+        "border:1px solid rgba(15,23,42,.12); background:#f8fafc; display:flex; align-items:center; justify-content:center; font-weight:900;";
+
+    private static string TitleStyle(InvoiceTemplateSettings s) =>
+        $"font-weight:900;font-size:22px;color:{s.AccentHex};";
+
+    private static string MutedStyle(InvoiceTemplateSettings s) =>
+        $"color:{s.MutedHex}; font-size:12px;";
+
+    private static string CapStyle(InvoiceTemplateSettings s) =>
+        $"color:{s.MutedHex}; font-size:12px; letter-spacing:.3px;";
+
+    private static string QrStyle(InvoiceTemplateSettings s) =>
+        $"width:86px;height:86px;border:1px dashed rgba(15,23,42,.35);border-radius:{Math.Min(14, s.Corner)}px;" +
+        "display:flex;align-items:center;justify-content:center;color:rgba(15,23,42,.55);font-size:12px;";
+
+    private static string TblStyle(InvoiceTemplateSettings s) =>
+        "width:100%; margin-top:14px; border-collapse:collapse; font-size:13px;";
+
+    private static string ThStyle(string align) =>
+        $"text-align:{align}; padding:10px; border:1px solid rgba(15,23,42,.10);";
+
+    private static string TdStyle(string align) =>
+        $"text-align:{align}; padding:10px; border:1px solid rgba(15,23,42,.10);";
+
+    private static string TotRowStyle =>
+        "display:flex; justify-content:space-between; padding:6px 0;";
+
+    private static string TotFinalStyle =>
+        "display:flex; justify-content:space-between; padding:10px 0; border-top:1px solid rgba(15,23,42,.10);";
+
+    private List<InvoiceTemplateColumnDef> VisibleCols()
+    {
+        if (Settings == null) return new();
+        Settings.EnsureDefaults();
+        return Settings.ItemColumns.Where(c => c.Visible).ToList();
+    }
+
+    private static string CellHtml(string key)
+    {
+        key = (key ?? "").Trim().ToLowerInvariant();
+        return key switch
+        {
+            "item" or "name" => "<b>Service A</b>",
+            "qty" => "1",
+            "rate" => "500.00",
+            "vat" => "25.00",
+            "total" => "<b>525.00</b>",
+            _ => "-"
+        };
+    }
+
+    private sealed class ColGroup
+    {
+        public string Title { get; set; } = "";
+        public int ColSpan { get; set; } = 1;
+    }
+
+    private static List<ColGroup> BuildGroups(List<InvoiceTemplateColumnDef> cols)
+    {
+        // keep order; group by consecutive GroupTitle
+        var groups = new List<ColGroup>();
+        if (cols.Count == 0) return groups;
+
+        string? curTitle = null;
+        int curSpan = 0;
+
+        void flush()
+        {
+            if (curSpan <= 0) return;
+            groups.Add(new ColGroup { Title = curTitle ?? "", ColSpan = curSpan });
+        }
+
+        foreach (var c in cols)
+        {
+            var gt = string.IsNullOrWhiteSpace(c.GroupTitle) ? "" : c.GroupTitle.Trim();
+
+            if (curTitle == null)
+            {
+                curTitle = gt;
+                curSpan = 1;
+                continue;
+            }
+
+            if (string.Equals(curTitle, gt, StringComparison.OrdinalIgnoreCase))
+            {
+                curSpan++;
+            }
+            else
+            {
+                flush();
+                curTitle = gt;
+                curSpan = 1;
+            }
+        }
+
+        flush();
+
+        // show group row only if meaningful (some group title exists OR any colspan > 1)
+        var meaningful = groups.Any(g => g.ColSpan > 1 || !string.IsNullOrWhiteSpace(g.Title));
+        return meaningful ? groups : new List<ColGroup>();
+    }
+}

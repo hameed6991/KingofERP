@@ -1,0 +1,245 @@
+﻿@page "/trial-balance"
+@using Microsoft.EntityFrameworkCore
+@using UaeEInvoice.Services.Auth
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject NavigationManager Nav
+@inject ICurrentCompany CurrentCompany
+
+<h1 class="display-6 fw-bold">Trial Balance</h1>
+<p class="text-muted mb-3">
+    All totals are derived from <b>LedgerEntries</b>. Any voucher (JV / INV / REC / EXP) will reflect here.
+</p>
+
+@if (!string.IsNullOrWhiteSpace(_error))
+{
+    <div class="alert alert-danger">@_error</div>
+}
+
+<div class="card p-3 shadow-sm rounded-4 mb-3">
+    <div class="row g-3 align-items-end">
+        <div class="col-md-3">
+            <label class="form-label">From</label>
+            <input type="date" class="form-control"
+                   @bind-value="FromDate" @bind-value:format="yyyy-MM-dd" />
+        </div>
+        <div class="col-md-3">
+            <label class="form-label">To</label>
+            <input type="date" class="form-control"
+                   @bind-value="ToDate" @bind-value:format="yyyy-MM-dd" />
+        </div>
+        <div class="col-md-3 d-grid">
+            <button class="btn btn-primary" @onclick="LoadAsync">Refresh</button>
+        </div>
+        <div class="col-md-3 d-flex gap-2">
+            <button class="btn btn-outline-secondary w-100" @onclick="ThisMonth">This Month</button>
+            <button class="btn btn-outline-secondary w-100" @onclick="Last30Days">Last 30 Days</button>
+        </div>
+    </div>
+</div>
+
+<div class="card p-3 shadow-sm rounded-4">
+    <div class="table-responsive">
+        <table class="table align-middle">
+            <thead>
+                <tr class="text-uppercase text-muted small">
+                    <th>Account</th>
+                    <th class="text-end">Debit</th>
+                    <th class="text-end">Credit</th>
+                    <th class="text-end">Closing Dr</th>
+                    <th class="text-end">Closing Cr</th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (_rows.Count == 0)
+                {
+                    <tr>
+                        <td colspan="5" class="text-center text-muted py-5">No entries for selected period.</td>
+                    </tr>
+                }
+                else
+                {
+                    @foreach (var r in _rows)
+                    {
+                        <tr>
+                            <td>
+                                <a href="@($"/ledger/{r.AccountNo}")" class="text-decoration-none fw-semibold">
+                                    @r.AccountName (@r.AccountNo)
+                                </a>
+                            </td>
+
+                            <td class="text-end">@r.Debit.ToString("N2")</td>
+                            <td class="text-end">@r.Credit.ToString("N2")</td>
+                            <td class="text-end">@r.ClosingDr.ToString("N2")</td>
+                            <td class="text-end">@r.ClosingCr.ToString("N2")</td>
+                        </tr>
+                    }
+
+                    <tr class="table-light fw-bold">
+                        <td class="text-end">TOTAL</td>
+                        <td class="text-end">@_totalDr.ToString("N2")</td>
+                        <td class="text-end">@_totalCr.ToString("N2")</td>
+                        <td class="text-end">@_totalClosingDr.ToString("N2")</td>
+                        <td class="text-end">@_totalClosingCr.ToString("N2")</td>
+                    </tr>
+
+                    @if (Math.Round(_totalClosingDr - _totalClosingCr, 2) != 0)
+                    {
+                        <tr>
+                            <td colspan="5">
+                                <div class="alert alert-warning mb-0">
+                                    Trial Balance is not balanced. Difference:
+                                    <b>@Math.Abs(_totalClosingDr - _totalClosingCr).ToString("N2")</b>
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                    else
+                    {
+                        <tr>
+                            <td colspan="5">
+                                <div class="alert alert-success mb-0">
+                                    ✅ Trial Balance is balanced.
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+@code {
+    private string? _error;
+
+    private DateTime FromDate = DateTime.Today.AddDays(-30);
+    private DateTime ToDate = DateTime.Today;
+
+    private List<Row> _rows = new();
+
+    private decimal _totalDr, _totalCr, _totalClosingDr, _totalClosingCr;
+    private int _companyId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _error = null;
+        _rows.Clear();
+        _totalDr = _totalCr = _totalClosingDr = _totalClosingCr = 0;
+
+        try
+        {
+            await CurrentCompany.RefreshAsync();
+            _companyId = CurrentCompany.CompanyId;
+
+            if (_companyId <= 0)
+                throw new Exception("CompanyId not found from login/session.");
+
+            var from = FromDate.Date;
+            var toExclusive = ToDate.Date.AddDays(1);
+
+            await using var db = await DbFactory.CreateDbContextAsync();
+
+            // 1) Split GL rows into debit and credit legs
+            var debits = db.GeneralLedgerEntries.AsNoTracking()
+                .Where(x => x.CompanyId == _companyId && x.TxnDate >= from && x.TxnDate < toExclusive)
+                .Select(x => new Split
+                    {
+                        AccountNo = x.DebitAccountNo,
+                        Debit = x.Amount,
+                        Credit = 0m
+                    });
+
+            var credits = db.GeneralLedgerEntries.AsNoTracking()
+                .Where(x => x.CompanyId == _companyId && x.TxnDate >= from && x.TxnDate < toExclusive)
+                .Select(x => new Split
+                    {
+                        AccountNo = x.CreditAccountNo,
+                        Debit = 0m,
+                        Credit = x.Amount
+                    });
+
+            var sums = await debits.Concat(credits)
+                .GroupBy(x => x.AccountNo)
+                .Select(g => new
+                {
+                    AccountNo = g.Key,
+                    Debit = g.Sum(x => x.Debit),
+                    Credit = g.Sum(x => x.Credit)
+                })
+                .ToListAsync();
+
+            // 2) Account names from ChartOfAccounts (optional)
+            var coaMap = await db.ChartOfAccounts
+                .AsNoTracking()
+                .Where(x => x.CompanyId == _companyId)
+                .ToDictionaryAsync(x => x.AccountNo, x => x.AccountName);
+
+            foreach (var s in sums.OrderBy(x => x.AccountNo))
+            {
+                var name = coaMap.TryGetValue(s.AccountNo, out var n) ? n : "Unknown";
+
+                var net = s.Debit - s.Credit;
+                var closingDr = net > 0 ? net : 0;
+                var closingCr = net < 0 ? Math.Abs(net) : 0;
+
+                _rows.Add(new Row
+                    {
+                        AccountNo = s.AccountNo,
+                        AccountName = name,
+                        Debit = s.Debit,
+                        Credit = s.Credit,
+                        ClosingDr = closingDr,
+                        ClosingCr = closingCr
+                    });
+
+                _totalDr += s.Debit;
+                _totalCr += s.Credit;
+                _totalClosingDr += closingDr;
+                _totalClosingCr += closingCr;
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private Task ThisMonth()
+    {
+        var now = DateTime.Today;
+        FromDate = new DateTime(now.Year, now.Month, 1);
+        ToDate = now;
+        return LoadAsync();
+    }
+
+    private Task Last30Days()
+    {
+        var now = DateTime.Today;
+        FromDate = now.AddDays(-30);
+        ToDate = now;
+        return LoadAsync();
+    }
+
+    private sealed class Split
+    {
+        public int AccountNo { get; set; }
+        public decimal Debit { get; set; }
+        public decimal Credit { get; set; }
+    }
+
+    private sealed class Row
+    {
+        public int AccountNo { get; set; }
+        public string AccountName { get; set; } = "";
+        public decimal Debit { get; set; }
+        public decimal Credit { get; set; }
+        public decimal ClosingDr { get; set; }
+        public decimal ClosingCr { get; set; }
+    }
+}
+

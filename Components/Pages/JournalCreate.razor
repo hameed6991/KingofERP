@@ -1,0 +1,540 @@
+﻿@page "/journal-create"
+@using Microsoft.EntityFrameworkCore
+@using System.Security.Claims
+@using UaeEInvoice.Data
+@using UaeEInvoice.Services.Auth
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject AuthenticationStateProvider AuthStateProvider
+@inject NavigationManager Nav
+@inject ICurrentCompany CurrentCompany
+
+<h1 class="mb-1">Journal Entry</h1>
+<p class="text-muted">Create a manual journal voucher (Dr / Cr lines must match). Option-A: allocate JV to Invoice / Purchase Invoice.</p>
+
+@if (!string.IsNullOrWhiteSpace(_error))
+{
+    <div class="alert alert-danger">@_error</div>
+}
+@if (!string.IsNullOrWhiteSpace(_success))
+{
+    <div class="alert alert-success">@_success</div>
+}
+
+<div class="card p-3 shadow-sm rounded-4">
+    <div class="row g-3 align-items-end">
+        <div class="col-md-3">
+            <label class="form-label">Date</label>
+            <input type="date" class="form-control"
+                   value="@TxnDate.ToString("yyyy-MM-dd")"
+                   @onchange="OnDateChanged" />
+        </div>
+        <div class="col-md-9">
+            <label class="form-label">Narration</label>
+            <input class="form-control" placeholder="E.g. Adjustment / Opening entry..."
+                   value="@Narration"
+                   @onchange="OnNarrationChanged" />
+        </div>
+    </div>
+
+    <hr class="my-3" />
+
+    @if (_companyId <= 0)
+    {
+        <div class="alert alert-warning">
+            Company not detected. Please logout & login again.
+        </div>
+    }
+    else
+    {
+        <div class="table-responsive">
+            <table class="table align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th style="width:40%">Account</th>
+                        <th style="width:15%" class="text-end">Debit</th>
+                        <th style="width:15%" class="text-end">Credit</th>
+                        <th style="width:20%">Allocate (Option-A)</th>
+                        <th style="width:10%"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @for (int i = 0; i < Lines.Count; i++)
+                    {
+                        var idx = i;              // ✅ freeze index
+                        var line = Lines[idx];
+
+                        <tr @key="line.RowKey">
+                            <td>
+                                <select class="form-select"
+                                        value="@line.AccountNo"
+                                        @onchange="(e) => AccountNoChanged(idx, e)">
+                                    <option value="0">-- Select --</option>
+                                    @foreach (var a in Accounts)
+                                    {
+                                        <option value="@a.AccountNo">@a.AccountName (@a.AccountNo)</option>
+                                    }
+                                </select>
+                            </td>
+
+                            <td class="text-end">
+                                <input type="number" step="0.01" class="form-control text-end"
+                                       value="@line.Debit"
+                                       @onchange="(e)=> DebitChanged(idx, e)" />
+                            </td>
+
+                            <td class="text-end">
+                                <input type="number" step="0.01" class="form-control text-end"
+                                       value="@line.Credit"
+                                       @onchange="(e)=> CreditChanged(idx, e)" />
+                            </td>
+
+                            <td>
+                                @if (line.AccountNo == _arAccountNo)
+                                {
+                                    <select class="form-select form-select-sm"
+                                            value="@(line.InvoiceId?.ToString() ?? "")"
+                                            @onchange="(e)=> InvoicePickChanged(idx, e)">
+                                        <option value="">-- AR Invoice --</option>
+                                        @foreach (var inv in _arOpenInvoices)
+                                        {
+                                            <option value="@inv.InvoiceId">
+                                                @inv.InvoiceNo • @inv.CustomerName • Bal: @inv.Balance.ToString("0.00")
+                                            </option>
+                                        }
+                                    </select>
+                                }
+                                else if (line.AccountNo == _apAccountNo)
+                                {
+                                    <select class="form-select form-select-sm"
+                                            value="@(line.PurchaseInvoiceId?.ToString() ?? "")"
+                                            @onchange="(e)=> PurchasePickChanged(idx, e)">
+                                        <option value="">-- AP Purchase --</option>
+                                        @foreach (var pi in _apOpenPurchases)
+                                        {
+                                            <option value="@pi.PurchaseInvoiceId">
+                                                @pi.PurchaseNo • @pi.VendorName • Bal: @pi.Balance.ToString("0.00")
+                                            </option>
+                                        }
+                                    </select>
+                                }
+                                else
+                                {
+                                    <span class="text-muted small">—</span>
+                                }
+                            </td>
+
+                            <td class="text-end">
+                                <button class="btn btn-outline-danger btn-sm"
+                                        type="button"
+                                        @onclick="() => RemoveLine(idx)">
+                                    ✕
+                                </button>
+                            </td>
+                        </tr>
+                    }
+
+                    <tr class="fw-bold">
+                        <td class="text-end">Totals</td>
+                        <td class="text-end">@TotalDebit.ToString("0.00")</td>
+                        <td class="text-end">@TotalCredit.ToString("0.00")</td>
+                        <td></td>
+                        <td></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="d-flex gap-2 justify-content-between">
+            <div class="d-flex gap-2">
+                <button class="btn btn-outline-primary" type="button" @onclick="AddLine">+ Add Line</button>
+                <button class="btn btn-outline-secondary" type="button" @onclick="Clear">Clear</button>
+            </div>
+
+            <button class="btn btn-primary px-4" disabled="@_loading" @onclick="SaveAsync">
+                @(_loading ? "Saving..." : "Save Journal Voucher")
+            </button>
+        </div>
+
+        <div class="text-muted small mt-3">
+            Notes: AR line allocate works best when <b>Credit</b> is used (reduces receivable). AP line allocate works best when <b>Debit</b> is used (reduces payable).
+        </div>
+    }
+</div>
+
+@code {
+    private bool _loading;
+    private string? _error;
+    private string? _success;
+
+    private int _companyId;
+    private int _arAccountNo = 1100; // fallback
+    private int _apAccountNo = 2000; // fallback
+
+    private DateTime TxnDate = DateTime.Today;
+    private string? Narration;
+
+    private List<CoaMini> Accounts = new();
+    private List<JvLine> Lines = new() { new(), new() };
+
+    private List<ArOpenInvoice> _arOpenInvoices = new();
+    private List<ApOpenPurchase> _apOpenPurchases = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CurrentCompany.RefreshAsync();
+        _companyId = CurrentCompany.CompanyId;
+
+        if (_companyId <= 0)
+        {
+            _error = "Company not detected for logged-in user.";
+            return;
+        }
+
+        await LoadAccountsAsync();
+        await ResolveArApAccountsAsync();
+        await LoadOpenListsAsync();
+    }
+
+    private async Task LoadAccountsAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        Accounts = await db.Set<ChartOfAccount>()
+            .AsNoTracking()
+            .Where(a => a.CompanyId == _companyId)
+            .OrderBy(a => a.AccountNo)
+            .Select(a => new CoaMini { AccountNo = a.AccountNo, AccountName = a.AccountName })
+            .ToListAsync();
+    }
+
+    // ✅ try detect AR/AP control accounts from COA names/types; fallback to 1100/2000
+    private async Task ResolveArApAccountsAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        var coa = await db.ChartOfAccounts.AsNoTracking()
+            .Where(x => x.CompanyId == _companyId)
+            .Select(x => new { x.AccountNo, x.AccountName, x.AccountType })
+            .ToListAsync();
+
+        int Find(string[] nameContains, string[] typeEquals)
+        {
+            var found = coa.FirstOrDefault(x =>
+                typeEquals.Any(t => string.Equals((x.AccountType ?? "").Trim(), t, StringComparison.OrdinalIgnoreCase))
+                || nameContains.Any(k => (x.AccountName ?? "").Contains(k, StringComparison.OrdinalIgnoreCase)));
+
+            return found?.AccountNo ?? 0;
+        }
+
+        var ar = Find(new[] { "Receivable", "Debtors", "AR" }, new[] { "AR", "AccountsReceivable" });
+        var ap = Find(new[] { "Payable", "Creditors", "AP" }, new[] { "AP", "AccountsPayable" });
+
+        if (ar > 0) _arAccountNo = ar;
+        if (ap > 0) _apAccountNo = ap;
+    }
+
+    private async Task LoadOpenListsAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        // ---------- AR open invoices ----------
+        var invList = await db.Invoices.AsNoTracking()
+            .Where(i => i.CompanyId == _companyId)
+            .Select(i => new { i.InvoiceId, i.InvoiceNo, i.CustomerName, i.GrandTotal })
+            .OrderByDescending(i => i.InvoiceId)
+            .Take(500)
+            .ToListAsync();
+
+        var invIds = invList.Select(x => x.InvoiceId).ToList();
+
+        var recvMap = await db.InvoiceReceipts.AsNoTracking()
+            .Where(r => invIds.Contains(r.InvoiceId))
+            .GroupBy(r => r.InvoiceId)
+            .Select(g => new { InvoiceId = g.Key, Received = g.Sum(x => x.Amount) })
+            .ToDictionaryAsync(x => x.InvoiceId, x => x.Received);
+
+        // JV allocations affecting AR per invoice (Debit-Credit)
+        var arAdjMap = await db.LedgerEntries.AsNoTracking()
+            .Where(le => le.CompanyId == _companyId && le.AccountNo == _arAccountNo && le.InvoiceId != null)
+            .GroupBy(le => le.InvoiceId!.Value)
+            .Select(g => new { InvoiceId = g.Key, Adj = g.Sum(x => x.Debit - x.Credit) })
+            .ToDictionaryAsync(x => x.InvoiceId, x => x.Adj);
+
+        _arOpenInvoices = invList.Select(x =>
+        {
+            var received = recvMap.TryGetValue(x.InvoiceId, out var r) ? r : 0m;
+            var adj = arAdjMap.TryGetValue(x.InvoiceId, out var a) ? a : 0m;
+            var bal = x.GrandTotal + adj - received;
+            return new ArOpenInvoice(x.InvoiceId, x.InvoiceNo, x.CustomerName, bal);
+        })
+        .Where(x => x.Balance > 0.0001m)
+        .OrderByDescending(x => x.Balance)
+        .Take(250)
+        .ToList();
+
+        // ---------- AP open purchases ----------
+        var purList = await db.PurchaseInvoices.AsNoTracking()
+            .Where(p => p.CompanyId == _companyId)
+            .Select(p => new { p.PurchaseInvoiceId, p.PurchaseNo, p.VendorName, p.GrandTotal })
+            .OrderByDescending(p => p.PurchaseInvoiceId)
+            .Take(500)
+            .ToListAsync();
+
+        var purIds = purList.Select(x => x.PurchaseInvoiceId).ToList();
+
+        var paidMap = await db.PurchasePayments.AsNoTracking()
+            .Where(p => purIds.Contains(p.PurchaseInvoiceId))
+            .GroupBy(p => p.PurchaseInvoiceId)
+            .Select(g => new { PurchaseInvoiceId = g.Key, Paid = g.Sum(x => x.Amount) })
+            .ToDictionaryAsync(x => x.PurchaseInvoiceId, x => x.Paid);
+
+        // JV allocations affecting AP per purchase (Credit-Debit) because AP normal is credit
+        var apAdjMap = await db.LedgerEntries.AsNoTracking()
+            .Where(le => le.CompanyId == _companyId && le.AccountNo == _apAccountNo && le.PurchaseInvoiceId != null)
+            .GroupBy(le => le.PurchaseInvoiceId!.Value)
+            .Select(g => new { PurchaseInvoiceId = g.Key, Adj = g.Sum(x => x.Credit - x.Debit) })
+            .ToDictionaryAsync(x => x.PurchaseInvoiceId, x => x.Adj);
+
+        _apOpenPurchases = purList.Select(x =>
+        {
+            var paid = paidMap.TryGetValue(x.PurchaseInvoiceId, out var p) ? p : 0m;
+            var adj = apAdjMap.TryGetValue(x.PurchaseInvoiceId, out var a) ? a : 0m;
+            var bal = x.GrandTotal + adj - paid;
+            return new ApOpenPurchase(x.PurchaseInvoiceId, x.PurchaseNo, x.VendorName, bal);
+        })
+        .Where(x => x.Balance > 0.0001m)
+        .OrderByDescending(x => x.Balance)
+        .Take(250)
+        .ToList();
+    }
+
+    // ---------- UI change handlers (NO @bind to avoid RZ10008) ----------
+    private void OnDateChanged(ChangeEventArgs e)
+    {
+        if (DateTime.TryParse(e.Value?.ToString(), out var d))
+            TxnDate = d.Date;
+    }
+
+    private void OnNarrationChanged(ChangeEventArgs e)
+    {
+        Narration = e.Value?.ToString();
+    }
+
+    private void AccountNoChanged(int index, ChangeEventArgs e)
+    {
+        if (index < 0 || index >= Lines.Count) return;
+
+        if (int.TryParse(e.Value?.ToString(), out var accNo))
+            Lines[index].AccountNo = accNo;
+        else
+            Lines[index].AccountNo = 0;
+
+        // clear allocations when account changes
+        Lines[index].InvoiceId = null;
+        Lines[index].PurchaseInvoiceId = null;
+
+        // Optional: auto-pick if only one open doc
+        if (Lines[index].AccountNo == _arAccountNo && _arOpenInvoices.Count == 1)
+            Lines[index].InvoiceId = _arOpenInvoices[0].InvoiceId;
+
+        if (Lines[index].AccountNo == _apAccountNo && _apOpenPurchases.Count == 1)
+            Lines[index].PurchaseInvoiceId = _apOpenPurchases[0].PurchaseInvoiceId;
+    }
+
+    private void DebitChanged(int index, ChangeEventArgs e)
+    {
+        if (index < 0 || index >= Lines.Count) return;
+        Lines[index].Debit = ParseDec(e.Value);
+    }
+
+    private void CreditChanged(int index, ChangeEventArgs e)
+    {
+        if (index < 0 || index >= Lines.Count) return;
+        Lines[index].Credit = ParseDec(e.Value);
+    }
+
+    private void InvoicePickChanged(int index, ChangeEventArgs e)
+    {
+        if (index < 0 || index >= Lines.Count) return;
+        var s = e.Value?.ToString();
+        Lines[index].InvoiceId = int.TryParse(s, out var id) ? id : null;
+        Lines[index].PurchaseInvoiceId = null;
+    }
+
+    private void PurchasePickChanged(int index, ChangeEventArgs e)
+    {
+        if (index < 0 || index >= Lines.Count) return;
+        var s = e.Value?.ToString();
+        Lines[index].PurchaseInvoiceId = int.TryParse(s, out var id) ? id : null;
+        Lines[index].InvoiceId = null;
+    }
+
+    private static decimal ParseDec(object? v)
+        => decimal.TryParse(v?.ToString(), out var d) ? d : 0m;
+
+    private void AddLine() => Lines.Add(new JvLine());
+
+    private void RemoveLine(int index)
+    {
+        if (Lines.Count <= 2) return;
+        if (index < 0 || index >= Lines.Count) return;
+        Lines.RemoveAt(index);
+    }
+
+    private void Clear()
+    {
+        _error = null;
+        _success = null;
+        Narration = null;
+        TxnDate = DateTime.Today;
+        Lines = new List<JvLine> { new(), new() };
+    }
+
+    private decimal TotalDebit => Lines.Where(x => x.AccountNo > 0).Sum(x => x.Debit);
+    private decimal TotalCredit => Lines.Where(x => x.AccountNo > 0).Sum(x => x.Credit);
+
+    private async Task SaveAsync()
+    {
+        _error = null;
+        _success = null;
+        _loading = true;
+
+        try
+        {
+            if (_companyId <= 0) throw new Exception("Company not detected.");
+
+            var validLines = Lines
+                .Where(x => x.AccountNo > 0 && (x.Debit > 0 || x.Credit > 0))
+                .ToList();
+
+            if (validLines.Count < 2)
+                throw new Exception("Minimum 2 valid lines required.");
+
+            var dr = validLines.Sum(x => x.Debit);
+            var cr = validLines.Sum(x => x.Credit);
+
+            if (Math.Abs(dr - cr) > 0.0001m)
+                throw new Exception($"Debit & Credit mismatch. Dr={dr:0.00}, Cr={cr:0.00}");
+
+            // ✅ Allocation validations
+            await ValidateAllocationsAsync(validLines);
+
+            await using var db = await DbFactory.CreateDbContextAsync();
+
+            // VoucherNo like JV-202512-00001
+            var prefix = $"JV-{TxnDate:yyyyMM}-";
+            var last = await db.LedgerEntries.AsNoTracking()
+                .Where(x => x.CompanyId == _companyId && x.RefNo != null && x.RefNo.StartsWith(prefix))
+                .OrderByDescending(x => x.RefNo)
+                .Select(x => x.RefNo!)
+                .FirstOrDefaultAsync();
+
+            var nextNo = 1;
+            if (!string.IsNullOrWhiteSpace(last))
+            {
+                var tail = last.Substring(prefix.Length);
+                if (int.TryParse(tail, out var n)) nextNo = n + 1;
+            }
+
+            var voucherNo = prefix + nextNo.ToString("00000");
+
+            var entries = validLines.Select(l => new LedgerEntry
+                {
+                    CompanyId = _companyId,
+                    TxnDate = TxnDate.Date,
+                    AccountNo = l.AccountNo,
+                    Debit = l.Debit,
+                    Credit = l.Credit,
+                    RefNo = voucherNo,
+                    Narration = Narration,
+
+                    // ✅ Option-A links
+                    InvoiceId = l.InvoiceId,
+                    PurchaseInvoiceId = l.PurchaseInvoiceId
+                }).ToList();
+
+            db.LedgerEntries.AddRange(entries);
+            await db.SaveChangesAsync();
+
+            _success = $"Saved: {voucherNo}";
+            Nav.NavigateTo($"/voucher/{voucherNo}");
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task ValidateAllocationsAsync(List<JvLine> validLines)
+    {
+        // AR allocation rule: only CREDIT reduces invoice outstanding
+        // AP allocation rule: only DEBIT reduces purchase outstanding
+
+        // Validate AR allocations
+        var arLines = validLines.Where(x => x.AccountNo == _arAccountNo && x.InvoiceId != null).ToList();
+        if (arLines.Count > 0)
+        {
+            // per invoice credit total
+            var map = arLines.GroupBy(x => x.InvoiceId!.Value)
+                             .ToDictionary(g => g.Key, g => g.Sum(x => x.Credit));
+
+            foreach (var kv in map)
+            {
+                var invId = kv.Key;
+                var credit = kv.Value;
+                if (credit <= 0) continue; // only credit matters
+
+                var inv = _arOpenInvoices.FirstOrDefault(x => x.InvoiceId == invId);
+                if (inv == null) throw new Exception($"Invoice not found/open: {invId}");
+
+                if (credit > inv.Balance + 0.0001m)
+                    throw new Exception($"Invoice allocation exceeds balance. Invoice={inv.InvoiceNo}, Alloc={credit:0.00}, Bal={inv.Balance:0.00}");
+            }
+        }
+
+        // Validate AP allocations
+        var apLines = validLines.Where(x => x.AccountNo == _apAccountNo && x.PurchaseInvoiceId != null).ToList();
+        if (apLines.Count > 0)
+        {
+            var map = apLines.GroupBy(x => x.PurchaseInvoiceId!.Value)
+                             .ToDictionary(g => g.Key, g => g.Sum(x => x.Debit));
+
+            foreach (var kv in map)
+            {
+                var piId = kv.Key;
+                var debit = kv.Value;
+                if (debit <= 0) continue; // only debit matters
+
+                var pi = _apOpenPurchases.FirstOrDefault(x => x.PurchaseInvoiceId == piId);
+                if (pi == null) throw new Exception($"Purchase invoice not found/open: {piId}");
+
+                if (debit > pi.Balance + 0.0001m)
+                    throw new Exception($"Purchase allocation exceeds balance. Purchase={pi.PurchaseNo}, Alloc={debit:0.00}, Bal={pi.Balance:0.00}");
+            }
+        }
+    }
+
+    private sealed class JvLine
+    {
+        public Guid RowKey { get; set; } = Guid.NewGuid(); // ✅ for @key
+        public int AccountNo { get; set; }
+        public decimal Debit { get; set; }
+        public decimal Credit { get; set; }
+
+        public int? InvoiceId { get; set; }
+        public int? PurchaseInvoiceId { get; set; }
+    }
+
+    private sealed class CoaMini
+    {
+        public int AccountNo { get; set; }
+        public string AccountName { get; set; } = "";
+    }
+
+    private sealed record ArOpenInvoice(int InvoiceId, string InvoiceNo, string CustomerName, decimal Balance);
+    private sealed record ApOpenPurchase(int PurchaseInvoiceId, string PurchaseNo, string VendorName, decimal Balance);
+}

@@ -1,0 +1,747 @@
+﻿@page "/construction/subcontractors"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+
+@using Microsoft.EntityFrameworkCore
+@using System.Data
+@using System.Data.Common
+@using UaeEInvoice.Data
+@using UaeEInvoice.Services.Auth
+
+@inject AppDbContext Db
+@inject ICurrentCompany CurrentCompany
+
+<PageTitle>Construction Subcontractors</PageTitle>
+
+<style>
+    @@media (max-width: 992px) {
+        .sticky-side {
+            position: static !important;
+            top: auto !important;
+        }
+    }
+
+    .hero {
+        border-radius: 18px;
+        padding: 18px 18px;
+        background: radial-gradient(900px 400px at 12% 15%, rgba(13,110,253,.16), transparent 60%), radial-gradient(900px 400px at 80% 20%, rgba(32,201,151,.14), transparent 60%), linear-gradient(180deg, #0b1220 0%, #0a0f1a 100%);
+        border: 1px solid rgba(255,255,255,.08);
+        box-shadow: 0 18px 40px rgba(0,0,0,.35);
+        color: #e9eefc;
+    }
+
+        .hero .mut {
+            color: rgba(233,238,252,.78);
+        }
+
+    .pill {
+        display: inline-flex;
+        gap: 8px;
+        align-items: center;
+        padding: 6px 10px;
+        border-radius: 999px;
+        border: 1px solid rgba(255,255,255,.12);
+        background: rgba(255,255,255,.06);
+        font-size: 12px;
+        color: rgba(233,238,252,.88);
+    }
+
+    .cardx {
+        border-radius: 16px;
+        border: 1px solid rgba(15, 23, 42, .10);
+        background: #fff;
+        box-shadow: 0 10px 25px rgba(2,6,23,.07);
+    }
+
+        .cardx .head {
+            padding: 14px 16px;
+            border-bottom: 1px solid rgba(2,6,23,.06);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+        }
+
+        .cardx .body {
+            padding: 14px 16px;
+        }
+
+    .tt {
+        font-weight: 900;
+        letter-spacing: .2px;
+        margin: 0;
+    }
+
+    .sub {
+        color: rgba(2,6,23,.62);
+        font-size: 13px;
+    }
+
+    .mut-small {
+        color: rgba(2,6,23,.60);
+        font-size: 12px;
+    }
+
+    .row-actions {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+
+    .kpi {
+        border-radius: 14px;
+        padding: 12px 14px;
+        border: 1px solid rgba(2,6,23,.08);
+        background: linear-gradient(180deg, rgba(248,250,252,1) 0%, rgba(255,255,255,1) 100%);
+    }
+
+        .kpi .n {
+            font-weight: 900;
+            font-size: 20px;
+        }
+
+        .kpi .l {
+            color: rgba(2,6,23,.6);
+            font-size: 12px;
+        }
+
+    .sticky-side {
+        position: sticky;
+        top: 86px;
+    }
+</style>
+
+<div class="container-xxl py-4">
+
+    <div class="hero mb-3">
+        <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
+            <div>
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <h2 class="mb-1" style="font-weight:900;">Construction Subcontractors</h2>
+                    <span class="pill"><span class="bi bi-buildings"></span> Company #@_companyId</span>
+                </div>
+                <div class="mut">Import from Vendors once → Subcontractor PC dropdown will auto show. (Claim CompanyId based)</div>
+            </div>
+
+            <div class="row-actions">
+                <button class="btn btn-outline-light" @onclick="Load" disabled="@_busy">
+                    <span class="bi bi-arrow-clockwise me-1"></span> Refresh
+                </button>
+
+                <button class="btn btn-light" @onclick="DetectSources" disabled="@_busy">
+                    <span class="bi bi-search me-1"></span> Detect Vendor Master
+                </button>
+
+                <button class="btn btn-primary" @onclick="ImportNow" disabled="@_busy || _selected < 0">
+                    <span class="bi bi-download me-1"></span> Import to Subcontractors
+                </button>
+            </div>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_err))
+    {
+        <div class="alert alert-danger">@_err</div>
+    }
+    @if (!string.IsNullOrWhiteSpace(_msg))
+    {
+        <div class="alert alert-success">@_msg</div>
+    }
+
+    <div class="row g-3">
+
+        <!-- LEFT -->
+        <div class="col-12 col-lg-4">
+            <div class="cardx sticky-side">
+                <div class="head">
+                    <div>
+                        <div class="tt">Import Setup</div>
+                        <div class="sub">Auto detects sources from DB schema.</div>
+                    </div>
+                </div>
+
+                <div class="body">
+                    <div class="mb-2">
+                        <label class="form-label">Detected Sources</label>
+                        <select class="form-select" value="@_selected" @onchange="OnSourceChanged">
+                            <option value="-1">-- Click "Detect Vendor Master" --</option>
+                            @for (int i = 0; i < _sources.Count; i++)
+                            {
+                                <option value="@i">@_sources[i].Display</option>
+                            }
+                        </select>
+                        <div class="mut-small mt-1">
+                            Your screenshot shows it detects <b>Vendors</b> table ✅
+                        </div>
+                    </div>
+
+                    @if (_selected >= 0)
+                    {
+                        var s = _sources[_selected];
+
+                        <div class="kpi mb-2">
+                            <div class="n">@s.TableName</div>
+                            <div class="l">Detected table</div>
+                        </div>
+
+                        <div class="mut-small">
+                            CompanyId: <b>@s.CompanyCol</b><br />
+                            Name: <b>@s.NameCol</b><br />
+                            TRN: <b>@(s.TrnCol ?? "-")</b><br />
+                            Phone: <b>@(s.PhoneCol ?? "-")</b><br />
+                            Email: <b>@(s.EmailCol ?? "-")</b><br />
+                            Active: <b>@(s.ActiveCol ?? "-")</b>
+                        </div>
+
+                        <div class="d-grid gap-2 mt-3">
+                            <button class="btn btn-outline-primary" @onclick="Preview" disabled="@_busy">
+                                <span class="bi bi-eye me-1"></span> Preview Vendors
+                            </button>
+                            <button class="btn btn-primary" @onclick="ImportNow" disabled="@_busy">
+                                <span class="bi bi-download me-1"></span> Import Now
+                            </button>
+                        </div>
+                    }
+                </div>
+            </div>
+
+            @if (_preview.Count > 0)
+            {
+                <div class="cardx mt-3">
+                    <div class="head">
+                        <div>
+                            <div class="tt">Preview (Top 30)</div>
+                            <div class="sub">These will be imported as subcontractors.</div>
+                        </div>
+                        <span class="badge text-bg-info">@_preview.Count</span>
+                    </div>
+                    <div class="body p-0">
+                        <div class="table-responsive">
+                            <table class="table mb-0 align-middle">
+                                <thead>
+                                    <tr>
+                                        <th>Name</th>
+                                        <th>TRN</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var p in _preview.Take(30))
+                                    {
+                                        <tr>
+                                            <td class="fw-semibold">@p.Name</td>
+                                            <td>@(p.TRN ?? "-")</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="p-2 border-top small text-muted">
+                            Showing top 30. Import will bring all (up to 5000).
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+
+        <!-- RIGHT -->
+        <div class="col-12 col-lg-8">
+            <div class="cardx">
+                <div class="head">
+                    <div>
+                        <div class="tt">Subcontractors (Company)</div>
+                        <div class="sub">Used by Subcontractor PC dropdown.</div>
+                    </div>
+                    <div style="min-width:280px;">
+                        <input class="form-control" placeholder="Search name/TRN/phone/email..."
+                               @bind="_q" @bind:event="oninput" />
+                    </div>
+                </div>
+
+                <div class="body p-0">
+                    <div class="table-responsive">
+                        <table class="table mb-0 align-middle">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>TRN</th>
+                                    <th>Phone</th>
+                                    <th>Email</th>
+                                    <th class="text-center">Retention</th>
+                                    <th class="text-center">Active</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @if (FilteredRows().Count == 0)
+                                {
+                                    <tr>
+                                        <td colspan="6" class="text-center text-muted p-4">
+                                            No subcontractors found. Use import.
+                                        </td>
+                                    </tr>
+                                }
+                                else
+                                {
+                                    @foreach (var r in FilteredRows())
+                                    {
+                                        <tr>
+                                            <td class="fw-semibold">@r.Name</td>
+                                            <td>@(r.TRN ?? "-")</td>
+                                            <td>@(r.Phone ?? "-")</td>
+                                            <td>@(r.Email ?? "-")</td>
+                                            <td class="text-center">@((r.DefaultRetentionRate * 100m).ToString("0.##"))%</td>
+                                            <td class="text-center">
+                                                @if (r.IsActive)
+                                                {
+                                                    <span class="badge text-bg-success">Yes</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="badge text-bg-secondary">No</span>
+                                                }
+                                            </td>
+                                        </tr>
+                                    }
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="body border-top">
+                        <div class="alert alert-info mb-0">
+                            ✅ After importing here, open <b>/construction/pc/0</b> → dropdown will show them automatically.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+@code {
+    private bool _busy;
+    private string _err = "";
+    private string _msg = "";
+
+    private int _companyId = 0;
+
+    private string _q = "";
+    private List<ConstructionSubcontractor> _subs = new();
+
+    private List<SourceInfo> _sources = new();
+    private int _selected = -1;
+
+    private List<VendorRow> _preview = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        _err = "";
+        _msg = "";
+        _busy = true;
+        try
+        {
+            await CurrentCompany.RefreshAsync();
+            _companyId = CurrentCompany.CompanyId;
+            if (_companyId <= 0)
+            {
+                _err = "CompanyId not found in claims. Login again.";
+                return;
+            }
+
+            _subs = await Db.ConstructionSubcontractors
+                .Where(x => x.CompanyId == _companyId)
+                .OrderByDescending(x => x.IsActive)
+                .ThenBy(x => x.Name)
+                .ToListAsync();
+        }
+        catch (Exception ex)
+        {
+            _err = ex.Message;
+        }
+        finally { _busy = false; }
+    }
+
+    private List<ConstructionSubcontractor> FilteredRows()
+    {
+        if (string.IsNullOrWhiteSpace(_q)) return _subs;
+
+        var q = _q.Trim().ToLowerInvariant();
+        return _subs.Where(x =>
+                (x.Name ?? "").ToLowerInvariant().Contains(q) ||
+                (x.TRN ?? "").ToLowerInvariant().Contains(q) ||
+                (x.Phone ?? "").ToLowerInvariant().Contains(q) ||
+                (x.Email ?? "").ToLowerInvariant().Contains(q))
+            .ToList();
+    }
+
+    private async Task DetectSources()
+    {
+        _err = "";
+        _msg = "";
+        _preview.Clear();
+        _sources.Clear();
+        _selected = -1;
+
+        _busy = true;
+        try
+        {
+            await CurrentCompany.RefreshAsync();
+            _companyId = CurrentCompany.CompanyId;
+            if (_companyId <= 0) { _err = "CompanyId not found."; return; }
+
+            _sources = await DetectSourcesFromDb();
+            if (_sources.Count == 0)
+            {
+                _err = "No source detected. But your screenshot shows Vendors exists—so this should work now.";
+                return;
+            }
+
+            _selected = 0;
+            _msg = $"Detected {_sources.Count} source(s). Select → Preview → Import.";
+        }
+        catch (Exception ex)
+        {
+            _err = ex.Message;
+        }
+        finally { _busy = false; }
+    }
+
+    private void OnSourceChanged(ChangeEventArgs e)
+    {
+        _preview.Clear();
+        _selected = int.TryParse(e.Value?.ToString(), out var i) ? i : -1;
+    }
+
+    private async Task Preview()
+    {
+        _err = "";
+        _msg = "";
+        _preview.Clear();
+
+        if (_selected < 0) { _err = "Select a detected source first."; return; }
+
+        _busy = true;
+        try
+        {
+            var src = _sources[_selected];
+            _preview = await FetchVendors(src, _companyId, take: 200);
+            _msg = $"Preview loaded: {_preview.Count} row(s).";
+        }
+        catch (Exception ex)
+        {
+            _err = ex.Message;
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task ImportNow()
+    {
+        _err = "";
+        _msg = "";
+        if (_selected < 0) { _err = "Select a detected source first."; return; }
+
+        _busy = true;
+        try
+        {
+            var src = _sources[_selected];
+            var vendors = await FetchVendors(src, _companyId, take: 5000);
+
+            if (vendors.Count == 0)
+            {
+                _err = "No vendor rows found for this company in selected source.";
+                return;
+            }
+
+            var existingNames = await Db.ConstructionSubcontractors
+                .Where(x => x.CompanyId == _companyId)
+                .Select(x => x.Name)
+                .ToListAsync();
+
+            var set = new HashSet<string>(existingNames.Select(Norm), StringComparer.OrdinalIgnoreCase);
+
+            int added = 0;
+            foreach (var v in vendors)
+            {
+                var name = (v.Name ?? "").Trim();
+                if (string.IsNullOrWhiteSpace(name)) continue;
+
+                var key = Norm(name);
+                if (set.Contains(key)) continue;
+
+                Db.ConstructionSubcontractors.Add(new ConstructionSubcontractor
+                    {
+                        CompanyId = _companyId,
+                        Name = (Trunc(name, 200) ?? ""),
+                        TRN = Trunc(EmptyToNull(v.TRN), 30),
+                        Phone = Trunc(EmptyToNull(v.Phone), 30),
+                        Email = Trunc(EmptyToNull(v.Email), 120),
+                        DefaultRetentionRate = 0.10m,
+                        IsActive = true
+                    });
+
+                set.Add(key);
+                added++;
+            }
+
+            if (added > 0)
+                await Db.SaveChangesAsync();
+
+            await Load();
+            _msg = $"Imported {added} subcontractor(s). PC dropdown will show them now.";
+        }
+        catch (Exception ex)
+        {
+            _err = ex.Message;
+        }
+        finally { _busy = false; }
+    }
+
+    // ✅ IMPORTANT FIX: DO NOT dispose DbContext connection.
+    // Use OpenConnection/CloseConnection only.
+    private async Task<DbConnection> GetOpenConnAsync()
+    {
+        var con = Db.Database.GetDbConnection();
+        if (con.State != ConnectionState.Open)
+            await Db.Database.OpenConnectionAsync();
+        return con;
+    }
+
+    private async Task<List<SourceInfo>> DetectSourcesFromDb()
+    {
+        var list = new List<SourceInfo>();
+        try
+        {
+            var con = await GetOpenConnAsync();
+
+            var sql =
+                "SELECT t.name AS TableName, c.name AS ColumnName " +
+                "FROM sys.tables t JOIN sys.columns c ON t.object_id = c.object_id " +
+                "WHERE t.is_ms_shipped = 0 " +
+                "AND (t.name LIKE '%Vendor%' OR t.name LIKE '%Supplier%' OR t.name LIKE '%Supp%' OR t.name LIKE '%Vndr%') " +
+                "ORDER BY t.name, c.name;";
+
+            using var cmd = con.CreateCommand();
+            cmd.CommandText = sql;
+
+            var map = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+
+            using (var r = await cmd.ExecuteReaderAsync())
+            {
+                while (await r.ReadAsync())
+                {
+                    var tn = r.GetString(0);
+                    var cn = r.GetString(1);
+
+                    if (!map.TryGetValue(tn, out var cols))
+                    {
+                        cols = new List<string>();
+                        map[tn] = cols;
+                    }
+                    cols.Add(cn);
+                }
+            }
+
+            foreach (var kv in map)
+            {
+                var tn = kv.Key;
+                var cols = kv.Value;
+
+                var companyCol = Pick(cols, "CompanyId", "CompanyID", "company_id");
+                if (companyCol == null) continue;
+
+                var nameCol = Pick(cols, "VendorName", "SupplierName", "Name", "Vendor", "Supplier");
+                if (nameCol == null) continue;
+
+                var trnCol = Pick(cols, "VendorTRN", "TRN", "Trn", "VatNo", "VatNumber");
+                var phoneCol = Pick(cols, "Phone", "Mobile", "Tel", "Telephone");
+                var emailCol = Pick(cols, "Email", "EmailId", "Mail");
+                var activeCol = Pick(cols, "IsActive", "Active", "Is_Active");
+
+                list.Add(new SourceInfo
+                    {
+                        TableName = tn,
+                        CompanyCol = companyCol,
+                        NameCol = nameCol,
+                        TrnCol = trnCol,
+                        PhoneCol = phoneCol,
+                        EmailCol = emailCol,
+                        ActiveCol = activeCol
+                    });
+            }
+
+            // If keyword scan empty, fallback to scan all tables
+            if (list.Count == 0)
+            {
+                var sql2 =
+                    "SELECT t.name AS TableName, c.name AS ColumnName " +
+                    "FROM sys.tables t JOIN sys.columns c ON t.object_id = c.object_id " +
+                    "WHERE t.is_ms_shipped = 0 " +
+                    "ORDER BY t.name, c.name;";
+
+                using var cmd2 = con.CreateCommand();
+                cmd2.CommandText = sql2;
+
+                var map2 = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+
+                using (var rr = await cmd2.ExecuteReaderAsync())
+                {
+                    while (await rr.ReadAsync())
+                    {
+                        var tn = rr.GetString(0);
+                        var cn = rr.GetString(1);
+
+                        if (!map2.TryGetValue(tn, out var cols))
+                        {
+                            cols = new List<string>();
+                            map2[tn] = cols;
+                        }
+                        cols.Add(cn);
+                    }
+                }
+
+                foreach (var kv2 in map2)
+                {
+                    var tn = kv2.Key;
+                    var cols = kv2.Value;
+
+                    var companyCol = Pick(cols, "CompanyId", "CompanyID", "company_id");
+                    var nameCol = Pick(cols, "VendorName", "SupplierName", "Name");
+                    if (companyCol == null || nameCol == null) continue;
+
+                    var trnCol = Pick(cols, "VendorTRN", "TRN", "VatNo");
+                    var phoneCol = Pick(cols, "Phone", "Mobile", "Tel");
+                    var emailCol = Pick(cols, "Email", "EmailId", "Mail");
+
+                    if (trnCol == null && phoneCol == null && emailCol == null) continue;
+
+                    var activeCol = Pick(cols, "IsActive", "Active", "Is_Active");
+
+                    list.Add(new SourceInfo
+                        {
+                            TableName = tn,
+                            CompanyCol = companyCol,
+                            NameCol = nameCol,
+                            TrnCol = trnCol,
+                            PhoneCol = phoneCol,
+                            EmailCol = emailCol,
+                            ActiveCol = activeCol
+                        });
+                }
+            }
+
+            return list.OrderBy(x => x.TableName).ToList();
+        }
+        finally
+        {
+            // Close but DO NOT dispose
+            try { await Db.Database.CloseConnectionAsync(); } catch { }
+        }
+    }
+
+    private async Task<List<VendorRow>> FetchVendors(SourceInfo src, int cid, int take)
+    {
+        var list = new List<VendorRow>();
+
+        try
+        {
+            var con = await GetOpenConnAsync();
+
+            var sql =
+                "SELECT TOP (@take) " +
+                $"{Q(src.NameCol)} AS Name, " +
+                $"{(src.TrnCol != null ? Q(src.TrnCol) : "NULL")} AS TRN, " +
+                $"{(src.PhoneCol != null ? Q(src.PhoneCol) : "NULL")} AS Phone, " +
+                $"{(src.EmailCol != null ? Q(src.EmailCol) : "NULL")} AS Email " +
+                $"FROM {Q(src.TableName)} " +
+                $"WHERE {Q(src.CompanyCol)} = @cid " +
+                $"{(src.ActiveCol != null ? $"AND {Q(src.ActiveCol)} = 1 " : "")}" +
+                $"ORDER BY {Q(src.NameCol)};";
+
+            using var cmd = con.CreateCommand();
+            cmd.CommandText = sql;
+
+            var pTake = cmd.CreateParameter();
+            pTake.ParameterName = "@take";
+            pTake.Value = take;
+            cmd.Parameters.Add(pTake);
+
+            var pCid = cmd.CreateParameter();
+            pCid.ParameterName = "@cid";
+            pCid.Value = cid;
+            cmd.Parameters.Add(pCid);
+
+            using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync())
+            {
+                var name = r.IsDBNull(0) ? "" : (r.GetValue(0)?.ToString() ?? "");
+                var trn = r.IsDBNull(1) ? null : r.GetValue(1)?.ToString();
+                var phone = r.IsDBNull(2) ? null : r.GetValue(2)?.ToString();
+                var email = r.IsDBNull(3) ? null : r.GetValue(3)?.ToString();
+
+                if (string.IsNullOrWhiteSpace(name)) continue;
+
+                list.Add(new VendorRow
+                    {
+                        Name = name.Trim(),
+                        TRN = EmptyToNull(trn),
+                        Phone = EmptyToNull(phone),
+                        Email = EmptyToNull(email)
+                    });
+            }
+
+            return list;
+        }
+        finally
+        {
+            try { await Db.Database.CloseConnectionAsync(); } catch { }
+        }
+    }
+
+    private static string Q(string identifier)
+        => "[" + identifier.Replace("]", "]]") + "]";
+
+    private static string? Pick(List<string> cols, params string[] prefer)
+    {
+        foreach (var p in prefer)
+        {
+            var hit = cols.FirstOrDefault(c => c.Equals(p, StringComparison.OrdinalIgnoreCase));
+            if (hit != null) return hit;
+        }
+        return null;
+    }
+
+    private static string Norm(string s) => (s ?? "").Trim().ToLowerInvariant();
+    private static string? EmptyToNull(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+
+    private static string? Trunc(string? s, int max)
+    {
+        if (string.IsNullOrWhiteSpace(s)) return null;
+        s = s.Trim();
+        return s.Length <= max ? s : s.Substring(0, max);
+    }
+
+    private class VendorRow
+    {
+        public string Name { get; set; } = "";
+        public string? TRN { get; set; }
+        public string? Phone { get; set; }
+        public string? Email { get; set; }
+    }
+
+    private class SourceInfo
+    {
+        public string TableName { get; set; } = "";
+        public string CompanyCol { get; set; } = "";
+        public string NameCol { get; set; } = "";
+        public string? TrnCol { get; set; }
+        public string? PhoneCol { get; set; }
+        public string? EmailCol { get; set; }
+        public string? ActiveCol { get; set; }
+
+        public string Display => $"{TableName} | Name:{NameCol} | Company:{CompanyCol}";
+    }
+}

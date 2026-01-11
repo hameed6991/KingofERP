@@ -1,0 +1,433 @@
+﻿@page "/ai-ask"
+@using System.Text.Json
+@using Microsoft.AspNetCore.Authorization
+@using UaeEInvoice.Services
+@using UaeEInvoice.Services.Auth
+@attribute [Authorize]
+
+@inject AiSalesQueryRouter SalesRouter
+@inject AiSalesQueryRunner SalesRunner
+@inject AiReportRouter Router
+@inject AiReportRunner Runner
+@inject ICurrentCompany CurrentCompany
+
+<link rel="stylesheet" href="app.css" />
+
+<div class="ai-shell">
+    <div class="ai-hero">
+        <div class="ai-hero-left">
+            <div class="ai-icon">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                    <path d="M4 19V5" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                    <path d="M4 19H20" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                    <path d="M7 15l3-4 3 2 4-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+            </div>
+            <div>
+                <div class="ai-title">Ask Your Accounts</div>
+                <div class="ai-sub">Natural language → route → run report → show table (JSON fallback too).</div>
+            </div>
+        </div>
+
+        <div class="ai-hero-right">
+            <div class="ai-pill">CompanyId</div>
+            <input class="ai-input ai-input-sm" type="number" value="@CurrentCompany.CompanyId" readonly />
+            <button class="ai-btn ai-btn-ghost" @onclick="ResetAll">Reset</button>
+        </div>
+    </div>
+
+    @if (CurrentCompany.CompanyId <= 0)
+    {
+        <div class="alert alert-warning">
+            Company not selected. Please select a company first.
+        </div>
+    }
+
+    <div class="ai-grid">
+        <!-- Left: Chat -->
+        <div class="ai-card">
+            <div class="ai-card-head">
+                <div class="ai-card-title">Chat</div>
+                <div class="ai-card-actions">
+                    <span class="ai-badge @(_busy ? "ai-badge-warn" : "ai-badge-ok")">@(_busy ? "Thinking…" : "Ready")</span>
+                </div>
+            </div>
+
+            <div class="ai-chat">
+                @if (_messages.Count == 0)
+                {
+                    <div class="ai-empty">
+                        <div class="ai-empty-title">Try these</div>
+
+                        <div class="ai-chips">
+                            @foreach (var p in _quickPrompts)
+                            {
+                                <button class="ai-chip" @onclick="() => QuickAsk(p)">@p</button>
+                            }
+                        </div>
+
+                        <div class="ai-hint">
+                            Tip: “Sales this month by customer” / “Sales by day last 14 days”
+                        </div>
+                    </div>
+                }
+
+                @foreach (var m in _messages)
+                {
+                    <div class="ai-msg @(m.Role == "user" ? "ai-msg-user" : "ai-msg-ai")">
+                        <div class="ai-bubble">
+                            <div class="ai-msg-meta">
+                                <span class="ai-who">@(m.Role == "user" ? "You" : "Assistant")</span>
+                                <span class="ai-time">@m.Time.ToString("HH:mm")</span>
+                            </div>
+                            <div class="ai-msg-text">@m.Text</div>
+                        </div>
+                    </div>
+                }
+
+                @if (!string.IsNullOrWhiteSpace(_clarify))
+                {
+                    <div class="ai-msg ai-msg-ai">
+                        <div class="ai-bubble ai-bubble-warn">
+                            <div class="ai-msg-meta">
+                                <span class="ai-who">Assistant</span>
+                                <span class="ai-time">@DateTime.Now.ToString("HH:mm")</span>
+                            </div>
+                            <div class="ai-msg-text">
+                                <b>Need one detail:</b> @_clarify
+                                <div class="ai-hint" style="margin-top:8px">
+                                    Reply short (example: “This month”, “last 30 days”, “Top 10”).
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                }
+            </div>
+
+            <div class="ai-composer">
+                <textarea class="ai-textarea" rows="2" placeholder="Ask something…"
+                          @bind="_text" @bind:event="oninput"
+                          disabled="@_busy"></textarea>
+
+                <div class="ai-composer-right">
+                    <button class="ai-btn ai-btn-ghost" @onclick="ClearChat" disabled="@(_busy || _messages.Count==0)">Clear</button>
+                    <button class="ai-btn ai-btn-primary" @onclick="Send"
+                            disabled="@(_busy || string.IsNullOrWhiteSpace(_text) || CurrentCompany.CompanyId<=0)">
+                        @(_busy ? "Running…" : "Send")
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right: Result -->
+        <div class="ai-card">
+            <div class="ai-card-head">
+                <div class="ai-card-title">Result</div>
+                <div class="ai-card-actions">
+                    @if (_lastReqJson.HasValue)
+                    {
+                        <button class="ai-btn ai-btn-ghost ai-btn-sm" @onclick="ToggleDebug">@(_showDebug ? "Hide debug" : "Show debug")</button>
+                    }
+                </div>
+            </div>
+
+            <div class="ai-result">
+                @if (_busy)
+                {
+                    <div class="ai-loading">
+                        <div class="ai-spinner"></div>
+                        <div>
+                            <div class="ai-loading-title">Generating…</div>
+                            <div class="ai-loading-sub">Routing → Query → Output</div>
+                        </div>
+                    </div>
+                }
+                else if (_table is not null)
+                {
+                    <div class="ai-kpis">
+                        <div class="ai-kpi">
+                            <div class="ai-kpi-label">Rows</div>
+                            <div class="ai-kpi-val">@_table.Rows.Count</div>
+                        </div>
+                        <div class="ai-kpi">
+                            <div class="ai-kpi-label">Columns</div>
+                            <div class="ai-kpi-val">@_table.Columns.Count</div>
+                        </div>
+                        <div class="ai-kpi">
+                            <div class="ai-kpi-label">Status</div>
+                            <div class="ai-kpi-val">OK</div>
+                        </div>
+                    </div>
+
+                    <div class="ai-table-wrap">
+                        <table class="ai-table">
+                            <thead>
+                                <tr>
+                                    @foreach (var c in _table.Columns)
+                                    {
+                                        <th>@c</th>
+                                    }
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var r in _table.Rows)
+                                {
+                                    <tr>
+                                        @foreach (var c in _table.Columns)
+                                        {
+                                            <td>@(r.TryGetValue(c, out var v) ? v : "")</td>
+                                        }
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+                else if (_lastResultJson.HasValue)
+                {
+                    <div class="ai-empty">
+                        <div class="ai-empty-title">No table shape found</div>
+                        <div class="ai-hint">Showing raw JSON.</div>
+                    </div>
+                    <pre class="ai-json">@Pretty(_lastResultJson.Value)</pre>
+                }
+                else
+                {
+                    <div class="ai-empty">
+                        <div class="ai-empty-title">No output yet</div>
+                        <div class="ai-hint">Ask a question on the left.</div>
+                    </div>
+                }
+
+                @if (_showDebug && _lastReqJson.HasValue)
+                {
+                    <div class="ai-debug">
+                        <div class="ai-debug-title">Request (debug)</div>
+                        <pre class="ai-json">@Pretty(_lastReqJson.Value)</pre>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private string _text = "";
+    private bool _busy = false;
+    private bool _showDebug = false;
+
+    private string? _clarify;
+    private string? _pendingQuestion;
+
+    private readonly List<ChatMsg> _messages = new();
+
+    private JsonElement? _lastReqJson;
+    private JsonElement? _lastResultJson;
+
+    private TableModel? _table;
+
+    private readonly string[] _quickPrompts = new[]
+    {
+        "Sales this month by customer",
+        "Sales last 30 days total",
+        "Top 10 customers by sales last 90 days",
+        "Sales by day last 14 days",
+        "Top 10 unpaid customers",
+        "VAT payable this month",
+        "Cash in/out last 30 days"
+    };
+
+    private async Task Send()
+    {
+        var userText = _text.Trim();
+        if (string.IsNullOrWhiteSpace(userText) || _busy) return;
+        if (CurrentCompany.CompanyId <= 0) return;
+
+        _busy = true;
+        try
+        {
+            bool parseFailureClarify =
+                !string.IsNullOrWhiteSpace(_clarify) &&
+                (_clarify.Contains("couldn't parse", StringComparison.OrdinalIgnoreCase) ||
+                 _clarify.Contains("try:", StringComparison.OrdinalIgnoreCase));
+
+            string finalText;
+
+            if (!string.IsNullOrWhiteSpace(_clarify) && parseFailureClarify)
+            {
+                _messages.Add(new ChatMsg("user", userText));
+                _pendingQuestion = userText;
+                finalText = userText;
+
+                _clarify = null;
+                _table = null;
+                _lastReqJson = null;
+                _lastResultJson = null;
+                _showDebug = false;
+            }
+            else if (!string.IsNullOrWhiteSpace(_clarify) && !string.IsNullOrWhiteSpace(_pendingQuestion))
+            {
+                _messages.Add(new ChatMsg("user", userText));
+                finalText = $"{_pendingQuestion}\nClarification: {userText}";
+                _clarify = null;
+            }
+            else
+            {
+                _messages.Add(new ChatMsg("user", userText));
+                _pendingQuestion = userText;
+                finalText = userText;
+
+                _table = null;
+                _lastReqJson = null;
+                _lastResultJson = null;
+                _showDebug = false;
+            }
+
+            _text = "";
+
+            // ✅ SALES FIRST (Dynamic: no companyId param)
+            var env = await SalesRouter.RouteAsync(finalText);
+            _lastReqJson = JsonSerializer.SerializeToElement(env);
+
+            if (!string.IsNullOrWhiteSpace(env.Clarify))
+            {
+                _clarify = env.Clarify;
+                _messages.Add(new ChatMsg("assistant", "I need one clarification to run the exact sales report."));
+                return;
+            }
+
+            if (env.Supported && env.Spec is not null && env.Spec.IsSalesQuery)
+            {
+                var salesResult = await SalesRunner.RunAsync(env.Spec);
+                _lastResultJson = JsonSerializer.SerializeToElement(salesResult);
+
+                var el = JsonSerializer.SerializeToElement(salesResult);
+                _table = TryExtractTable(el);
+
+                _messages.Add(new ChatMsg("assistant",
+                    _table is not null ? "Done ✅ Showing SALES output on the right." : "Done ✅ Sales output generated (see right panel)."));
+                return;
+            }
+
+            // ✅ FALLBACK: normal reports (Dynamic: no companyId param)
+            var req = await Router.RouteAsync(finalText);
+            _lastReqJson = JsonSerializer.SerializeToElement(req);
+
+            if (!string.IsNullOrWhiteSpace(req.ClarifyQuestion))
+            {
+                _clarify = req.ClarifyQuestion;
+                _messages.Add(new ChatMsg("assistant", "I need one clarification to run the exact report."));
+                return;
+            }
+
+            var result = await Runner.RunAsync(req);
+            _lastResultJson = JsonSerializer.SerializeToElement(result);
+
+            var reportEl = JsonSerializer.SerializeToElement(result);
+            _table = TryExtractTable(reportEl);
+
+            _messages.Add(new ChatMsg("assistant",
+                _table is not null ? "Done ✅ Showing report output on the right." : "Done ✅ Output generated (see right panel)."));
+        }
+        catch (Exception ex)
+        {
+            _messages.Add(new ChatMsg("assistant", $"Error: {ex.Message}"));
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task QuickAsk(string q)
+    {
+        _text = q;
+        await Send();
+    }
+
+    private void ToggleDebug() => _showDebug = !_showDebug;
+
+    private void ClearChat()
+    {
+        _messages.Clear();
+        _clarify = null;
+        _pendingQuestion = null;
+        _table = null;
+        _lastReqJson = null;
+        _lastResultJson = null;
+        _showDebug = false;
+    }
+
+    private void ResetAll()
+    {
+        ClearChat();
+        _text = "";
+    }
+
+    private static string Pretty(JsonElement el)
+        => JsonSerializer.Serialize(el, new JsonSerializerOptions { WriteIndented = true });
+
+    private static TableModel? TryExtractTable(JsonElement result)
+    {
+        if (result.ValueKind != JsonValueKind.Object) return null;
+
+        if (!TryGet(result, "columns", "Columns", out var colsEl)) return null;
+        if (!TryGet(result, "rows", "Rows", out var rowsEl)) return null;
+
+        if (colsEl.ValueKind != JsonValueKind.Array || rowsEl.ValueKind != JsonValueKind.Array)
+            return null;
+
+        var cols = colsEl.EnumerateArray()
+            .Where(x => x.ValueKind == JsonValueKind.String)
+            .Select(x => x.GetString() ?? "")
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .ToList();
+
+        if (cols.Count == 0) return null;
+
+        var rows = new List<Dictionary<string, string>>();
+
+        foreach (var rowEl in rowsEl.EnumerateArray())
+        {
+            if (rowEl.ValueKind == JsonValueKind.Object)
+            {
+                var dict = new Dictionary<string, string>();
+                foreach (var c in cols)
+                {
+                    if (rowEl.TryGetProperty(c, out var v))
+                        dict[c] = JsonToString(v);
+                    else
+                        dict[c] = "";
+                }
+                rows.Add(dict);
+            }
+        }
+
+        return new TableModel(cols, rows);
+    }
+
+    private static bool TryGet(JsonElement obj, string a, string b, out JsonElement el)
+    {
+        if (obj.TryGetProperty(a, out el)) return true;
+        if (obj.TryGetProperty(b, out el)) return true;
+        el = default;
+        return false;
+    }
+
+    private static string JsonToString(JsonElement v) => v.ValueKind switch
+    {
+        JsonValueKind.String => v.GetString() ?? "",
+        JsonValueKind.Number => v.ToString(),
+        JsonValueKind.True => "true",
+        JsonValueKind.False => "false",
+        JsonValueKind.Null => "",
+        _ => v.ToString()
+    };
+
+    private sealed record ChatMsg(string Role, string Text)
+    {
+        public DateTime Time { get; } = DateTime.Now;
+    }
+
+    private sealed record TableModel(List<string> Columns, List<Dictionary<string, string>> Rows);
+}

@@ -1,0 +1,494 @@
+﻿@page "/aging-center"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+
+@using UaeEInvoice.Services.Auth
+@using UaeEInvoice.Services.Reports
+@inject ICurrentCompany CurrentCompany
+@inject AgingService Aging
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+
+<style>
+    :root {
+        --bg: #070b16;
+        --card: rgba(255,255,255,.06);
+        --border: rgba(255,255,255,.12);
+        --text: rgba(255,255,255,.92);
+        --muted: rgba(255,255,255,.62);
+        --shadow: 0 18px 70px rgba(0,0,0,.45);
+        --r: 20px;
+    }
+
+    .ac-wrap {
+        background: radial-gradient(1100px 650px at 12% -10%, rgba(34,197,94,.20), transparent 60%), radial-gradient(900px 520px at 90% 0%, rgba(59,130,246,.18), transparent 60%), radial-gradient(900px 520px at 50% 120%, rgba(168,85,247,.14), transparent 65%), linear-gradient(180deg, #0b1220, #070b16 70%, #040711);
+        min-height: calc(100vh - 70px);
+        border-radius: 22px;
+        padding: 18px;
+        color: var(--text);
+    }
+
+    .ac-hero {
+        border-radius: 22px;
+        padding: 16px;
+        background: radial-gradient(900px 460px at 10% -10%, rgba(34,197,94,.25), transparent 62%), radial-gradient(800px 420px at 92% 0%, rgba(59,130,246,.20), transparent 55%), linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,.03));
+        border: 1px solid var(--border);
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(10px);
+    }
+
+    .ac-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 10px;
+        border-radius: 999px;
+        border: 1px solid rgba(255,255,255,.14);
+        background: rgba(255,255,255,.06);
+        color: rgba(255,255,255,.86);
+        font-size: .85rem;
+    }
+
+    .ac-card {
+        border-radius: var(--r);
+        background: var(--card);
+        border: 1px solid rgba(255,255,255,.10);
+        box-shadow: 0 14px 35px rgba(0,0,0,.22);
+        backdrop-filter: blur(10px);
+        overflow: hidden;
+    }
+
+    .ac-head {
+        padding: 12px 14px;
+        border-bottom: 1px solid rgba(255,255,255,.08);
+        background: linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.02));
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
+        font-weight: 900;
+    }
+
+    .ac-body {
+        padding: 14px;
+    }
+
+    .ac-input, .ac-select {
+        border-radius: 12px !important;
+        background: rgba(255,255,255,.92) !important;
+        border: 1px solid rgba(15,23,42,.12) !important;
+    }
+
+    .ac-tab {
+        border-radius: 999px;
+        padding: 10px 14px;
+        font-weight: 900;
+        border: 1px solid rgba(255,255,255,.14);
+        background: rgba(255,255,255,.06);
+        color: rgba(255,255,255,.86);
+    }
+
+        .ac-tab.active {
+            background: rgba(59,130,246,.22);
+            border-color: rgba(59,130,246,.40);
+        }
+
+    .ac-tile {
+        border-radius: 18px;
+        border: 1px solid rgba(255,255,255,.12);
+        background: rgba(255,255,255,.06);
+        padding: 14px;
+        height: 100%;
+    }
+
+        .ac-tile .lbl {
+            color: var(--muted);
+            font-size: .85rem;
+        }
+
+        .ac-tile .val {
+            font-size: 1.8rem;
+            font-weight: 900;
+            letter-spacing: .2px;
+        }
+
+    .ac-tablewrap {
+        border-radius: 14px;
+        overflow: hidden;
+        border: 1px solid rgba(255,255,255,.10);
+        background: #fff;
+        color: #0f172a;
+    }
+
+        .ac-tablewrap .table thead th {
+            background: linear-gradient(180deg, #f8fafc, #f1f5f9) !important;
+            border-bottom: 1px solid rgba(15,23,42,.10) !important;
+            font-size: .80rem;
+            text-transform: uppercase;
+            letter-spacing: .3px;
+            color: rgba(15,23,42,.70);
+            white-space: nowrap;
+        }
+
+    .ac-badge {
+        border-radius: 999px;
+        padding: 6px 10px;
+        font-weight: 900;
+        font-size: .78rem;
+        border: 1px solid rgba(15,23,42,.10);
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    .bNot {
+        background: #e2e8f0;
+        color: #0f172a;
+    }
+
+    .b030 {
+        background: #dcfce7;
+        color: #166534;
+    }
+
+    .b3160 {
+        background: #e0f2fe;
+        color: #075985;
+    }
+
+    .b6190 {
+        background: #fef9c3;
+        color: #854d0e;
+    }
+
+    .b90 {
+        background: #fee2e2;
+        color: #991b1b;
+    }
+</style>
+
+<div class="container-xxl py-4">
+    <div class="ac-wrap">
+
+        <div class="ac-hero mb-3">
+            <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+                <div>
+                    <div class="d-flex gap-2 flex-wrap">
+                        <span class="ac-pill">🧠 Aging Center</span>
+                        <span class="ac-pill">AR + AP</span>
+                        <span class="ac-pill">Due Reminders</span>
+                    </div>
+                    <h2 class="mt-2 mb-1" style="font-weight:900; letter-spacing:.2px;">Collections & Payables</h2>
+                    <div class="text-white-50">As-of aging + outstanding drill-down + one-click reminder (manual now).</div>
+                    <div class="text-white-50 small mt-1">CompanyId: <b>@_companyId</b></div>
+                </div>
+
+                <div class="d-flex gap-2 flex-wrap">
+                    <button class="btn btn-light" type="button" @onclick="Load" disabled="@_loading">
+                        @(_loading ? "Loading..." : "Refresh")
+                    </button>
+                    <button class="btn btn-outline-light" type="button" @onclick="GoInvoices">Invoices</button>
+                    <button class="btn btn-outline-light" type="button" @onclick="GoPurchases">Purchases</button>
+                </div>
+            </div>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(_err))
+        {
+            <div class="alert alert-danger py-2">@_err</div>
+        }
+
+        <div class="ac-card mb-3">
+            <div class="ac-head">
+                <div class="d-flex gap-2 flex-wrap">
+                    <button class="ac-tab @(_tab == "AR" ? "active" : "")" type="button" @onclick="SwitchToAR">AP Aging</button>
+                    <button class="ac-tab @(_tab == "AP" ? "active" : "")" type="button" @onclick="SwitchToAP">AR Aging</button>
+                </div>
+                <div class="text-white-50 small">Tip: “Copy Reminder” → WhatsApp manually; later auto.</div>
+            </div>
+
+            <div class="ac-body">
+                <div class="row g-2 align-items-end">
+                    <div class="col-12 col-md-3">
+                        <label class="form-label text-white-50">As of</label>
+                        <input type="date" class="form-control ac-input" value="@_asOf.ToString("yyyy-MM-dd")" @onchange="AsOfChanged" />
+                    </div>
+
+                    <div class="col-12 col-md-5">
+                        <label class="form-label text-white-50">Search</label>
+                        <input class="form-control ac-input" @bind="_search" @bind:event="oninput"
+                               placeholder="Invoice No / Customer / Vendor..." />
+                    </div>
+
+                    <div class="col-12 col-md-2">
+                        <label class="form-label text-white-50">Bucket</label>
+                        <select class="form-select ac-select" @bind="_bucket">
+                            <option value="">All</option>
+                            <option value="Not Due">Not Due</option>
+                            <option value="0-30">0-30</option>
+                            <option value="31-60">31-60</option>
+                            <option value="61-90">61-90</option>
+                            <option value="90+">90+</option>
+                        </select>
+                    </div>
+
+                    <div class="col-12 col-md-2 d-grid">
+                        <button class="btn btn-primary" type="button" @onclick="Load" disabled="@_loading">Apply</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        @if (_resp != null)
+        {
+            <div class="row g-3 mb-3">
+                <div class="col-12 col-md-3">
+                    <div class="ac-tile">
+                        <div class="lbl">Outstanding</div>
+                        <div class="val">@Fmt(_resp.Summary.TotalOutstanding)</div>
+                    </div>
+                </div>
+
+                <div class="col-12 col-md-3">
+                    <div class="ac-tile">
+                        <div class="lbl">Not Due</div>
+                        <div class="val">@Fmt(_resp.Summary.NotDue)</div>
+                    </div>
+                </div>
+
+                <div class="col-12 col-md-2">
+                    <div class="ac-tile">
+                        <div class="lbl">0-30</div>
+                        <div class="val">@Fmt(_resp.Summary.B0_30)</div>
+                    </div>
+                </div>
+
+                <div class="col-12 col-md-2">
+                    <div class="ac-tile">
+                        <div class="lbl">31-60</div>
+                        <div class="val">@Fmt(_resp.Summary.B31_60)</div>
+                    </div>
+                </div>
+
+                <div class="col-12 col-md-2">
+                    <div class="ac-tile">
+                        <div class="lbl">90+</div>
+                        <div class="val">@Fmt(_resp.Summary.B90Plus)</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="ac-card">
+                <div class="ac-head">
+                    <div>Due List</div>
+                    <div class="text-white-50 small">Rows: <b>@Filtered().Count()</b></div>
+                </div>
+
+                <div class="ac-body">
+                    <div class="ac-tablewrap">
+                        <table class="table table-hover align-middle mb-0">
+                            <thead>
+                                <tr>
+                                    <th style="width:120px;">Bucket</th>
+                                    <th style="width:170px;">Doc</th>
+                                    <th>Party</th>
+                                    <th style="width:150px;">Due</th>
+                                    <th class="text-end" style="width:150px;">Outstanding</th>
+                                    <th style="width:170px;">Last Reminder</th>
+                                    <th style="width:260px;">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var r in Filtered())
+                                {
+                                    <tr>
+                                        <td>
+                                            <span class="ac-badge @BucketCls(r.Bucket)">@r.Bucket</span>
+                                        </td>
+                                        <td class="fw-semibold">@r.DocNo</td>
+                                        <td>
+                                            <div class="fw-semibold">@r.PartyName</div>
+                                            <div class="text-muted small">@(!string.IsNullOrWhiteSpace(r.PartyTRN) ? r.PartyTRN : "—")</div>
+                                        </td>
+                                        <td>
+                                            <div class="fw-semibold">@r.DueDate.ToString("dd-MMM-yyyy")</div>
+                                            <div class="text-muted small">@DueLabel(r.DaysOverdue)</div>
+                                        </td>
+                                        <td class="text-end fw-bold">@Fmt(r.Outstanding)</td>
+                                        <td class="text-muted small">
+                                            @(r.LastReminderAt.HasValue ? r.LastReminderAt.Value.ToLocalTime().ToString("dd-MMM HH:mm") : "—")
+                                        </td>
+                                        <td>
+                                            <div class="d-flex gap-2 flex-wrap">
+                                                <button class="btn btn-sm btn-outline-primary" type="button" @onclick="() => OpenDoc(r)">Open</button>
+                                                <button class="btn btn-sm btn-primary" type="button" @onclick="() => CopyReminder(r)">Copy Reminder</button>
+                                                <button class="btn btn-sm btn-outline-success" type="button" @onclick="() => MarkSent(r)">Mark Sent</button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                }
+
+                                @if (!Filtered().Any())
+                                {
+                                    <tr>
+                                        <td colspan="7" class="text-center text-muted py-4">No outstanding items.</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        }
+
+    </div>
+</div>
+
+@code {
+    private int _companyId;
+    private bool _loading;
+    private string? _err;
+
+    private string _tab = "AP";              // AR / AP
+    private DateTime _asOf = DateTime.Today;
+    private string _search = "";
+    private string _bucket = "";
+
+    private AgingResponseDto? _resp;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await ResolveCompany();
+        await Load();
+    }
+
+    private async Task ResolveCompany()
+    {
+        await CurrentCompany.RefreshAsync();
+        _companyId = CurrentCompany.CompanyId;
+        if (_companyId <= 0) throw new Exception("CompanyId not resolved. Logout/Login again.");
+    }
+
+    private async Task Load()
+    {
+        _loading = true;
+        _err = null;
+
+        try
+        {
+            await ResolveCompany();
+
+            if (_tab == "AR")
+                _resp = await Aging.GetARAgingAsync(_companyId, _asOf, _search);
+            else
+                _resp = await Aging.GetAPAgingAsync(_companyId, _asOf, _search);
+        }
+        catch (Exception ex)
+        {
+            _err = ex.InnerException?.Message ?? ex.Message;
+            _resp = null;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void SwitchToAR()
+    {
+        _tab = "AR";
+        _ = Load();
+    }
+
+    private void SwitchToAP()
+    {
+        _tab = "AP";
+        _ = Load();
+    }
+
+    private void AsOfChanged(ChangeEventArgs e)
+    {
+        if (DateTime.TryParse(e?.Value?.ToString(), out var d))
+            _asOf = d.Date;
+    }
+
+    private IEnumerable<AgingRowDto> Filtered()
+    {
+        if (_resp == null) return Enumerable.Empty<AgingRowDto>();
+
+        var q = _resp.Rows.AsEnumerable();
+
+        if (!string.IsNullOrWhiteSpace(_bucket))
+            q = q.Where(x => (x.Bucket ?? "").Equals(_bucket, StringComparison.OrdinalIgnoreCase));
+
+        return q;
+    }
+
+    private void OpenDoc(AgingRowDto r)
+    {
+        if ((r.DocType ?? "").Equals("INV", StringComparison.OrdinalIgnoreCase))
+        {
+            Nav.NavigateTo($"/invoice-view/{r.DocId}", forceLoad: true);
+            return;
+        }
+
+        // Change this route if your purchase view page differs
+        Nav.NavigateTo($"/purchase-invoice-view/{r.DocId}", forceLoad: true);
+    }
+
+    private async Task CopyReminder(AgingRowDto r)
+    {
+        // ✅ NO multi-line $@" ..."  -> avoids unterminated literal issues
+        var docLabel = (_tab == "AR") ? "Invoice" : "Payment";
+        var msg =
+            "Hi " + r.PartyName + "\n" +
+            "Reminder: " + docLabel + " " + r.DocNo + "\n" +
+            "Due: " + r.DueDate.ToString("dd-MMM-yyyy") + "\n" +
+            "Outstanding: " + r.Outstanding.ToString("0.00") + "\n" +
+            "Please arrange at the earliest. Thank you.";
+
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", msg);
+        }
+        catch
+        {
+            // fallback: alert
+            await JS.InvokeVoidAsync("alert", "Copy failed. Please allow clipboard permission.");
+        }
+    }
+
+    private async Task MarkSent(AgingRowDto r)
+    {
+        try
+        {
+            await Aging.MarkReminderSentAsync(_companyId, r.DocType, r.DocId, "Manual", "Marked from Aging Center", null);
+            await Load();
+        }
+        catch (Exception ex)
+        {
+            _err = ex.InnerException?.Message ?? ex.Message;
+        }
+    }
+
+    private void GoInvoices() => Nav.NavigateTo("/invoices", true);
+    private void GoPurchases() => Nav.NavigateTo("/purchase-invoices", true);
+
+    private static string Fmt(decimal v) => v.ToString("0.00");
+
+    private static string DueLabel(int daysOverdue)
+    {
+        if (daysOverdue < 0) return "Due in " + Math.Abs(daysOverdue) + "d";
+        if (daysOverdue == 0) return "Due Today";
+        return "Overdue " + daysOverdue + "d";
+    }
+
+    private static string BucketCls(string? b)
+    {
+        var x = (b ?? "").Trim();
+        if (x == "Not Due") return "bNot";
+        if (x == "0-30") return "b030";
+        if (x == "31-60") return "b3160";
+        if (x == "61-90") return "b6190";
+        return "b90";
+    }
+}

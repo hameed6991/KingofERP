@@ -1,0 +1,250 @@
+﻿@page "/account-roles"
+@using Microsoft.EntityFrameworkCore
+@using UaeEInvoice.Data
+@using UaeEInvoice.Services
+@using UaeEInvoice.Services.Auth
+@using Microsoft.AspNetCore.Authorization
+@attribute [Authorize]
+
+@inject AppDbContext Db
+@inject ICurrentCompany CurrentCompany
+@inject AccountRoleService Roles
+@inject NavigationManager Nav
+
+<div class="container-xxl py-4">
+
+    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
+        <div>
+            <h2 class="mb-1">Account Roles</h2>
+            <div class="text-muted">Map Cash/Bank/AR/AP etc once. Dashboard + Cashflow will use these (no hardcoding).</div>
+        </div>
+
+        <div class="d-flex align-items-center gap-2">
+            <span class="text-muted small">CompanyId</span>
+            <input class="form-control form-control-sm" style="width:80px" value="@_companyId" readonly />
+            <button class="btn btn-outline-secondary btn-sm" @onclick="Load">Reload</button>
+        </div>
+    </div>
+
+    @if (_fromSetup)
+    {
+        <div class="alert alert-info">
+            ✅ Company setup saved. Now map your accounts here (Cash/Bank/AR/AP...).
+            After mapping, Dashboard balances will start working correctly.
+        </div>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(_error))
+    {
+        <div class="alert alert-danger">@_error</div>
+    }
+    @if (!string.IsNullOrWhiteSpace(_msg))
+    {
+        <div class="alert alert-success">@_msg</div>
+    }
+
+    <div class="card shadow-sm border-0 mb-3">
+        <div class="card-body">
+            <div class="row g-2 align-items-end">
+                <div class="col-12 col-md-3">
+                    <label class="form-label">Role</label>
+                    <select class="form-select" @bind="_selectedRole">
+                        @foreach (var r in RoleOptions)
+                        {
+                            <option value="@r.Key">@r.Text</option>
+                        }
+                    </select>
+                </div>
+
+                <div class="col-12 col-md-3">
+                    <label class="form-label">Account No (GL)</label>
+                    <input class="form-control" @bind="_accountNoText" placeholder="eg: 1000" />
+                </div>
+
+                <div class="col-12 col-md-4">
+                    <label class="form-label">Pick from COA</label>
+                    <select class="form-select" @onchange="OnPickFromCoa">
+                        <option value="">-- select --</option>
+                        @foreach (var a in _coa)
+                        {
+                            <option value="@a.AccountNo">@a.AccountName (@a.AccountNo)</option>
+                        }
+                    </select>
+                    <div class="form-text">
+                        If dropdown is empty → COA not created. Go Company Setup and Save once.
+                    </div>
+                </div>
+
+                <div class="col-12 col-md-2 d-grid">
+                    <button class="btn btn-primary" @onclick="SaveMap" disabled="@_saving">
+                        @(_saving ? "Saving..." : "Save")
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card shadow-sm border-0">
+        <div class="card-body">
+            <h6 class="mb-3 text-uppercase text-muted">Current Mappings</h6>
+
+            @if (_rows.Count == 0)
+            {
+                <div class="text-muted">No mappings</div>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle">
+                        <thead>
+                            <tr class="text-uppercase text-muted small">
+                                <th>Role</th>
+                                <th>AccountNo</th>
+                                <th>Account Name</th>
+                                <th>Active</th>
+                                <th class="text-end">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var r in _rows)
+                            {
+                                <tr>
+                                    <td class="fw-semibold">@r.RoleKey</td>
+                                    <td>@r.AccountNo</td>
+                                    <td>@r.AccountName</td>
+                                    <td>
+                                        @if (r.IsActive)
+                                        {
+                                            <span class="badge bg-success">Active</span>
+                                        }
+                                        else
+                                        {
+                                            <span class="badge bg-secondary">Inactive</span>
+                                        }
+                                    </td>
+                                    <td class="text-end">
+                                        <button class="btn btn-sm btn-outline-secondary me-1"
+                                                @onclick="() => Toggle(r.Id, !r.IsActive)">
+                                            @(r.IsActive ? "Disable" : "Enable")
+                                        </button>
+                                        <button class="btn btn-sm btn-outline-danger"
+                                                @onclick="() => Delete(r.Id)">
+                                            Delete
+                                        </button>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+
+        </div>
+    </div>
+
+</div>
+
+@code {
+    private int _companyId;
+    private bool _saving;
+    private string? _error;
+    private string? _msg;
+
+    private bool _fromSetup;
+
+    private List<ChartOfAccount> _coa = new();
+    private List<AccountRoleRowDto> _rows = new();
+
+    private string _selectedRole = AccountRoleKeys.CASH;
+    private string _accountNoText = "";
+
+    private readonly List<(string Key, string Text)> RoleOptions = new()
+    {
+        (AccountRoleKeys.CASH, "CASH (Cash in hand)"),
+        (AccountRoleKeys.BANK, "BANK (Bank account)"),
+        (AccountRoleKeys.AR,   "AR (Accounts Receivable)"),
+        (AccountRoleKeys.AP,   "AP (Accounts Payable)"),
+        (AccountRoleKeys.INVENTORY, "INVENTORY (Stock/Inventory)"),
+        (AccountRoleKeys.SALES, "SALES (Sales Revenue)"),
+        (AccountRoleKeys.PURCHASE, "PURCHASE (Purchases/Expense)"),
+        (AccountRoleKeys.VAT_OUTPUT, "VAT_OUTPUT (VAT Payable)"),
+        (AccountRoleKeys.VAT_INPUT, "VAT_INPUT (VAT Receivable)")
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        _fromSetup = Nav.ToAbsoluteUri(Nav.Uri).Query.Contains("from=setup", StringComparison.OrdinalIgnoreCase);
+        await CurrentCompany.RefreshAsync();
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        _error = _msg = null;
+
+        await CurrentCompany.RefreshAsync();
+        _companyId = CurrentCompany.CompanyId;
+
+        if (_companyId <= 0)
+        {
+            _error = "CompanyId not found from login/session.";
+            return;
+        }
+
+        _coa = await Db.Set<ChartOfAccount>()
+            .AsNoTracking()
+            .Where(x => x.CompanyId == _companyId)
+            .OrderBy(x => x.AccountNo)
+            .ToListAsync();
+
+        _rows = await Roles.GetRoleRowsAsync(_companyId);
+    }
+
+    private void OnPickFromCoa(ChangeEventArgs e)
+    {
+        var v = e.Value?.ToString();
+        if (!string.IsNullOrWhiteSpace(v))
+            _accountNoText = v!;
+    }
+
+    private async Task SaveMap()
+    {
+        _saving = true;
+        _error = _msg = null;
+
+        try
+        {
+            if (!int.TryParse(_accountNoText, out var accNo) || accNo <= 0)
+                throw new Exception("Enter valid AccountNo.");
+
+            await Roles.UpsertAsync(_companyId, _selectedRole, accNo);
+
+            _msg = "Mapping saved.";
+            await Load();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task Toggle(int id, bool active)
+    {
+        _error = _msg = null;
+        await Roles.SetActiveAsync(id, active);
+        _msg = "Updated.";
+        await Load();
+    }
+
+    private async Task Delete(int id)
+    {
+        _error = _msg = null;
+        await Roles.DeleteAsync(id);
+        _msg = "Deleted.";
+        await Load();
+    }
+}

@@ -1,0 +1,272 @@
+﻿@page "/insights/sales-trend"
+@using UaeEInvoice.Services.Analytics
+@using UaeEInvoice.Services.Auth
+@inject AnalyticsService Analytics
+@inject ICurrentCompany CurrentCompany
+@inject IJSRuntime JS
+@inject NavigationManager Nav
+@implements IAsyncDisposable
+
+<style>
+    .bi-shell {
+        min-height: calc(100vh - 90px);
+        background: radial-gradient(900px 450px at 15% 0%, rgba(13,110,253,.12), transparent 60%), radial-gradient(900px 450px at 85% 0%, rgba(25,135,84,.10), transparent 60%), linear-gradient(180deg, rgba(248,249,250,1), rgba(255,255,255,1));
+        border: 1px solid rgba(0,0,0,.07);
+        border-radius: 18px;
+        box-shadow: 0 12px 34px rgba(0,0,0,.06);
+        padding: 18px;
+    }
+
+    .title {
+        font-weight: 900;
+        letter-spacing: -0.6px;
+        margin: 0;
+        font-size: clamp(22px, 2.2vw, 34px);
+        line-height: 1.05;
+    }
+
+    .mut {
+        color: rgba(33,37,41,.65);
+        font-size: 13px;
+    }
+
+    .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        border-radius: 999px;
+        padding: 8px 12px;
+        border: 1px solid rgba(0,0,0,.10);
+        background: rgba(255,255,255,.75);
+        font-weight: 800;
+        box-shadow: 0 8px 22px rgba(0,0,0,.05);
+        backdrop-filter: blur(10px);
+    }
+
+    .cardx {
+        border: 1px solid rgba(0,0,0,.07);
+        border-radius: 18px;
+        background: rgba(255,255,255,.75);
+        box-shadow: 0 10px 28px rgba(0,0,0,.05);
+        backdrop-filter: blur(10px);
+        overflow: hidden;
+    }
+
+    .chartBox {
+        height: 420px;
+        padding: 14px;
+    }
+
+    .kpi {
+        padding: 14px;
+    }
+
+        .kpi .cap {
+            color: rgba(33,37,41,.60);
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: .10em;
+        }
+
+        .kpi .val {
+            font-weight: 900;
+            letter-spacing: -0.8px;
+            font-size: 28px;
+            margin-top: 6px;
+        }
+
+    .btn-soft {
+        border-radius: 12px;
+        padding: 10px 12px;
+        font-weight: 800;
+        border: 1px solid rgba(0,0,0,.10);
+        background: rgba(255,255,255,.70);
+    }
+
+    .btn-main {
+        border-radius: 12px;
+        padding: 10px 14px;
+        font-weight: 900;
+    }
+
+    .skeleton {
+        border-radius: 18px;
+        border: 1px solid rgba(0,0,0,.07);
+        background: linear-gradient(90deg, rgba(0,0,0,.04), rgba(0,0,0,.08), rgba(0,0,0,.04));
+        background-size: 200% 100%;
+        animation: shimmer 1.1s infinite linear;
+        height: 420px;
+    }
+
+    @@keyframes shimmer {
+        0% {
+            background-position: 200% 0;
+        }
+
+        100% {
+            background-position: -200% 0;
+        }
+    }
+</style>
+
+<div class="container-xxl py-4">
+    <div class="bi-shell">
+
+        <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
+            <div>
+                <h2 class="title">Sales Trend</h2>
+                <div class="mut">Company #@CurrentCompany.CompanyId • Chart.js Executive View</div>
+
+                <div class="d-flex gap-2 flex-wrap mt-3">
+                    <span class="pill"><span class="mut">As of</span> @DateTime.Today.ToString("dd MMM yyyy")</span>
+                    <span class="pill"><span class="mut">Range</span> Last @_days days</span>
+                    <span class="pill"><span class="mut">Invoices</span> @_count</span>
+                    <span class="pill"><span class="mut">Total</span> @Fmt(_total)</span>
+                </div>
+            </div>
+
+            <div class="d-flex gap-2 flex-wrap">
+                <button class="btn btn-soft" type="button" @onclick="GoBack">Back</button>
+
+                <div class="btn-group" role="group" aria-label="days range">
+                    <button class="btn btn-outline-primary @( _days==30 ? "active" : "" )" type="button" @onclick="(()=>SetDays(30))">30 Days</button>
+                    <button class="btn btn-outline-primary @( _days==90 ? "active" : "" )" type="button" @onclick="(()=>SetDays(90))">90 Days</button>
+                </div>
+
+                <button class="btn btn-primary btn-main" type="button" @onclick="Reload" disabled="@_loading">
+                    @(_loading ? "Loading..." : "Refresh")
+                </button>
+            </div>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(_err))
+        {
+            <div class="alert alert-danger border-0 rounded-4 shadow-sm">
+                <b>Error:</b> @_err
+            </div>
+        }
+
+        <div class="row g-3">
+            <div class="col-12 col-lg-4">
+                <div class="cardx kpi h-100">
+                    <div class="cap">Average / Day</div>
+                    <div class="val">@Fmt(_avgPerDay)</div>
+                    <div class="mut">Based on last @_days days</div>
+
+                    <hr class="my-3" />
+
+                    <div class="cap">Best Day</div>
+                    <div class="val">@Fmt(_maxDayValue)</div>
+                    <div class="mut">@(_maxDayLabel ?? "-")</div>
+                </div>
+            </div>
+
+            <div class="col-12 col-lg-8">
+                <div class="cardx chartBox">
+                    @if (_loading && _trend.Count == 0)
+                    {
+                        <div class="skeleton"></div>
+                    }
+                    else
+                    {
+                        <canvas id="@_canvasId" style="width:100%; height:100%;"></canvas>
+                    }
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+@code {
+    private bool _loading;
+    private string? _err;
+
+    private int _days = 30;
+    private readonly string _canvasId = "salesTrendChart";
+
+    private List<TrendPoint> _trend = new();
+
+    private decimal _total;
+    private int _count;
+    private decimal _avgPerDay;
+
+    private decimal _maxDayValue;
+    private string? _maxDayLabel;
+
+    private bool _renderRequested;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Reload();
+    }
+
+    private void GoBack()
+    {
+        Nav.NavigateTo("/insights");
+    }
+
+    private async Task SetDays(int d)
+    {
+        _days = d;
+        await Reload();
+    }
+
+    private async Task Reload()
+    {
+        _loading = true;
+        _err = null;
+
+        try
+        {
+            var cid = CurrentCompany.CompanyId;
+            var asOf = DateTime.Today;
+
+            _trend = await Analytics.GetSalesTrendDaily(cid, _days, asOf);
+
+            _total = _trend.Sum(x => x.Value);
+            _count = _trend.Sum(x => x.Count);
+            _avgPerDay = (_days <= 0) ? 0m : (_total / _days);
+
+            var best = _trend.OrderByDescending(x => x.Value).FirstOrDefault();
+            _maxDayValue = best?.Value ?? 0m;
+            _maxDayLabel = best is null ? "-" : best.Day.ToString("dd MMM yyyy");
+
+            // Request chart render after UI draws canvas
+            _renderRequested = true;
+        }
+        catch (Exception ex)
+        {
+            _err = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+
+        StateHasChanged();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_renderRequested) return;
+        _renderRequested = false;
+
+        // Build chart arrays
+        var labels = _trend.Select(x => x.Day.ToString("dd-MMM")).ToArray();
+        var values = _trend.Select(x => (double)x.Value).ToArray();
+
+        await JS.InvokeVoidAsync("biCharts.renderLine", _canvasId, labels, values, $"Sales (Last {_days} days)");
+    }
+
+    private static string Fmt(decimal v) => v.ToString("0.00");
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("biCharts.destroy", _canvasId);
+        }
+        catch { }
+    }
+}

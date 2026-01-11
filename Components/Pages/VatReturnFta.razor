@@ -1,0 +1,242 @@
+﻿@page "/vat-return-fta"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+
+@using UaeEInvoice.Services.Reports
+@using UaeEInvoice.Services.Auth
+@inject VatReportService Vat
+@inject ICurrentCompany CurrentCompany
+
+<style>
+    :root {
+        --bd: rgba(255,255,255,.12);
+        --tx: rgba(255,255,255,.92);
+        --mut: rgba(255,255,255,.62);
+        --sh: 0 18px 70px rgba(0,0,0,.45);
+    }
+
+    .wrap {
+        background: radial-gradient(1100px 650px at 12% -10%, rgba(34,197,94,.20), transparent 60%), radial-gradient(900px 520px at 90% 0%, rgba(59,130,246,.18), transparent 60%), linear-gradient(180deg, #0b1220, #070b16 70%, #040711);
+        min-height: calc(100vh - 70px);
+        border-radius: 22px;
+        padding: 18px;
+        color: var(--tx);
+    }
+
+    .hero {
+        border-radius: 22px;
+        padding: 16px;
+        border: 1px solid var(--bd);
+        box-shadow: var(--sh);
+        background: linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,.03));
+        backdrop-filter: blur(10px);
+    }
+
+    .cardx {
+        border-radius: 20px;
+        border: 1px solid rgba(255,255,255,.10);
+        background: rgba(255,255,255,.06);
+        box-shadow: 0 14px 35px rgba(0,0,0,.22);
+        overflow: hidden;
+    }
+
+    .head {
+        padding: 12px 14px;
+        border-bottom: 1px solid rgba(255,255,255,.08);
+        font-weight: 900;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
+    }
+
+    .body {
+        padding: 14px;
+    }
+
+    .mut {
+        color: var(--mut);
+    }
+
+    .inp {
+        border-radius: 12px !important;
+        background: rgba(255,255,255,.92) !important;
+        border: 1px solid rgba(15,23,42,.12) !important;
+    }
+
+    .tbl {
+        border-radius: 14px;
+        overflow: hidden;
+        background: #fff;
+        color: #0f172a;
+        border: 1px solid rgba(15,23,42,.10);
+    }
+
+        .tbl thead th {
+            background: #f1f5f9 !important;
+            font-size: .80rem;
+            text-transform: uppercase;
+            letter-spacing: .3px;
+            white-space: nowrap;
+        }
+
+    .btn {
+        border-radius: 12px;
+        font-weight: 900;
+    }
+
+    .pill {
+        display: inline-block;
+        padding: 4px 10px;
+        border-radius: 999px;
+        background: rgba(255,255,255,.10);
+        border: 1px solid rgba(255,255,255,.14);
+    }
+</style>
+
+<div class="container-xxl py-4">
+    <div class="wrap">
+
+        <div class="hero mb-3">
+            <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+                <div>
+                    <h2 class="mb-1" style="font-weight:900;">VAT Return (FTA Boxes)</h2>
+                    <div class="mut">CompanyId: <b>@_companyId</b> <span class="pill ms-2">UAE</span></div>
+                </div>
+
+                <div class="d-flex gap-2">
+                    <button class="btn btn-light" @onclick="Load" disabled="@_loading">@(_loading ? "Loading..." : "Refresh")</button>
+                </div>
+            </div>
+
+            <div class="row g-2 align-items-end mt-3">
+                <div class="col-12 col-md-3">
+                    <label class="form-label mut">From</label>
+                    <input type="date" class="form-control inp" @bind="_from" />
+                </div>
+                <div class="col-12 col-md-3">
+                    <label class="form-label mut">To</label>
+                    <input type="date" class="form-control inp" @bind="_to" />
+                </div>
+                <div class="col-12 col-md-2 d-grid">
+                    <button class="btn btn-primary" @onclick="Load" disabled="@_loading">Apply</button>
+                </div>
+            </div>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(_err))
+        {
+            <div class="alert alert-danger py-2">@_err</div>
+        }
+
+        @if (_vm == null)
+        {
+            <div class="cardx"><div class="body text-center mut py-5">No data.</div></div>
+        }
+        else
+        {
+            <div class="cardx">
+                <div class="head">
+                    <div>VAT Return Boxes</div>
+                    <div class="mut small">Period: <b>@_vm.FromDate:dd-MMM-yyyy</b> to <b>@_vm.ToDate:dd-MMM-yyyy</b></div>
+                </div>
+
+                <div class="body">
+                    <div class="tbl">
+                        <table class="table table-hover align-middle mb-0">
+                            <thead>
+                                <tr>
+                                    <th style="width:110px;">Box</th>
+                                    <th>Description</th>
+                                    <th class="text-end" style="width:160px;">Value (AED)</th>
+                                    <th class="text-end" style="width:160px;">VAT (AED)</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td class="fw-bold">1</td>
+                                    <td class="fw-semibold">Standard Rated Supplies (5%)</td>
+                                    <td class="text-end">@_vm.Box1_Taxable.ToString("0.00")</td>
+                                    <td class="text-end fw-semibold">@_vm.Box1_OutputVat.ToString("0.00")</td>
+                                </tr>
+
+                                <tr>
+                                    <td class="fw-bold">2</td>
+                                    <td class="fw-semibold">Zero Rated Supplies (0%)</td>
+                                    <td class="text-end">@_vm.Box2_ZeroRated.ToString("0.00")</td>
+                                    <td class="text-end">0.00</td>
+                                </tr>
+
+                                <tr>
+                                    <td class="fw-bold">3</td>
+                                    <td class="fw-semibold">Exempt Supplies</td>
+                                    <td class="text-end">@_vm.Box3_Exempt.ToString("0.00")</td>
+                                    <td class="text-end">0.00</td>
+                                </tr>
+
+                                <tr>
+                                    <td class="fw-bold">9</td>
+                                    <td class="fw-semibold">Standard Rated Expenses (Input VAT)</td>
+                                    <td class="text-end">@_vm.Box9_Taxable.ToString("0.00")</td>
+                                    <td class="text-end fw-semibold">@_vm.Box9_InputVat.ToString("0.00")</td>
+                                </tr>
+
+                                <tr>
+                                    <td colspan="2" class="fw-bold">Net VAT Payable / (Refund)</td>
+                                    <td class="text-end"></td>
+                                    <td class="text-end fw-bold">@_vm.NetVatPayable.ToString("0.00")</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="mut small mt-2">
+                        Notes: Box 1 VAT is <b>Output VAT</b>. Box 9 VAT is <b>Input VAT</b>. Net = Output - Input.
+                    </div>
+                </div>
+            </div>
+        }
+
+    </div>
+</div>
+
+@code {
+    int _companyId;
+    bool _loading;
+    string? _err;
+
+    DateTime _from = new(DateTime.Today.Year, DateTime.Today.Month, 1);
+    DateTime _to = DateTime.Today;
+
+    VatReportService.VatFtaBoxesDto? _vm;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CurrentCompany.RefreshAsync();
+        _companyId = CurrentCompany.CompanyId;
+        await Load();
+    }
+
+    async Task Load()
+    {
+        _err = null;
+        _loading = true;
+
+        try
+        {
+            await CurrentCompany.RefreshAsync();
+            _companyId = CurrentCompany.CompanyId;
+            if (_companyId <= 0) throw new Exception("Company not resolved.");
+
+            _vm = await Vat.GetFtaBoxesAsync(_companyId, _from, _to);
+        }
+        catch (Exception ex)
+        {
+            _vm = null;
+            _err = ex.InnerException?.Message ?? ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+}

@@ -1,0 +1,425 @@
+﻿@page "/masters/import"
+@using ClosedXML.Excel
+@using UaeEInvoice.Services.Import
+@using UaeEInvoice.Services.Auth
+@using Microsoft.AspNetCore.Authorization
+@inject ExcelImportService ImportService
+@inject NavigationManager Nav
+@inject ICurrentCompany CurrentCompany
+
+@attribute [Authorize]   
+
+<h2 class="mb-3">Bulk Upload (Excel)</h2>
+
+@if (!string.IsNullOrWhiteSpace(_initError))
+{
+    <div class="alert alert-danger">@_initError</div>
+}
+else
+{
+    <div class="card shadow-sm mb-3">
+        <div class="card-body">
+
+            <div class="row g-3 align-items-end">
+                <div class="col-12 col-md-4">
+                    <label class="form-label">Import Type</label>
+                    <select class="form-select" @bind="_type">
+                        <option value="Employee">Employee</option>
+                        <option value="Item">Item</option>
+                        <option value="Customer">Customer</option>
+                    </select>
+                </div>
+
+                <div class="col-12 col-md-3">
+                    <label class="form-label">CompanyId</label>
+                    <input class="form-control" value="@_companyId" readonly />
+                    <div class="form-text">Auto from login (claim).</div>
+                </div>
+
+                <div class="col-12 col-md-3">
+                    <div class="form-check mt-4">
+                        <input class="form-check-input" type="checkbox" id="overwrite" @bind="_overwrite" />
+                        <label class="form-check-label" for="overwrite">Overwrite existing</label>
+                    </div>
+                </div>
+
+                <div class="col-12 col-md-2 text-md-end">
+                    <button class="btn btn-outline-primary w-100" @onclick="DownloadTemplate" disabled="@_busy">
+                        ⬇️ Template
+                    </button>
+                </div>
+            </div>
+
+            <hr class="my-3" />
+
+            <div class="row g-3">
+                <div class="col-12 col-lg-8">
+                    <label class="form-label">Select Excel file</label>
+                    <InputFile OnChange="OnFileChanged" class="form-control" accept=".xlsx" />
+                    <div class="form-text">
+                        Must be .xlsx. Headers can match template OR common aliases (we support both).
+                    </div>
+                </div>
+
+                <div class="col-12 col-lg-4 d-grid">
+                    <button class="btn btn-success" disabled="@(!_fileReady || _busy)" @onclick="Import">
+                        @(_busy ? "Importing..." : "🚀 Import Now")
+                    </button>
+
+                    <button class="btn btn-outline-secondary mt-2" @onclick="Clear" disabled="@(_busy)">
+                        Clear
+                    </button>
+                </div>
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(_error))
+            {
+                <div class="alert alert-danger mt-3">@_error</div>
+            }
+            @if (!string.IsNullOrWhiteSpace(_msg))
+            {
+                <div class="alert alert-success mt-3">@_msg</div>
+            }
+        </div>
+    </div>
+
+    @if (_previewHeaders.Count > 0)
+    {
+        <div class="card shadow-sm mb-3">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <div>
+                    <strong>Preview</strong>
+                    <span class="text-muted"> (first 10 rows)</span>
+                </div>
+                <div class="text-muted small">@_fileName</div>
+            </div>
+
+            <div class="card-body">
+                <div class="mb-2">
+                    <span class="badge bg-dark me-2">Detected Headers</span>
+                    @foreach (var h in _previewHeaders)
+                    {
+                        <span class="badge bg-light text-dark border me-1 mb-1">@h</span>
+                    }
+                </div>
+
+                <div class="table-responsive">
+                    <table class="table table-sm table-bordered align-middle">
+                        <thead class="table-light">
+                            <tr>
+                                @foreach (var col in _previewHeaders.Take(12))
+                                {
+                                    <th>@col</th>
+                                }
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var row in _previewRows)
+                            {
+                                <tr>
+                                    @foreach (var col in _previewHeaders.Take(12))
+                                    {
+                                        <td>@(row.TryGetValue(col, out var v) ? v : "")</td>
+                                    }
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="text-muted small">
+                    Tip: If your model fields differ (ex: no Mobile/Email), it will auto-skip safely.
+                </div>
+            </div>
+        </div>
+    }
+
+    @if (_result != null)
+    {
+        <div class="row g-3 mb-3">
+            <div class="col-6 col-md-3">
+                <div class="card shadow-sm">
+                    <div class="card-body">
+                        <div class="text-muted small">Total</div>
+                        <div class="fs-4 fw-bold">@_result.TotalRows</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="card shadow-sm">
+                    <div class="card-body">
+                        <div class="text-muted small">Inserted</div>
+                        <div class="fs-4 fw-bold text-success">@_result.Inserted</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="card shadow-sm">
+                    <div class="card-body">
+                        <div class="text-muted small">Updated</div>
+                        <div class="fs-4 fw-bold text-primary">@_result.Updated</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="card shadow-sm">
+                    <div class="card-body">
+                        <div class="text-muted small">Skipped</div>
+                        <div class="fs-4 fw-bold text-warning">@_result.Skipped</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        @if (_result.Errors.Any())
+        {
+            <div class="card shadow-sm">
+                <div class="card-header">
+                    <strong>Errors</strong> <span class="text-muted">(@_result.Errors.Count)</span>
+                </div>
+                <div class="card-body">
+                    <details open>
+                        <summary class="mb-2">Show error list</summary>
+                        <ol class="mb-0">
+                            @foreach (var e in _result.Errors.Take(200))
+                            {
+                                <li class="mb-1">@e</li>
+                            }
+                        </ol>
+                        @if (_result.Errors.Count > 200)
+                        {
+                            <div class="text-muted small mt-2">Showing first 200 errors.</div>
+                        }
+                    </details>
+                </div>
+            </div>
+        }
+    }
+
+    <div class="card shadow-sm">
+        <div class="card-header">
+            <strong>Excel Template Headers</strong>
+        </div>
+        <div class="card-body">
+            <div class="row g-3">
+
+                <div class="col-12 col-md-4">
+                    <div class="p-3 border rounded">
+                        <div class="fw-bold mb-2">Employee</div>
+                        <div class="small text-muted">
+                            EmpCode, EmpName, Mobile, Email, BasicSalary, Allowance, IsActive
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-12 col-md-4">
+                    <div class="p-3 border rounded">
+                        <div class="fw-bold mb-2">Item</div>
+                        <div class="small text-muted">
+                            ItemCode, ItemName, Unit, SalePrice, PurchasePrice, TaxPercent, IsActive
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-12 col-md-4">
+                    <div class="p-3 border rounded">
+                        <div class="fw-bold mb-2">Customer</div>
+                        <div class="small text-muted">
+                            CustomerCode, CustomerName, Mobile, Email, TRN, Address, IsActive
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private string _type = "Employee";
+    private int _companyId;                 // ✅ dynamic
+    private bool _overwrite = true;
+
+    private bool _busy;
+    private string? _initError;
+    private string? _error;
+    private string? _msg;
+
+    private IBrowserFile? _file;
+    private bool _fileReady;
+    private string _fileName = "";
+
+    private ImportResult? _result;
+
+    private List<string> _previewHeaders = new();
+    private List<Dictionary<string, string>> _previewRows = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _initError = null;
+
+        try
+        {
+            await CurrentCompany.RefreshAsync();
+
+            if (!CurrentCompany.IsAuthenticated)
+                throw new Exception("Not authenticated. Please login again.");
+
+            _companyId = CurrentCompany.CompanyId;
+
+            if (_companyId <= 0)
+                throw new Exception("CompanyId not found from login. Logout & login again.");
+        }
+        catch (Exception ex)
+        {
+            _initError = ex.Message;
+        }
+    }
+
+    private async Task OnFileChanged(InputFileChangeEventArgs e)
+    {
+        ClearPreview();
+        _result = null;
+        _msg = _error = null;
+
+        _file = e.File;
+        if (_file == null)
+        {
+            _fileReady = false;
+            return;
+        }
+
+        if (!_file.Name.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase))
+        {
+            _fileReady = false;
+            _error = "Please select .xlsx file only.";
+            return;
+        }
+
+        _fileName = _file.Name;
+        _fileReady = true;
+
+        // Preview first 10 rows
+        try
+        {
+            using var stream = _file.OpenReadStream(maxAllowedSize: 50 * 1024 * 1024);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+            ms.Position = 0;
+
+            using var wb = new XLWorkbook(ms);
+            var ws = wb.Worksheets.FirstOrDefault();
+            if (ws == null)
+            {
+                _error = "Excel sheet not found.";
+                return;
+            }
+
+            var headerRow = ws.Row(1);
+            var lastCol = ws.LastColumnUsed()?.ColumnNumber() ?? 0;
+
+            for (int c = 1; c <= lastCol; c++)
+            {
+                var h = headerRow.Cell(c).GetString().Trim();
+                if (!string.IsNullOrWhiteSpace(h))
+                    _previewHeaders.Add(h);
+            }
+
+            var lastRow = ws.LastRowUsed()?.RowNumber() ?? 1;
+            var takeRows = Math.Min(lastRow, 11); // 1 header + 10 rows
+
+            for (int r = 2; r <= takeRows; r++)
+            {
+                var rowDict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                for (int c = 1; c <= lastCol; c++)
+                {
+                    var h = headerRow.Cell(c).GetString().Trim();
+                    if (string.IsNullOrWhiteSpace(h)) continue;
+                    rowDict[h] = ws.Cell(r, c).GetString();
+                }
+                _previewRows.Add(rowDict);
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = "Preview failed: " + ex.Message;
+        }
+    }
+
+    private async Task Import()
+    {
+        _busy = true;
+        _error = _msg = null;
+        _result = null;
+
+        try
+        {
+            await CurrentCompany.RefreshAsync();
+            _companyId = CurrentCompany.CompanyId;
+
+            if (_companyId <= 0)
+                throw new Exception("CompanyId missing. Logout & login again.");
+
+            if (_file == null)
+            {
+                _error = "Choose a file first.";
+                return;
+            }
+
+            using var stream = _file.OpenReadStream(maxAllowedSize: 50 * 1024 * 1024);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+            ms.Position = 0;
+
+            if (_type == "Employee")
+                _result = await ImportService.ImportEmployeesAsync(ms, _companyId, _overwrite);
+            else if (_type == "Item")
+                _result = await ImportService.ImportItemsAsync(ms, _companyId, _overwrite);
+            else
+                _result = await ImportService.ImportCustomersAsync(ms, _companyId, _overwrite);
+
+            _msg = $"Import completed. Inserted={_result.Inserted}, Updated={_result.Updated}, Skipped={_result.Skipped}, Errors={_result.Errors.Count}";
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void Clear()
+    {
+        _file = null;
+        _fileReady = false;
+        _fileName = "";
+        _msg = _error = null;
+        _result = null;
+        ClearPreview();
+    }
+
+    private void ClearPreview()
+    {
+        _previewHeaders.Clear();
+        _previewRows.Clear();
+    }
+
+    // -------- Template download (CSV) --------
+    private async Task DownloadTemplate()
+    {
+        var csv = _type switch
+        {
+            "Employee" => "EmpCode,EmpName,Mobile,Email,BasicSalary,Allowance,IsActive\nE001,John,0500000000,john@mail.com,3000,200,true\n",
+            "Item" => "ItemCode,ItemName,Unit,SalePrice,PurchasePrice,TaxPercent,IsActive\nI001,Sample Item,PCS,10,7,5,true\n",
+            _ => "CustomerCode,CustomerName,Mobile,Email,TRN,Address,IsActive\nC001,ABC LLC,0500000000,abc@mail.com,100000000000003,Dubai,true\n"
+        };
+
+        var bytes = System.Text.Encoding.UTF8.GetBytes(csv);
+        var base64 = Convert.ToBase64String(bytes);
+        var url = $"data:text/csv;base64,{base64}";
+
+        Nav.NavigateTo(url, forceLoad: true);
+    }
+}

@@ -1,0 +1,556 @@
+﻿@page "/insights/ar-collection"
+
+@using UaeEInvoice.Services.Auth
+@using UaeEInvoice.Services.Analytics
+
+@inject AnalyticsService Analytics
+@inject ICurrentCompany CurrentCompany
+@inject IJSRuntime JS
+@inject NavigationManager Nav
+
+@implements IAsyncDisposable
+
+<style>
+    :root {
+        --ar-bg1: #0b1020;
+        --ar-bg2: #0a1a2f;
+        --ar-card: rgba(255,255,255,.06);
+        --ar-card2: rgba(255,255,255,.10);
+        --ar-border: rgba(255,255,255,.12);
+        --ar-text: rgba(255,255,255,.92);
+        --ar-muted: rgba(255,255,255,.65);
+        --ar-accent: #2f7bff;
+        --ar-good: #18c964;
+        --ar-warn: #f5a524;
+        --ar-bad: #f31260;
+        --ar-radius: 18px;
+    }
+
+    .ar-shell {
+        background: radial-gradient(1200px 600px at 20% 5%, rgba(47,123,255,0.25), transparent 60%), radial-gradient(900px 500px at 85% 15%, rgba(243,18,96,0.18), transparent 55%), linear-gradient(160deg, var(--ar-bg1), var(--ar-bg2));
+        border-radius: 22px;
+        padding: 22px;
+        border: 1px solid rgba(255,255,255,0.08);
+        box-shadow: 0 30px 90px rgba(0,0,0,0.45);
+        color: var(--ar-text);
+        min-height: calc(100vh - 110px);
+    }
+
+    .ar-hero {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-bottom: 14px;
+    }
+
+    .ar-title {
+        font-size: 38px;
+        font-weight: 900;
+        letter-spacing: -.4px;
+        margin: 0;
+        line-height: 1.05;
+    }
+
+    .ar-sub {
+        color: var(--ar-muted);
+        font-weight: 700;
+        margin-top: 6px;
+    }
+
+    .ar-meta {
+        color: var(--ar-muted);
+        font-size: 13px;
+        font-weight: 700;
+    }
+
+    .ar-btn {
+        border-radius: 14px;
+        padding: 10px 14px;
+        border: 1px solid rgba(255,255,255,0.18);
+        background: rgba(255,255,255,0.06);
+        color: var(--ar-text);
+        font-weight: 800;
+    }
+
+        .ar-btn.primary {
+            background: linear-gradient(135deg, rgba(47,123,255,0.95), rgba(47,123,255,0.55));
+            border: 1px solid rgba(47,123,255,0.55);
+        }
+
+        .ar-btn:disabled {
+            opacity: .55;
+            cursor: not-allowed;
+        }
+
+    .ar-card {
+        background: linear-gradient(180deg, var(--ar-card2), var(--ar-card));
+        border: 1px solid var(--ar-border);
+        border-radius: var(--ar-radius);
+        box-shadow: 0 18px 60px rgba(0,0,0,0.25);
+        overflow: hidden;
+    }
+
+        .ar-card .body {
+            padding: 16px;
+        }
+
+    .kpi {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        min-height: 104px;
+    }
+
+        .kpi .k {
+            color: var(--ar-muted);
+            font-weight: 800;
+            font-size: 12px;
+            letter-spacing: .4px;
+            text-transform: uppercase;
+        }
+
+        .kpi .v {
+            font-size: 32px;
+            font-weight: 950;
+        }
+
+        .kpi .s {
+            color: var(--ar-muted);
+            font-size: 12px;
+            font-weight: 700;
+        }
+
+    .filters .form-label {
+        color: var(--ar-muted);
+        font-weight: 800;
+        font-size: 12px;
+    }
+
+    .filters .form-control {
+        background: rgba(255,255,255,0.06);
+        border: 1px solid rgba(255,255,255,0.14);
+        color: var(--ar-text);
+        border-radius: 14px;
+        padding: 10px 12px;
+        font-weight: 800;
+    }
+
+    .canvasBox {
+        background: rgba(255,255,255,0.04);
+        border: 1px solid rgba(255,255,255,0.10);
+        border-radius: 16px;
+        padding: 12px;
+        height: 320px;
+    }
+
+        .canvasBox canvas {
+            width: 100% !important;
+            height: 100% !important;
+        }
+
+    .tbl {
+        color: var(--ar-text);
+    }
+
+        .tbl thead th {
+            color: var(--ar-muted);
+            font-weight: 900;
+            font-size: 12px;
+            text-transform: uppercase;
+            border-color: rgba(255,255,255,0.10) !important;
+        }
+
+        .tbl td {
+            border-color: rgba(255,255,255,0.08) !important;
+            vertical-align: middle;
+            font-weight: 700;
+        }
+
+    .pill {
+        display: inline-flex;
+        gap: 8px;
+        align-items: center;
+        border-radius: 999px;
+        padding: 8px 12px;
+        border: 1px solid rgba(255,255,255,0.12);
+        background: rgba(255,255,255,0.06);
+        font-weight: 900;
+        white-space: nowrap;
+    }
+
+        .pill.bad {
+            border-color: rgba(243,18,96,.35);
+        }
+
+        .pill.good {
+            border-color: rgba(24,201,100,.35);
+        }
+
+    .mut {
+        color: var(--ar-muted);
+        font-weight: 700;
+    }
+</style>
+
+<div class="container-xxl py-4">
+    <div class="ar-shell">
+
+        <div class="ar-hero">
+            <div>
+                <h2 class="ar-title">AR Collection (Recovery BI)</h2>
+                <div class="ar-sub">Overdue • Trend • DSO • Promise tracker • Collector mode</div>
+                <div class="ar-meta mt-1">
+                    CompanyId: <b>@CurrentCompany.CompanyId</b>
+                </div>
+            </div>
+
+            <div class="d-flex gap-2 flex-wrap">
+                <button type="button" class="ar-btn" @onclick="GoBack">Back</button>
+                <button type="button" class="ar-btn primary" @onclick="Reload" disabled="@_loading">
+                    @(_loading ? "Running..." : "Run")
+                </button>
+            </div>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(_err))
+        {
+            <div class="alert alert-danger border-0 rounded-4 shadow-sm">
+                <b>Error:</b> @_err
+            </div>
+        }
+
+        <!-- Filters -->
+        <div class="ar-card filters mb-3">
+            <div class="body">
+                <div class="row g-2 align-items-end">
+                    <div class="col-12 col-md-3">
+                        <label class="form-label">As Of</label>
+                        <InputDate class="form-control" @bind-Value="_asOf" />
+                    </div>
+                    <div class="col-12 col-md-3">
+                        <label class="form-label">DSO Window (days)</label>
+                        <input class="form-control" type="number" min="7" max="180" @bind="_windowDays" />
+                    </div>
+                    <div class="col-12 col-md-3">
+                        <label class="form-label">Top customers</label>
+                        <input class="form-control" type="number" min="5" max="50" @bind="_takeTop" />
+                    </div>
+                    <div class="col-12 col-md-3">
+                        <button type="button" class="ar-btn primary w-100" @onclick="Reload" disabled="@_loading">
+                            @(_loading ? "Loading..." : "Run Dashboard")
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        @if (_data != null)
+        {
+            <!-- KPIs -->
+            <div class="row g-3 mb-3">
+                <div class="col-12 col-lg-3">
+                    <div class="ar-card h-100">
+                        <div class="body kpi">
+                            <div class="k">AR Outstanding</div>
+                            <div class="v">@Fmt(_data.ArOutstanding)</div>
+                            <div class="s">All open balances</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-12 col-lg-3">
+                    <div class="ar-card h-100">
+                        <div class="body kpi">
+                            <div class="k">AR Overdue</div>
+                            <div class="v">@Fmt(_data.ArOverdue)</div>
+                            <div class="s">Due date passed</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-12 col-lg-3">
+                    <div class="ar-card h-100">
+                        <div class="body kpi">
+                            <div class="k">DSO</div>
+                            <div class="v">@_data.DsoDays.ToString("0.0") <span class="mut">days</span></div>
+                            <div class="s">Based on last @_data.WindowDays days sales</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-12 col-lg-3">
+                    <div class="ar-card h-100">
+                        <div class="body kpi">
+                            <div class="k">Sales in Window</div>
+                            <div class="v">@Fmt(_data.SalesInWindow)</div>
+                            <div class="s">@_data.WindowDays day window</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Trend chart -->
+            <div class="ar-card mb-3">
+                <div class="body">
+                    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+                        <div>
+                            <div class="fw-bold" style="font-size:18px;">Overdue Trend</div>
+                            <div class="mut">This month vs last month (same day count)</div>
+                        </div>
+
+                        <div class="d-flex gap-2 flex-wrap">
+                            <span class="pill"><span class="mut">As of</span> @_data.AsOf.ToString("dd-MMM-yyyy")</span>
+                            <span class="pill bad"><span class="mut">Overdue</span> @Fmt(_data.ArOverdue)</span>
+                            <span class="pill good"><span class="mut">Outstanding</span> @Fmt(_data.ArOutstanding)</span>
+                        </div>
+                    </div>
+
+                    <div class="canvasBox">
+                        <canvas id="@_trendCanvasId"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row g-3">
+                <!-- Top overdue -->
+                <div class="col-12 col-lg-7">
+                    <div class="ar-card h-100">
+                        <div class="body">
+                            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+                                <div>
+                                    <div class="fw-bold" style="font-size:18px;">Top Overdue Customers</div>
+                                    <div class="mut">Collector mode: one-click WhatsApp reminders</div>
+                                </div>
+                            </div>
+
+                            @if (_data.TopOverdueCustomers.Count == 0)
+                            {
+                                <div class="mut">No overdue customers.</div>
+                            }
+                            else
+                            {
+                                <div class="table-responsive">
+                                    <table class="table tbl table-sm align-middle mb-0">
+                                        <thead>
+                                            <tr>
+                                                <th style="width:50px;">#</th>
+                                                <th>Customer</th>
+                                                <th class="text-end">Invoices</th>
+                                                <th class="text-end">Max Days</th>
+                                                <th class="text-end">Overdue</th>
+                                                <th style="width:170px;"></th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            @{
+                                                var i = 1;
+                                                foreach (var r in _data.TopOverdueCustomers)
+                                                {
+                                                    <tr>
+                                                        <td class="fw-bold">@i</td>
+                                                        <td>
+                                                            <div class="fw-bold">@r.CustomerName</div>
+                                                            <div class="mut">@r.Mobile</div>
+                                                        </td>
+                                                        <td class="text-end">@r.InvoiceCount</td>
+                                                        <td class="text-end">@r.MaxDaysOverdue</td>
+                                                        <td class="text-end fw-bold">@Fmt(r.OverdueAmount)</td>
+                                                        <td class="text-end">
+                                                            <button class="btn btn-outline-light btn-sm me-1" type="button"
+                                                                    @onclick="() => OpenCustomer(r.CustomerId)">
+                                                                Open
+                                                            </button>
+                                                            <button class="btn btn-primary btn-sm" type="button"
+                                                                    @onclick="() => WhatsAppReminder(r.CustomerName, r.Mobile, r.OverdueAmount, r.MaxDaysOverdue)">
+                                                                WhatsApp
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+                                                    i++;
+                                                }
+                                            }
+                                        </tbody>
+                                    </table>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Promise tracker -->
+                <div class="col-12 col-lg-5">
+                    <div class="ar-card h-100">
+                        <div class="body">
+                            <div class="fw-bold" style="font-size:18px;">Payment Promise Tracker</div>
+                            <div class="mut mb-2">From Customer master: NextFollowUpDate + Note</div>
+
+                            @if (_data.FollowUps.Count == 0)
+                            {
+                                <div class="mut">No follow-ups planned.</div>
+                            }
+                            else
+                            {
+                                <div class="table-responsive">
+                                    <table class="table tbl table-sm align-middle mb-0">
+                                        <thead>
+                                            <tr>
+                                                <th>Customer</th>
+                                                <th style="width:120px;">Follow-up</th>
+                                                <th style="width:90px;"></th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            @foreach (var f in _data.FollowUps)
+                                            {
+                                                <tr>
+                                                    <td>
+                                                        <div class="fw-bold">@f.CustomerName</div>
+                                                        <div class="mut text-truncate" title="@f.Note">@f.Note</div>
+                                                    </td>
+                                                    <td class="fw-bold">@f.NextFollowUpDate?.ToString("dd-MMM")</td>
+                                                    <td class="text-end">
+                                                        <button class="btn btn-outline-light btn-sm" type="button"
+                                                                @onclick="() => WhatsAppFollowUp(f.CustomerName, f.Mobile, f.Note)">
+                                                            WhatsApp
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            }
+                                        </tbody>
+                                    </table>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private bool _loading;
+    private string? _err;
+
+    private DateTime _asOf = DateTime.Today;
+    private int _windowDays = 30;
+    private int _takeTop = 10;
+
+    private ArRecoveryDashboardDto? _data;
+
+    private bool _renderRequested;
+    private readonly string _trendCanvasId = "arTrendLine";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Reload();
+    }
+
+    private void GoBack() => Nav.NavigateTo("/insights");
+
+    private void OpenCustomer(int customerId)
+    {
+        Nav.NavigateTo($"/insights/customer-sales/{customerId}");
+    }
+
+    private async Task Reload()
+    {
+        _loading = true;
+        _err = null;
+
+        try
+        {
+            var cid = CurrentCompany.CompanyId;
+            if (cid <= 0) throw new Exception("Company not resolved. Please login again.");
+
+            _data = await Analytics.GetArRecoveryDashboard(cid, _asOf, _windowDays, _takeTop);
+
+            _renderRequested = true;
+        }
+        catch (Exception ex)
+        {
+            _err = ex.Message;
+            _data = null;
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_renderRequested || _data == null) return;
+        _renderRequested = false;
+
+        try
+        {
+            // labels = day numbers (dd-MMM)
+            var labels = _data.OverdueTrendThisMonth.Select(x => x.Day.ToString("dd-MMM")).ToArray();
+
+            var thisVals = _data.OverdueTrendThisMonth.Select(x => (double)x.Value).ToArray();
+            var lastVals = _data.OverdueTrendLastMonth.Select(x => (double)x.Value).ToArray();
+
+            var datasets = new object[]
+            {
+                new { label = "This Month", data = thisVals, tension = 0.35, pointRadius = 2, fill = true  },
+                new { label = "Last Month", data = lastVals, tension = 0.35, pointRadius = 2, fill = false }
+            };
+
+            await JS.InvokeVoidAsync("biCharts.renderLineMulti", _trendCanvasId, labels, datasets, new { currencyPrefix = "AED " });
+        }
+        catch
+        {
+            // If chart js function not available, do nothing (page still works)
+        }
+    }
+
+    private async Task WhatsAppReminder(string name, string? mobile, decimal overdue, int days)
+    {
+        var phone = NormalizePhone(mobile);
+        if (string.IsNullOrWhiteSpace(phone))
+        {
+            _err = "Customer mobile not available for WhatsApp.";
+            return;
+        }
+
+        var msg = $"Hi {name}, payment reminder: your outstanding overdue is AED {overdue:0.00} (max {days} days). Please confirm payment date. Thank you.";
+        var url = $"https://wa.me/{phone}?text={Uri.EscapeDataString(msg)}";
+        await JS.InvokeVoidAsync("window.open", url, "_blank");
+    }
+
+    private async Task WhatsAppFollowUp(string name, string? mobile, string? note)
+    {
+        var phone = NormalizePhone(mobile);
+        if (string.IsNullOrWhiteSpace(phone))
+        {
+            _err = "Customer mobile not available for WhatsApp.";
+            return;
+        }
+
+        var msg = $"Hi {name}, follow-up reminder: {note ?? "Please confirm payment status / promise date."}";
+        var url = $"https://wa.me/{phone}?text={Uri.EscapeDataString(msg)}";
+        await JS.InvokeVoidAsync("window.open", url, "_blank");
+    }
+
+    private static string NormalizePhone(string? mobile)
+    {
+        if (string.IsNullOrWhiteSpace(mobile)) return "";
+        var digits = new string(mobile.Where(char.IsDigit).ToArray());
+        return digits;
+    }
+
+    private static string Fmt(decimal v) => v.ToString("0.00");
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("biCharts.destroy", _trendCanvasId);
+        }
+        catch { }
+    }
+}

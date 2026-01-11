@@ -1,0 +1,461 @@
+﻿@page "/cash-forecast"
+@using System.Globalization
+@using UaeEInvoice.Services
+@using UaeEInvoice.Services.Auth
+@inject AccountRoleService RoleSvc
+@inject CashForecastService Forecast
+@inject ICurrentCompany CurrentCompany
+
+<div class="container-xxl py-4">
+
+    <!-- Header -->
+    <div class="d-flex align-items-start justify-content-between flex-wrap gap-3 mb-3">
+        <div class="d-flex align-items-center gap-3">
+            <div class="cf-icon">
+                <span class="cf-icon-inner">📈</span>
+            </div>
+            <div>
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <h1 class="cf-title mb-0">Cash Forecast</h1>
+                    <span class="badge rounded-pill text-bg-light border cf-badge">Forecast</span>
+                </div>
+                <div class="text-muted cf-sub">
+                    Forecast uses historical averages + recurring rules + what-if simulation.
+                </div>
+
+                <div class="text-muted small mt-1">
+                    CompanyId: <b>@_companyId</b>
+                </div>
+            </div>
+        </div>
+
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <button class="btn btn-outline-secondary cf-btn"
+                    @onclick="Reset"
+                    disabled="@_busy">
+                Reset
+            </button>
+
+            <button class="btn btn-primary cf-btn cf-btn-primary"
+                    @onclick="Generate"
+                    disabled="@_busy">
+                @(_busy ? "Generating..." : "Generate Report")
+            </button>
+        </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="card cf-card mb-4">
+        <div class="card-body p-4">
+            <div class="row g-3 align-items-end">
+                <div class="col-12 col-md-4">
+                    <label class="form-label cf-label">From</label>
+                    <InputDate @bind-Value="_fromDate" class="form-control cf-input" />
+                </div>
+
+                <div class="col-12 col-md-4">
+                    <label class="form-label cf-label">Days</label>
+                    <InputSelect @bind-Value="_days" class="form-select cf-input">
+                        <option value="30">30 days</option>
+                        <option value="60">60 days</option>
+                        <option value="90">90 days</option>
+                        <option value="180">180 days</option>
+                        <option value="365">365 days</option>
+                    </InputSelect>
+                </div>
+
+                <div class="col-12 col-md-4">
+                    <label class="form-label cf-label">Lookback (history)</label>
+                    <InputSelect @bind-Value="_lookbackDays" class="form-select cf-input">
+                        <option value="30">30 days</option>
+                        <option value="60">60 days</option>
+                        <option value="90">90 days</option>
+                        <option value="180">180 days</option>
+                        <option value="365">365 days</option>
+                    </InputSelect>
+                </div>
+            </div>
+
+            <hr class="my-4" />
+
+            <!-- What-If -->
+            <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-2">
+                <div>
+                    <div class="cf-section-title">What-If Simulation</div>
+                    <div class="text-muted small">
+                        Add a cash-in or cash-out on a future date and see impact on closing balance.
+                    </div>
+                </div>
+                <button class="btn btn-outline-secondary cf-btn"
+                        @onclick="ClearWhatIf"
+                        disabled="@(_busy || _whatIf.Count == 0)">
+                    Clear All
+                </button>
+            </div>
+
+            <div class="row g-3 align-items-end">
+                <div class="col-12 col-md-3">
+                    <label class="form-label cf-label">Date</label>
+                    <InputDate @bind-Value="_wiDate" class="form-control cf-input" />
+                </div>
+
+                <div class="col-12 col-md-3">
+                    <label class="form-label cf-label">Direction</label>
+                    <InputSelect @bind-Value="_wiDir" class="form-select cf-input">
+                        <option value="OUT">Cash Out</option>
+                        <option value="IN">Cash In</option>
+                    </InputSelect>
+                </div>
+
+                <div class="col-12 col-md-3">
+                    <label class="form-label cf-label">Amount (AED)</label>
+                    <InputNumber @bind-Value="_wiAmt" class="form-control cf-input" />
+                </div>
+
+                <div class="col-12 col-md-2">
+                    <label class="form-label cf-label">Label</label>
+                    <input class="form-control cf-input"
+                           @bind="_wiLabel"
+                           placeholder="Eg: Pay supplier" />
+                </div>
+
+                <div class="col-12 col-md-1 d-grid">
+                    <button class="btn btn-dark cf-btn"
+                            @onclick="AddWhatIf"
+                            disabled="@_busy">
+                        Add
+                    </button>
+                </div>
+            </div>
+
+            @if (_whatIf.Count > 0)
+            {
+                <div class="table-responsive mt-3">
+                    <table class="table table-sm align-middle mb-0 cf-table">
+                        <thead>
+                            <tr class="text-uppercase small text-muted">
+                                <th style="width:140px;">Date</th>
+                                <th style="width:120px;">Type</th>
+                                <th>Label</th>
+                                <th class="text-end" style="width:160px;">Amount</th>
+                                <th class="text-end" style="width:90px;">Remove</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @for (int i = 0; i < _whatIf.Count; i++)
+                            {
+                                var it = _whatIf[i];
+                                <tr>
+                                    <td>@it.Date.ToString("dd-MMM-yyyy")</td>
+                                    <td>
+                                        <span class="badge rounded-pill @(it.Direction == "IN" ? "text-bg-success" : "text-bg-danger")">
+                                            @(it.Direction == "IN" ? "IN" : "OUT")
+                                        </span>
+                                    </td>
+                                    <td>@it.Label</td>
+                                    <td class="text-end">@Money(it.Amount)</td>
+                                    <td class="text-end">
+                                        <button class="btn btn-outline-danger btn-sm"
+                                                title="Remove"
+                                                @onclick="() => RemoveWhatIf(i)">
+                                            ✕
+                                        </button>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    </div>
+
+    @if (_err is not null)
+    {
+        <div class="alert alert-danger">@_err</div>
+    }
+
+    @if (_result is not null)
+    {
+        var closing = ClosingCash;
+        var netChange = closing - _result.OpeningCash;
+
+        <!-- Summary Cards -->
+        <div class="row g-3 mb-4">
+            <div class="col-12 col-lg-4">
+                <div class="card cf-card cf-kpi">
+                    <div class="card-body p-4">
+                        <div class="text-muted small">Opening Cash</div>
+                        <div class="cf-kpi-value">@Money(_result.OpeningCash)</div>
+                        <div class="text-muted small">Before @_result.FromDate.ToString("dd-MMM-yyyy")</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-12 col-lg-4">
+                <div class="card cf-card cf-kpi">
+                    <div class="card-body p-4">
+                        <div class="text-muted small">Net Change</div>
+                        <div class="cf-kpi-value">@Money(netChange)</div>
+                        <div class="text-muted small">Forecast In - Out</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-12 col-lg-4">
+                <div class="card cf-card cf-kpi">
+                    <div class="card-body p-4">
+                        <div class="text-muted small">Closing Cash</div>
+                        <div class="cf-kpi-value">@Money(closing)</div>
+                        <div class="text-muted small">After @ToDate.ToString("dd-MMM-yyyy")</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Daily Forecast -->
+        <div class="card cf-card">
+            <div class="card-body p-4">
+                <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-2">
+                    <div>
+                        <div class="cf-section-title">Daily Forecast</div>
+                        <div class="text-muted small">
+                            Latest line shows running cash position
+                        </div>
+                    </div>
+
+                    <div class="text-muted small">
+                        GL used: <b>@_result.GlRowsUsed</b> |
+                        Rules: <b>@_result.RulesUsed</b> |
+                        What-If: <b>@_whatIf.Count</b>
+                    </div>
+                </div>
+
+                <div class="table-responsive">
+                    <table class="table align-middle cf-table">
+                        <thead>
+                            <tr class="text-uppercase small text-muted">
+                                <th style="width:150px;">Date</th>
+                                <th class="text-end" style="width:160px;">In</th>
+                                <th class="text-end" style="width:160px;">Out</th>
+                                <th class="text-end" style="width:160px;">Net</th>
+                                <th class="text-end" style="width:200px;">Running</th>
+                                <th>Notes</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var d in _result.DaysList)
+                            {
+                                <tr>
+                                    <td class="fw-semibold">@d.Date.ToString("dd-MMM-yyyy")</td>
+                                    <td class="text-end">@Money(d.TotalIn)</td>
+                                    <td class="text-end">@Money(d.TotalOut)</td>
+                                    <td class="text-end">@Money(d.Net)</td>
+                                    <td class="text-end fw-bold">@Money(d.RunningCash)</td>
+                                    <td class="text-muted">
+                                        @((d.Notes is null || d.Notes.Count == 0) ? "-" : string.Join(" | ", d.Notes))
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+
+            </div>
+        </div>
+    }
+</div>
+
+<style>
+    .cf-title {
+        font-weight: 800;
+        letter-spacing: -0.02em;
+    }
+
+    .cf-sub {
+        margin-top: 2px;
+    }
+
+    .cf-icon {
+        width: 44px;
+        height: 44px;
+        border-radius: 12px;
+        display: grid;
+        place-items: center;
+        border: 1px solid rgba(0,0,0,.08);
+        background: #fff;
+        box-shadow: 0 6px 18px rgba(0,0,0,.06);
+    }
+
+    .cf-icon-inner {
+        font-size: 18px;
+    }
+
+    .cf-badge {
+        font-weight: 600;
+    }
+
+    .cf-card {
+        border: 1px solid rgba(0,0,0,.08);
+        border-radius: 16px;
+        box-shadow: 0 10px 26px rgba(0,0,0,.06);
+        background: #fff;
+    }
+
+    .cf-btn {
+        border-radius: 12px;
+        padding: 10px 14px;
+        font-weight: 600;
+    }
+
+    .cf-btn-primary {
+        padding-left: 16px;
+        padding-right: 16px;
+    }
+
+    .cf-label {
+        font-size: .85rem;
+        color: #6c757d;
+        font-weight: 600;
+    }
+
+    .cf-input {
+        border-radius: 12px;
+        padding: 10px 12px;
+    }
+
+    .cf-section-title {
+        font-weight: 800;
+        letter-spacing: -.01em;
+    }
+
+    .cf-kpi .cf-kpi-value {
+        font-size: 2.1rem;
+        font-weight: 900;
+        letter-spacing: -0.02em;
+        margin: 8px 0 4px;
+    }
+
+    .cf-table thead th {
+        border-top: 0;
+        border-bottom: 1px solid rgba(0,0,0,.12);
+    }
+
+    .cf-table tbody tr:hover {
+        background: rgba(13,110,253,.04);
+    }
+</style>
+
+@code {
+    private bool _busy;
+    private string? _err;
+
+    private int _companyId;
+    private DateTime _fromDate = DateTime.Today;
+    private int _days = 30;
+    private int _lookbackDays = 90;
+
+    private ForecastResult? _result;
+
+    // What-if input
+    private readonly List<ForecastWhatIfItem> _whatIf = new();
+    private DateTime _wiDate = DateTime.Today;
+    private string _wiDir = "OUT";
+    private decimal _wiAmt = 0;
+    private string _wiLabel = "";
+
+    private DateTime ToDate => _fromDate.Date.AddDays(Math.Max(1, _days) - 1);
+
+    private decimal ClosingCash
+        => _result?.DaysList?.LastOrDefault()?.RunningCash ?? _result?.OpeningCash ?? 0m;
+
+    protected override Task OnInitializedAsync()
+    {
+        _companyId = CurrentCompany.CompanyId; // ✅ dynamic
+        if (_companyId <= 0)
+            _err = "Company not selected / not found.";
+
+        return Task.CompletedTask;
+    }
+
+    private async Task Generate()
+    {
+        if (_busy) return;
+
+        _err = null;
+        _result = null;
+
+        try
+        {
+            if (_companyId <= 0)
+                throw new Exception("Company not selected / not found.");
+
+            _busy = true;
+
+            var roles = await RoleSvc.GetRolesAsync(_companyId);
+
+            _result = await Forecast.BuildAsync(
+                companyId: _companyId,
+                fromDate: _fromDate.Date,
+                days: Math.Max(1, _days),
+                whatIfItems: _whatIf,
+                lookbackDays: Math.Max(1, _lookbackDays),
+                cashAccounts: roles.CashAccounts,
+                bankAccounts: roles.BankAccounts
+            );
+        }
+        catch (Exception ex)
+        {
+            _err = ex.Message;
+            _result = null;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void Reset()
+    {
+        _err = null;
+        _result = null;
+
+        _fromDate = DateTime.Today;
+        _days = 30;
+        _lookbackDays = 90;
+
+        _whatIf.Clear();
+        _wiDate = DateTime.Today;
+        _wiDir = "OUT";
+        _wiAmt = 0;
+        _wiLabel = "";
+    }
+
+    private void AddWhatIf()
+    {
+        var amt = _wiAmt;
+        if (amt == 0) return;
+
+        _whatIf.Add(new ForecastWhatIfItem
+            {
+                Date = _wiDate.Date,
+                Direction = (_wiDir ?? "OUT").ToUpperInvariant() == "IN" ? "IN" : "OUT",
+                Amount = amt,
+                Label = _wiLabel?.Trim() ?? ""
+            });
+
+        _wiAmt = 0;
+        _wiLabel = "";
+    }
+
+    private void RemoveWhatIf(int idx)
+    {
+        if (idx < 0 || idx >= _whatIf.Count) return;
+        _whatIf.RemoveAt(idx);
+    }
+
+    private void ClearWhatIf() => _whatIf.Clear();
+
+    private static string Money(decimal v)
+        => "AED" + v.ToString("N2", CultureInfo.InvariantCulture);
+}

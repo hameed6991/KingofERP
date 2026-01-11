@@ -1,0 +1,747 @@
+﻿@page "/accounts-payable"
+@using Microsoft.EntityFrameworkCore
+@using System.ComponentModel.DataAnnotations
+@using UaeEInvoice.Data
+@using UaeEInvoice.Services.Auth
+@inject AppDbContext Db
+@inject UaeEInvoice.Services.LedgerService Ledger
+@inject ICurrentCompany CurrentCompany
+
+<style>
+    :root {
+        --r: 22px;
+        --b: 1px solid rgba(0,0,0,.06);
+        --shadow: 0 14px 45px rgba(0,0,0,.08);
+        --shadow-soft: 0 10px 30px rgba(0,0,0,.06);
+    }
+
+    .hero-pro {
+        border-radius: 26px;
+        border: var(--b);
+        background: radial-gradient(900px 260px at 10% 0%, rgba(13,110,253,.20), transparent 60%), radial-gradient(700px 260px at 70% 0%, rgba(25,135,84,.16), transparent 60%), linear-gradient(180deg, rgba(255,255,255,.95), rgba(255,255,255,.86));
+        backdrop-filter: blur(8px);
+        box-shadow: var(--shadow-soft);
+        padding: 18px;
+    }
+
+    .soft-card-pro {
+        border-radius: var(--r);
+        border: var(--b);
+        box-shadow: var(--shadow-soft);
+        background: rgba(255,255,255,.92);
+        backdrop-filter: blur(6px);
+    }
+
+    .btn-pro {
+        border-radius: 999px;
+        padding: .58rem 1rem;
+        font-weight: 800;
+    }
+
+    .pill {
+        border-radius: 999px;
+        border: var(--b);
+        background: #fff;
+        padding: .42rem .7rem;
+        font-weight: 900;
+        font-size: .82rem;
+        display: inline-flex;
+        gap: .45rem;
+        align-items: center;
+        white-space: nowrap;
+    }
+
+    .searchbox {
+        position: relative;
+    }
+
+        .searchbox .icon {
+            position: absolute;
+            left: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            opacity: .55;
+            font-size: 14px;
+        }
+
+        .searchbox input {
+            padding-left: 36px;
+            border-radius: 999px;
+        }
+
+    .table thead th {
+        font-size: .74rem;
+        letter-spacing: .10em;
+        text-transform: uppercase;
+        color: rgba(0,0,0,.55);
+        white-space: nowrap;
+        border-bottom: 1px solid rgba(0,0,0,.06) !important;
+    }
+
+    .row-click {
+        cursor: pointer;
+    }
+
+        .row-click:hover {
+            background: rgba(13,110,253,.05);
+        }
+
+    .money {
+        font-variant-numeric: tabular-nums;
+    }
+
+    .badge-soft {
+        border-radius: 999px;
+        padding: .35rem .6rem;
+        font-weight: 900;
+        font-size: .78rem;
+        border: var(--b);
+        background: #fff;
+        display: inline-flex;
+        align-items: center;
+        gap: .4rem;
+        white-space: nowrap;
+    }
+
+    .stat {
+        border: var(--b);
+        border-radius: 18px;
+        padding: 14px;
+        background: #fff;
+        height: 100%;
+    }
+
+        .stat .label {
+            font-size: .85rem;
+            color: rgba(0,0,0,.55);
+        }
+
+        .stat .value {
+            font-size: 1.8rem;
+            font-weight: 900;
+        }
+
+    .kpi {
+        border: var(--b);
+        border-radius: 18px;
+        padding: 14px;
+        background: #fff;
+    }
+
+    .sticky-title {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        background: rgba(255,255,255,.88);
+        backdrop-filter: blur(8px);
+        border-bottom: 1px solid rgba(0,0,0,.06);
+        padding-bottom: 10px;
+        margin-bottom: 10px;
+    }
+
+    .skeleton {
+        height: 12px;
+        border-radius: 999px;
+        background: linear-gradient(90deg, rgba(0,0,0,.06), rgba(0,0,0,.03), rgba(0,0,0,.06));
+        background-size: 200% 100%;
+        animation: sk 1.2s infinite linear;
+    }
+
+    @@keyframes sk {
+        0% {
+            background-position: 0 0
+        }
+
+        100% {
+            background-position: 200% 0
+        }
+    }
+
+    .form-control, .form-select {
+        border-radius: 14px;
+        border: 1px solid rgba(0,0,0,.08);
+    }
+</style>
+
+<div class="container-xxl py-4">
+
+    <!-- HERO -->
+    <div class="hero-pro mb-3">
+        <div class="d-flex align-items-start justify-content-between flex-wrap gap-2">
+            <div>
+                <h2 class="mb-1" style="font-weight:900;">Accounts Payable</h2>
+                <div class="text-muted">Vendor payments, balances and unallocated JV adjustments.</div>
+
+                <div class="d-flex flex-wrap gap-2 mt-2">
+                    <span class="pill">🧾 Invoices: <b>@rows.Count</b></span>
+                    <span class="pill">💸 Outstanding: <b class="money">@rows.Sum(x => x.Balance).ToString("0.00")</b> <span class="text-muted fw-semibold">AED</span></span>
+                    <span class="pill">✅ Paid: <b class="money">@rows.Sum(x => x.Paid).ToString("0.00")</b></span>
+                </div>
+            </div>
+
+            <div class="d-flex gap-2">
+                <button class="btn btn-outline-secondary btn-pro" type="button" @onclick="Load" disabled="@loading">
+                    @(!loading ? "Refresh" : "Loading...")
+                </button>
+            </div>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(err))
+    {
+        <div class="alert alert-danger soft-card-pro p-3">@err</div>
+    }
+    @if (!string.IsNullOrWhiteSpace(msg))
+    {
+        <div class="alert alert-info soft-card-pro p-3">@msg</div>
+    }
+
+    <div class="row g-3">
+
+        <!-- LEFT: GRID -->
+        <div class="col-12 col-lg-7">
+            <div class="card soft-card-pro">
+                <div class="card-body">
+
+                    <div class="sticky-title">
+                        <div class="row g-2 align-items-end">
+                            <div class="col-12 col-lg-7">
+                                <label class="form-label">Search</label>
+                                <div class="searchbox">
+                                    <span class="icon">🔎</span>
+                                    <input class="form-control" @bind="search" @bind:event="oninput"
+                                           placeholder="Vendor name / Purchase no..." />
+                                </div>
+                            </div>
+
+                            <div class="col-12 col-lg-3">
+                                <div class="form-check" style="padding-top:32px;">
+                                    <input class="form-check-input" type="checkbox" id="onlyPending" @bind="onlyPending" />
+                                    <label class="form-check-label" for="onlyPending">Only Pending</label>
+                                </div>
+                            </div>
+
+                            <div class="col-12 col-lg-2 d-flex justify-content-end">
+                                <button class="btn btn-primary btn-pro w-100" type="button" @onclick="Load" disabled="@loading">
+                                    Refresh
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- KPI row -->
+                    <div class="row g-2 mb-2">
+                        <div class="col-12 col-md-4">
+                            <div class="stat">
+                                <div class="label">Shown</div>
+                                <div class="value">@rows.Count</div>
+                            </div>
+                        </div>
+                        <div class="col-12 col-md-4">
+                            <div class="stat">
+                                <div class="label">Grand Total (shown)</div>
+                                <div class="value money">@rows.Sum(x => x.GrandTotal).ToString("0.00")</div>
+                            </div>
+                        </div>
+                        <div class="col-12 col-md-4">
+                            <div class="stat">
+                                <div class="label">Balance (shown)</div>
+                                <div class="value money">@rows.Sum(x => x.Balance).ToString("0.00")</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle">
+                            <thead>
+                                <tr>
+                                    <th style="min-width:160px;">Purchase No</th>
+                                    <th style="min-width:160px;">Vendor</th>
+                                    <th style="width:140px;">Date</th>
+                                    <th class="text-end" style="width:160px;">Grand</th>
+                                    <th class="text-end" style="width:140px;">Paid</th>
+                                    <th class="text-end" style="width:140px;">JV Adj</th>
+                                    <th class="text-end" style="width:160px;">Balance</th>
+                                    <th class="text-end" style="width:120px;">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @if (loading && rows.Count == 0)
+                                {
+                                    @for (int i = 0; i < 5; i++)
+                                    {
+                                        <tr>
+                                            <td><div class="skeleton" style="width:140px;"></div></td>
+                                            <td><div class="skeleton" style="width:160px;"></div></td>
+                                            <td><div class="skeleton" style="width:90px;"></div></td>
+                                            <td class="text-end"><div class="skeleton" style="width:120px; margin-left:auto;"></div></td>
+                                            <td class="text-end"><div class="skeleton" style="width:90px; margin-left:auto;"></div></td>
+                                            <td class="text-end"><div class="skeleton" style="width:90px; margin-left:auto;"></div></td>
+                                            <td class="text-end"><div class="skeleton" style="width:120px; margin-left:auto;"></div></td>
+                                            <td class="text-end"><div class="skeleton" style="width:70px; margin-left:auto;"></div></td>
+                                        </tr>
+                                    }
+                                }
+                                else
+                                {
+                                    @foreach (var x in rows)
+                                    {
+                                        <tr class="row-click @(selected?.PurchaseInvoiceId == x.PurchaseInvoiceId ? "table-primary" : "")"
+                                            @onclick="() => Select(x)">
+                                            <td class="fw-semibold">@x.PurchaseNo</td>
+                                            <td>
+                                                <div class="fw-semibold">@x.VendorName</div>
+                                             @*    <div class="text-muted small">Click to open payment panel</div> *@
+                                            </td>
+                                            <td>@x.PurchaseDate.ToString("yyyy-MM-dd")</td>
+                                            <td class="text-end money">@x.GrandTotal.ToString("0.00")</td>
+                                            <td class="text-end money">@x.Paid.ToString("0.00")</td>
+                                            <td class="text-end money">@x.JvAdj.ToString("0.00")</td>
+                                            <td class="text-end fw-bold money">@x.Balance.ToString("0.00")</td>
+                                            <td class="text-end" @onclick:stopPropagation="true">
+                                                <button class="btn btn-sm btn-outline-primary btn-pro"
+                                                        type="button" @onclick="() => Select(x)" disabled="@loading">
+                                                    Pay
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    }
+
+                                    @if (rows.Count == 0)
+                                    {
+                                        <tr><td colspan="8" class="text-center text-muted py-4">No purchase invoices found.</td></tr>
+                                    }
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+
+                    @if (unallocatedJv.Count > 0)
+                    {
+                        <hr />
+                        <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-2">
+                            <h6 class="mb-0" style="font-weight:900;">Manual / JV affecting AP (Unallocated)</h6>
+                            <span class="badge-soft">📌 Lines: <b>@unallocatedJv.Count</b></span>
+                        </div>
+
+                        <div class="table-responsive">
+                            <table class="table table-sm align-middle">
+                                <thead>
+                                    <tr>
+                                        <th style="width:140px;">Date</th>
+                                        <th style="width:200px;">RefNo</th>
+                                        <th>Narration</th>
+                                        <th class="text-end" style="width:140px;">Debit</th>
+                                        <th class="text-end" style="width:140px;">Credit</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var j in unallocatedJv)
+                                    {
+                                        <tr>
+                                            <td>@j.TxnDate.ToString("yyyy-MM-dd")</td>
+                                            <td class="fw-semibold">@j.RefNo</td>
+                                            <td>@j.Narration</td>
+                                            <td class="text-end money">@j.Debit.ToString("0.00")</td>
+                                            <td class="text-end money">@j.Credit.ToString("0.00")</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <div class="text-muted small">
+                            These JV lines won’t reduce any single purchase invoice until Journal line is allocated with PurchaseInvoiceId (Option-A).
+                        </div>
+                    }
+
+                </div>
+            </div>
+        </div>
+
+        <!-- RIGHT: PAYMENT PANEL -->
+        <div class="col-12 col-lg-5">
+            <div class="card soft-card-pro">
+                <div class="card-body">
+                    <div class="d-flex align-items-start justify-content-between flex-wrap gap-2 mb-2">
+                        <div>
+                            <h5 class="mb-1" style="font-weight:900;">Make Payment</h5>
+                            <div class="text-muted">Select a purchase invoice to pay.</div>
+                        </div>
+
+                        @if (selected != null)
+                        {
+                            <span class="badge-soft">🧾 @selected.PurchaseNo</span>
+                        }
+                    </div>
+
+                    @if (selected == null)
+                    {
+                        <div class="kpi text-muted">
+                            Choose an invoice from the left table to start payment.
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="kpi mb-3">
+                            <div class="d-flex justify-content-between">
+                                <div class="text-muted">Vendor</div>
+                                <div class="fw-semibold">@selected.VendorName</div>
+                            </div>
+                            <div class="d-flex justify-content-between">
+                                <div class="text-muted">Grand Total</div>
+                                <div class="fw-semibold money">@selected.GrandTotal.ToString("0.00")</div>
+                            </div>
+                            <div class="d-flex justify-content-between">
+                                <div class="text-muted">Paid</div>
+                                <div class="fw-semibold money">@selected.Paid.ToString("0.00")</div>
+                            </div>
+                            <div class="d-flex justify-content-between pt-2 mt-2 border-top">
+                                <div class="fw-bold">Balance</div>
+                                <div class="fw-bold money">@selected.Balance.ToString("0.00")</div>
+                            </div>
+                        </div>
+
+                        <EditForm Model="pay" OnValidSubmit="SavePayment">
+                            <DataAnnotationsValidator />
+                            <ValidationSummary />
+
+                            <div class="mb-2">
+                                <label class="form-label">Payment Date</label>
+                                <InputDate class="form-control" @bind-Value="pay.PaymentDate" />
+                            </div>
+
+                            <div class="mb-2">
+                                <label class="form-label">Amount</label>
+                                <InputNumber class="form-control" @bind-Value="pay.Amount" />
+                                <div class="text-muted small mt-1">Max: <b class="money">@selected.Balance.ToString("0.00")</b></div>
+                            </div>
+
+                            <div class="mb-2">
+                                <label class="form-label">Method</label>
+                                <InputSelect class="form-select" @bind-Value="pay.Method">
+                                    <option>Cash</option>
+                                    <option>Bank</option>
+                                    <option>Card</option>
+                                    <option>Online</option>
+                                </InputSelect>
+                            </div>
+
+                            <div class="mb-2">
+                                <label class="form-label">Reference No</label>
+                                <InputText class="form-control" @bind-Value="pay.ReferenceNo" />
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label">Notes</label>
+                                <InputTextArea class="form-control" rows="3" @bind-Value="pay.Notes" />
+                            </div>
+
+                            <button class="btn btn-primary btn-pro w-100" type="submit" disabled="@loading">
+                                @(loading ? "Saving..." : "Save Payment")
+                            </button>
+                        </EditForm>
+
+                        <hr />
+
+                        <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-2">
+                            <h6 class="mb-0" style="font-weight:900;">Payment History</h6>
+                            <span class="badge-soft">✅ @history.Count</span>
+                        </div>
+
+                        <div class="table-responsive">
+                            <table class="table table-sm align-middle">
+                                <thead>
+                                    <tr>
+                                        <th style="width:140px;">Date</th>
+                                        <th style="width:110px;">Method</th>
+                                        <th>Ref</th>
+                                        <th class="text-end" style="width:140px;">Amount</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var p in history)
+                                    {
+                                        <tr>
+                                            <td>@p.PaymentDate.ToString("yyyy-MM-dd")</td>
+                                            <td class="fw-semibold">@p.Method</td>
+                                            <td>@(string.IsNullOrWhiteSpace(p.ReferenceNo) ? "-" : p.ReferenceNo)</td>
+                                            <td class="text-end money fw-semibold">@p.Amount.ToString("0.00")</td>
+                                        </tr>
+                                    }
+                                    @if (history.Count == 0)
+                                    {
+                                        <tr><td colspan="4" class="text-muted">No payments yet.</td></tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+@code {
+    private int _companyId;
+    private int _apAccountNo = 2000; // fallback
+
+    private bool loading;
+    private string search = "";
+    private bool onlyPending = true;
+
+    private List<Row> rows = new();
+    private Row? selected;
+
+    private List<PurchasePayment> history = new();
+    private PayModel pay = new();
+
+    private List<JvRow> unallocatedJv = new();
+
+    private string? msg;
+    private string? err;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CurrentCompany.RefreshAsync();
+        _companyId = CurrentCompany.CompanyId;
+
+        if (_companyId <= 0)
+        {
+            err = "CompanyId not found from login/session. Please logout & login again.";
+            return;
+        }
+
+        await ResolveApAccountAsync();
+        await Load();
+    }
+
+    private async Task ResolveApAccountAsync()
+    {
+        var coa = await Db.ChartOfAccounts.AsNoTracking()
+            .Where(x => x.CompanyId == _companyId)
+            .Select(x => new { x.AccountNo, x.AccountName, x.AccountType })
+            .ToListAsync();
+
+        var ap = coa.FirstOrDefault(x =>
+            string.Equals((x.AccountType ?? "").Trim(), "AP", StringComparison.OrdinalIgnoreCase) ||
+            (x.AccountName ?? "").Contains("Payable", StringComparison.OrdinalIgnoreCase) ||
+            (x.AccountName ?? "").Contains("Creditors", StringComparison.OrdinalIgnoreCase));
+
+        if (ap != null) _apAccountNo = ap.AccountNo;
+    }
+
+    private async Task Load()
+    {
+        loading = true;
+        msg = err = null;
+        selected = null;
+        history.Clear();
+        pay = new PayModel();
+        unallocatedJv.Clear();
+
+        try
+        {
+            var q = Db.PurchaseInvoices.AsNoTracking()
+                .Where(pi => pi.CompanyId == _companyId)
+                .Select(pi => new
+                {
+                    pi.PurchaseInvoiceId,
+                    pi.PurchaseNo,
+                    pi.PurchaseDate,
+                    pi.VendorName,
+                    pi.GrandTotal
+                });
+
+            if (!string.IsNullOrWhiteSpace(search))
+            {
+                var s = search.Trim();
+                q = q.Where(x => x.PurchaseNo.Contains(s) || x.VendorName.Contains(s));
+            }
+
+            var list = await q.OrderByDescending(x => x.PurchaseInvoiceId)
+                              .Take(300)
+                              .ToListAsync();
+
+            var ids = list.Select(x => x.PurchaseInvoiceId).ToList();
+
+            var paidMap = await Db.PurchasePayments.AsNoTracking()
+                .Where(x => ids.Contains(x.PurchaseInvoiceId))
+                .GroupBy(x => x.PurchaseInvoiceId)
+                .Select(g => new { PurchaseInvoiceId = g.Key, Paid = g.Sum(z => z.Amount) })
+                .ToDictionaryAsync(x => x.PurchaseInvoiceId, x => x.Paid);
+
+            // ✅ JV allocations affecting AP per purchase (Credit - Debit)
+            var jvAdjMap = await Db.LedgerEntries.AsNoTracking()
+                .Where(le => le.CompanyId == _companyId && le.AccountNo == _apAccountNo && le.PurchaseInvoiceId != null)
+                .GroupBy(le => le.PurchaseInvoiceId!.Value)
+                .Select(g => new { PurchaseInvoiceId = g.Key, Adj = g.Sum(x => x.Credit - x.Debit) })
+                .ToDictionaryAsync(x => x.PurchaseInvoiceId, x => x.Adj);
+
+            rows = list.Select(x =>
+            {
+                var paid = paidMap.TryGetValue(x.PurchaseInvoiceId, out var v) ? v : 0m;
+                var adj = jvAdjMap.TryGetValue(x.PurchaseInvoiceId, out var a) ? a : 0m;
+                var balance = x.GrandTotal + adj - paid;
+
+                return new Row
+                    {
+                        PurchaseInvoiceId = x.PurchaseInvoiceId,
+                        PurchaseNo = x.PurchaseNo,
+                        PurchaseDate = x.PurchaseDate,
+                        VendorName = x.VendorName,
+                        GrandTotal = x.GrandTotal,
+                        Paid = paid,
+                        JvAdj = adj,
+                        Balance = balance
+                    };
+            }).ToList();
+
+            if (onlyPending)
+                rows = rows.Where(x => x.Balance > 0.0001m).ToList();
+
+            // ✅ Unallocated JV affecting AP
+            unallocatedJv = await Db.LedgerEntries.AsNoTracking()
+                .Where(x => x.CompanyId == _companyId && x.AccountNo == _apAccountNo && x.PurchaseInvoiceId == null)
+                .OrderByDescending(x => x.TxnDate)
+                .ThenByDescending(x => x.RefNo)
+                .Take(50)
+                .Select(x => new JvRow
+                    {
+                        TxnDate = x.TxnDate,
+                        RefNo = x.RefNo ?? "",
+                        Narration = x.Narration ?? "",
+                        Debit = x.Debit,
+                        Credit = x.Credit
+                    })
+                .ToListAsync();
+        }
+        catch (Exception ex)
+        {
+            err = ex.Message;
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    private async Task Select(Row r)
+    {
+        msg = err = null;
+        selected = r;
+
+        pay = new PayModel
+            {
+                PaymentDate = DateTime.Today,
+                Amount = Math.Max(0.01m, r.Balance),
+                Method = "Cash"
+            };
+
+        history = await Db.PurchasePayments.AsNoTracking()
+            .Where(x => x.PurchaseInvoiceId == r.PurchaseInvoiceId)
+            .OrderByDescending(x => x.PurchasePaymentId)
+            .ToListAsync();
+    }
+
+    private async Task SavePayment()
+    {
+        msg = err = null;
+        if (selected == null) return;
+
+        if (pay.Amount <= 0) { err = "Amount must be greater than 0."; return; }
+        if (pay.Amount > selected.Balance) { err = $"Amount cannot be more than balance ({selected.Balance:0.00})."; return; }
+
+        loading = true;
+
+        try
+        {
+            using var tx = await Db.Database.BeginTransactionAsync();
+
+            var payment = new PurchasePayment
+                {
+                    PurchaseInvoiceId = selected.PurchaseInvoiceId,
+                    PaymentDate = pay.PaymentDate.Date,
+                    Amount = pay.Amount,
+                    Method = pay.Method ?? "Cash",
+                    ReferenceNo = pay.ReferenceNo,
+                    Notes = pay.Notes
+                };
+
+            Db.PurchasePayments.Add(payment);
+            await Db.SaveChangesAsync();
+
+            var creditAccount = GetCreditAccountByMethod(pay.Method);
+
+            // Dr AP, Cr Cash/Bank
+            await Ledger.PostAsync(
+                companyId: _companyId,
+                date: pay.PaymentDate.Date,
+                voucherType: "PPAY",
+                voucherNo: $"{selected.PurchaseNo}",
+                debitAccountNo: _apAccountNo,
+                creditAccountNo: creditAccount,
+                amount: pay.Amount,
+                narration: $"AP Payment against {selected.PurchaseNo}",
+                refId: selected.PurchaseInvoiceId
+            );
+
+            await tx.CommitAsync();
+
+            msg = "Payment saved & posted to ledger ✅";
+            await Load();
+        }
+        catch (Exception ex)
+        {
+            err = ex.Message;
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    private int GetCreditAccountByMethod(string? method)
+    {
+        var m = (method ?? "Cash").Trim().ToUpperInvariant();
+        if (m == "BANK" || m == "ONLINE" || m == "CARD") return 1010; // Bank
+        return 1000; // Cash
+    }
+
+    private class Row
+    {
+        public int PurchaseInvoiceId { get; set; }
+        public string PurchaseNo { get; set; } = "";
+        public DateTime PurchaseDate { get; set; }
+        public string VendorName { get; set; } = "";
+        public decimal GrandTotal { get; set; }
+        public decimal Paid { get; set; }
+        public decimal JvAdj { get; set; }
+        public decimal Balance { get; set; }
+    }
+
+    private class JvRow
+    {
+        public DateTime TxnDate { get; set; }
+        public string RefNo { get; set; } = "";
+        public string Narration { get; set; } = "";
+        public decimal Debit { get; set; }
+        public decimal Credit { get; set; }
+    }
+
+    private class PayModel
+    {
+        [Required]
+        public DateTime PaymentDate { get; set; } = DateTime.Today;
+
+        [Range(0.01, 999999999)]
+        public decimal Amount { get; set; }
+
+        public string Method { get; set; } = "Cash";
+        public string? ReferenceNo { get; set; }
+        public string? Notes { get; set; }
+    }
+}

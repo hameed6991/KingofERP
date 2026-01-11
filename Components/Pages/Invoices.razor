@@ -1,0 +1,481 @@
+﻿@page "/invoices"
+@using UaeEInvoice.Data
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Authorization
+@using UaeEInvoice.Services.Auth
+@attribute [Authorize]
+@inject AppDbContext Db
+@inject NavigationManager Nav
+@inject ICurrentCompany CurrentCompany
+
+<style>
+    .hero {
+        border-radius: 22px;
+        border: 1px solid rgba(0,0,0,.06);
+        background: linear-gradient(135deg, rgba(13,110,253,.14), rgba(255,255,255,0));
+        padding: 18px;
+    }
+
+    .soft-card {
+        border: 1px solid rgba(0,0,0,.06);
+        border-radius: 22px;
+    }
+
+    .soft-shadow {
+        box-shadow: 0 10px 30px rgba(0,0,0,.06);
+    }
+
+    .table thead th {
+        font-size: .78rem;
+        letter-spacing: .08em;
+        color: rgba(0,0,0,.55);
+        text-transform: uppercase;
+        white-space: nowrap;
+    }
+
+    .stat-tile {
+        background: #fff;
+        border: 1px solid rgba(0,0,0,.06);
+        border-radius: 18px;
+        padding: 14px;
+        height: 100%;
+    }
+
+        .stat-tile .label {
+            font-size: .85rem;
+            color: rgba(0,0,0,.55);
+        }
+
+        .stat-tile .value {
+            font-size: 2rem;
+            font-weight: 800;
+            letter-spacing: .2px;
+        }
+
+    .badge-soft {
+        border: 1px solid rgba(0,0,0,.08);
+        background: #fff;
+        padding: .35rem .7rem;
+        border-radius: 999px;
+        display: inline-flex;
+        align-items: center;
+        gap: .4rem;
+        white-space: nowrap;
+    }
+</style>
+
+<div class="container-xxl py-4">
+
+    <!-- ✅ HERO HEADER -->
+    <div class="hero mb-3">
+        <div class="d-flex align-items-start justify-content-between flex-wrap gap-2">
+            <div>
+                <h2 class="mb-1 fw-bold">Invoices</h2>
+                <div class="text-muted">Search, filter, view and print invoices.</div>
+                <div class="d-flex flex-wrap gap-2 mt-2">
+                    <span class="badge-soft">🏢 CompanyId: <b>@_companyId</b></span>
+                    <span class="badge-soft">📄 Showing: <b>@_rows.Count</b></span>
+                    <span class="badge-soft">📅 Range: <b>@RangeLabel()</b></span>
+                </div>
+            </div>
+
+            <div class="d-flex gap-2">
+                <button class="btn btn-outline-secondary" type="button" @onclick="Reload" disabled="@_loading">
+                    @(_loading ? "Loading..." : "Reload")
+                </button>
+                <button class="btn btn-primary" type="button" @onclick="GoCreate">
+                    + Create Invoice
+                </button>
+            </div>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_toast))
+    {
+        <div class="alert alert-success soft-card soft-shadow p-3">@_toast</div>
+    }
+    @if (!string.IsNullOrWhiteSpace(_error))
+    {
+        <div class="alert alert-danger soft-card soft-shadow p-3">@_error</div>
+    }
+
+    <!-- ✅ FILTER BAR (NO oninput) -->
+    <div class="card soft-card soft-shadow mb-3">
+        <div class="card-body">
+            <div class="row g-2 align-items-end">
+                <div class="col-12 col-lg-5">
+                    <label class="form-label">Search</label>
+                    <input class="form-control" placeholder="Invoice no / Customer / TRN..."
+                           value="@_q" @onchange="OnSearchChanged" />
+                </div>
+
+                <div class="col-12 col-md-4 col-lg-2">
+                    <label class="form-label">From</label>
+                    <input type="date" class="form-control"
+                           value="@DateVal(_fromDate)" @onchange="FromChanged" />
+                </div>
+
+                <div class="col-12 col-md-4 col-lg-2">
+                    <label class="form-label">To</label>
+                    <input type="date" class="form-control"
+                           value="@DateVal(_toDate)" @onchange="ToChanged" />
+                </div>
+
+                <div class="col-12 col-md-4 col-lg-3 d-flex gap-2">
+                    <button class="btn btn-outline-primary flex-grow-1" type="button"
+                            @onclick="ApplyFilters" disabled="@_loading">
+                        Apply
+                    </button>
+                    <button class="btn btn-outline-secondary flex-grow-1" type="button"
+                            @onclick="ClearFilters" disabled="@_loading">
+                        Clear
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ✅ SUMMARY -->
+    <div class="card soft-card soft-shadow mb-3">
+        <div class="card-body">
+            <div class="row g-2">
+                <div class="col-12 col-md-4">
+                    <div class="stat-tile">
+                        <div class="label">Invoices (shown)</div>
+                        <div class="value">@_rows.Count</div>
+                    </div>
+                </div>
+                <div class="col-12 col-md-4">
+                    <div class="stat-tile">
+                        <div class="label">Subtotal (shown)</div>
+                        <div class="value">@_rows.Sum(x => x.SubTotal).ToString("0.00")</div>
+                    </div>
+                </div>
+                <div class="col-12 col-md-4">
+                    <div class="stat-tile">
+                        <div class="label">Grand Total (shown)</div>
+                        <div class="value">@_rows.Sum(x => x.GrandTotal).ToString("0.00")</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ✅ GRID -->
+    <div class="card soft-card soft-shadow">
+        <div class="card-body">
+
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <div class="text-muted">Showing: <b>@_rows.Count</b></div>
+            </div>
+
+            <div class="table-responsive">
+                <table class="table align-middle">
+                    <thead>
+                        <tr>
+                            <th style="min-width:180px;">Invoice No</th>
+                            <th style="width:140px;">Date</th>
+                            <th style="width:200px;">Due</th>
+                            <th style="min-width:240px;">Customer</th>
+                            <th style="min-width:160px;">TRN</th>
+                            <th class="text-end" style="width:140px;">Subtotal</th>
+                            <th class="text-end" style="width:120px;">VAT</th>
+                            <th class="text-end" style="width:140px;">Grand</th>
+                            <th class="text-end" style="width:220px;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var r in _rows)
+                        {
+                            var viewUrl = $"/invoice-view/{r.InvoiceId}";
+
+                            <tr>
+                                <td class="fw-semibold">@r.InvoiceNo</td>
+                                <td>@r.InvoiceDate.ToString("dd-MM-yyyy")</td>
+                                <td>@RenderDueBadge(r.DueDate)</td>
+                                <td>@r.CustomerName</td>
+                                <td>@(string.IsNullOrWhiteSpace(r.CustomerTRN) ? "-" : r.CustomerTRN)</td>
+                                <td class="text-end">@r.SubTotal.ToString("0.00")</td>
+                                <td class="text-end">@r.VatTotal.ToString("0.00")</td>
+                                <td class="text-end fw-semibold">@r.GrandTotal.ToString("0.00")</td>
+
+                                <td class="text-end">
+                                    <div class="d-flex justify-content-end flex-wrap gap-2">
+                                        <a class="btn btn-sm btn-outline-primary" href="@viewUrl">View</a>
+
+                                        <button class="btn btn-sm btn-outline-danger" type="button"
+                                                @onclick="() => AskDelete(r.InvoiceId)">
+                                            Delete
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+
+                @if (_rows.Count == 0 && !_loading)
+                {
+                    <div class="text-center text-muted py-4">No invoices found.</div>
+                }
+            </div>
+
+            @if (_deleteId > 0)
+            {
+                <div class="alert alert-warning mt-3 soft-card">
+                    Delete invoice <b>@DeletePreviewNo()</b>? This will delete its lines also.
+                    <div class="mt-2 d-flex gap-2">
+                        <button class="btn btn-danger" type="button" @onclick="ConfirmDelete" disabled="@_loading">Yes, Delete</button>
+                        <button class="btn btn-outline-secondary" type="button" @onclick="CancelDelete" disabled="@_loading">Cancel</button>
+                    </div>
+                </div>
+            }
+
+        </div>
+    </div>
+
+</div>
+
+@code {
+    private bool _loading = false;
+    private string? _error;
+    private string? _toast;
+
+    private int _companyId;
+
+    private string _q = "";
+    private DateTime? _fromDate;
+    private DateTime? _toDate;
+
+    private int _deleteId = 0;
+    private List<RowVm> _rows = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CurrentCompany.RefreshAsync();
+        _companyId = CurrentCompany.CompanyId;
+
+        if (_companyId <= 0)
+        {
+            _error = "Company not resolved. Logout & login again.";
+            return;
+        }
+
+        await Load();
+    }
+
+    private void GoCreate() => Nav.NavigateTo("/invoice-create");
+
+    private async Task Reload()
+    {
+        _toast = null;
+        _error = null;
+
+        await CurrentCompany.RefreshAsync();
+        _companyId = CurrentCompany.CompanyId;
+
+        await Load();
+    }
+
+    private Task ApplyFilters() => Load();
+
+    private async Task ClearFilters()
+    {
+        _q = "";
+        _fromDate = null;
+        _toDate = null;
+        await Load();
+    }
+
+    // ✅ No oninput: only onchange
+    private void OnSearchChanged(ChangeEventArgs e) => _q = (e?.Value?.ToString() ?? "").Trim();
+
+    private void FromChanged(ChangeEventArgs e)
+        => _fromDate = DateTime.TryParse(e?.Value?.ToString(), out var dt) ? dt.Date : (DateTime?)null;
+
+    private void ToChanged(ChangeEventArgs e)
+        => _toDate = DateTime.TryParse(e?.Value?.ToString(), out var dt) ? dt.Date : (DateTime?)null;
+
+    private async Task Load()
+    {
+        _loading = true;
+        _error = null;
+
+        try
+        {
+            if (_companyId <= 0)
+                throw new Exception("CompanyId not resolved.");
+
+            // ✅ CRITICAL: Company filter to prevent leakage
+            var qry = Db.Invoices.AsNoTracking()
+                .Where(x => x.CompanyId == _companyId);
+
+            if (!string.IsNullOrWhiteSpace(_q))
+            {
+                var s = _q.Trim();
+                qry = qry.Where(x =>
+                    x.InvoiceNo.Contains(s) ||
+                    x.CustomerName.Contains(s) ||
+                    (x.CustomerTRN != null && x.CustomerTRN.Contains(s)));
+            }
+
+            if (_fromDate.HasValue)
+            {
+                var from = _fromDate.Value.Date;
+                qry = qry.Where(x => x.InvoiceDate >= from);
+            }
+
+            if (_toDate.HasValue)
+            {
+                var to = _toDate.Value.Date.AddDays(1).AddTicks(-1);
+                qry = qry.Where(x => x.InvoiceDate <= to);
+            }
+
+            _rows = await qry
+                .OrderByDescending(x => x.InvoiceId)
+                .Take(200)
+                .Select(x => new RowVm
+                    {
+                        InvoiceId = x.InvoiceId,
+                        InvoiceNo = x.InvoiceNo,
+                        InvoiceDate = x.InvoiceDate,
+                        DueDate = x.DueDate,
+                        CustomerName = x.CustomerName,
+                        CustomerTRN = x.CustomerTRN,
+                        SubTotal = x.SubTotal,
+                        VatTotal = x.VatTotal,
+                        GrandTotal = x.GrandTotal
+                    })
+                .ToListAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.InnerException?.Message ?? ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void AskDelete(int id)
+    {
+        _toast = null;
+        _error = null;
+        _deleteId = id;
+    }
+
+    private void CancelDelete() => _deleteId = 0;
+
+    private async Task ConfirmDelete()
+    {
+        if (_deleteId <= 0) return;
+
+        _loading = true;
+        _error = null;
+        _toast = null;
+
+        try
+        {
+            // ✅ CRITICAL: delete only inside this company
+            var inv = await Db.Invoices
+                .Where(x => x.CompanyId == _companyId && x.InvoiceId == _deleteId)
+                .SingleOrDefaultAsync();
+
+            if (inv == null) throw new Exception("Invoice not found (or not in your company).");
+
+            // ✅ delete lines only inside this company
+            var lines = await Db.InvoiceLines
+                .Where(x => x.CompanyId == _companyId && x.InvoiceId == _deleteId)
+                .ToListAsync();
+
+            Db.InvoiceLines.RemoveRange(lines);
+            Db.Invoices.Remove(inv);
+            await Db.SaveChangesAsync();
+
+            _toast = $"Invoice deleted: {inv.InvoiceNo}";
+            _deleteId = 0;
+
+            await Load();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.InnerException?.Message ?? ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private string DeletePreviewNo()
+    {
+        var row = _rows.FirstOrDefault(x => x.InvoiceId == _deleteId);
+        return row == null ? $"#{_deleteId}" : row.InvoiceNo;
+    }
+
+    private string RangeLabel()
+    {
+        if (!_fromDate.HasValue && !_toDate.HasValue) return "All";
+        var f = _fromDate?.ToString("dd-MM-yyyy") ?? "…";
+        var t = _toDate?.ToString("dd-MM-yyyy") ?? "…";
+        return $"{f} → {t}";
+    }
+
+    private string DateVal(DateTime? d) => d.HasValue ? d.Value.ToString("yyyy-MM-dd") : "";
+
+    private class RowVm
+    {
+        public int InvoiceId { get; set; }
+        public string InvoiceNo { get; set; } = "";
+        public DateTime InvoiceDate { get; set; }
+        public DateTime? DueDate { get; set; }
+        public string CustomerName { get; set; } = "";
+        public string? CustomerTRN { get; set; }
+        public decimal SubTotal { get; set; }
+        public decimal VatTotal { get; set; }
+        public decimal GrandTotal { get; set; }
+    }
+
+    // ✅ Due badge
+    private MarkupString RenderDueBadge(DateTime? dueDate)
+    {
+        if (!dueDate.HasValue)
+            return new MarkupString("<span class='badge bg-secondary'>No Due</span>");
+
+        var dd = dueDate.Value.Date;
+        var today = DateTime.Today.Date;
+        var daysUntil = (dd - today).Days;
+
+        var css = DueBadgeClass(daysUntil);
+        var label = DueLabel(daysUntil);
+
+        var html =
+            $"<span class='badge {css}' title='Due: {dd:dd-MM-yyyy}'>" +
+            $"{dd:dd-MM-yyyy} <span class='ms-1 small opacity-75'>{label}</span>" +
+            $"</span>";
+
+        return new MarkupString(html);
+    }
+
+    private string DueBadgeClass(int daysUntil)
+    {
+        if (daysUntil < 0)
+        {
+            var over = Math.Abs(daysUntil);
+            if (over > 20) return "bg-dark text-white";
+            return "bg-danger text-white";
+        }
+
+        if (daysUntil <= 10) return "bg-warning text-dark";
+        if (daysUntil <= 20) return "bg-info text-dark";
+        return "bg-success text-white";
+    }
+
+    private string DueLabel(int daysUntil)
+    {
+        if (daysUntil < 0) return $"Over {Math.Abs(daysUntil)}d";
+        if (daysUntil == 0) return "Today";
+        return $"{daysUntil}d";
+    }
+}

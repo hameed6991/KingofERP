@@ -1,0 +1,646 @@
+﻿@page "/customers"
+@using System
+@using System.Linq
+@using System.Collections.Generic
+@using System.ComponentModel.DataAnnotations
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.EntityFrameworkCore
+@using UaeEInvoice.Data
+@using UaeEInvoice.Services.Auth
+
+@attribute [Authorize]
+
+@inject AppDbContext Db
+@inject ICurrentCompany CurrentCompany
+
+<style>
+    .soft-card {
+        border: 1px solid rgba(0,0,0,.06);
+        border-radius: 22px;
+        box-shadow: 0 10px 30px rgba(0,0,0,.06);
+    }
+
+    .hero {
+        border-radius: 22px;
+        border: 1px solid rgba(0,0,0,.06);
+        background: linear-gradient(135deg, rgba(13,110,253,.12), rgba(255,255,255,0));
+        padding: 18px;
+    }
+
+    .title {
+        font-weight: 900;
+        letter-spacing: .2px;
+        margin: 0;
+    }
+
+    .muted {
+        color: rgba(0,0,0,.55);
+    }
+
+    .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: .45rem;
+        padding: .30rem .75rem;
+        border-radius: 999px;
+        border: 1px solid rgba(0,0,0,.08);
+        background: #fff;
+        font-size: .85rem;
+        white-space: nowrap;
+    }
+
+    .stat {
+        border-radius: 22px;
+        border: 1px solid rgba(0,0,0,.06);
+        background: #fff;
+        padding: 14px 16px;
+        box-shadow: 0 10px 30px rgba(0,0,0,.05);
+    }
+
+    .kpi {
+        font-weight: 900;
+        font-size: 1.35rem;
+        margin: 0;
+    }
+
+    .pill {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: .25rem .65rem;
+        border-radius: 999px;
+        border: 1px solid rgba(0,0,0,.08);
+        font-size: .82rem;
+    }
+
+    .req {
+        color: #dc3545;
+        font-weight: 800;
+    }
+
+    .modal-surface {
+        border-radius: 18px;
+        overflow: hidden;
+    }
+
+    .modal-head {
+        background: linear-gradient(135deg, #0d6efd, #4ea1ff);
+        color: #fff;
+    }
+
+    .field-hint {
+        font-size: .82rem;
+        color: rgba(0,0,0,.55);
+    }
+
+    .table thead th {
+        font-size: .78rem;
+        letter-spacing: .08em;
+        text-transform: uppercase;
+        color: rgba(0,0,0,.55);
+        border-top: 0;
+    }
+
+    .row-click:hover {
+        background: rgba(13,110,253,.04);
+    }
+</style>
+
+<div class="container-xxl py-4">
+
+    <!-- HERO -->
+    <div class="hero mb-3">
+        <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+            <div>
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <h2 class="title">Customers</h2>
+                    <span class="chip">👥 Masters</span>
+                </div>
+                <div class="muted">Manage buyers (B2B/B2C). B2B requires TRN (15 digits).</div>
+
+                <div class="d-flex flex-wrap gap-2 mt-2">
+                    <span class="chip">🏢 CompanyId: @_companyId</span>
+                    <span class="chip">📌 Showing: @_rows.Count</span>
+                </div>
+            </div>
+
+            <div class="d-flex gap-2">
+                <button class="btn btn-outline-secondary" type="button" @onclick="Reload" disabled="@_loading">
+                    @(_loading ? "Loading..." : "Reload")
+                </button>
+                <button class="btn btn-primary" type="button" @onclick="NewCustomer" disabled="@(_companyId<=0)">
+                    + Add Customer
+                </button>
+            </div>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_error))
+    {
+        <div class="alert alert-danger soft-card p-3">
+            <strong>Error:</strong> @_error
+        </div>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(_toast))
+    {
+        <div class="alert alert-success alert-dismissible fade show soft-card p-3" role="alert">
+            <strong>Done!</strong> @_toast
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+    }
+
+    <!-- STATS -->
+    <div class="row g-3 mb-3">
+        <div class="col-12 col-md-4">
+            <div class="stat">
+                <div class="muted small">Total Customers</div>
+                <div class="kpi">@_total</div>
+            </div>
+        </div>
+        <div class="col-12 col-md-4">
+            <div class="stat">
+                <div class="muted small">B2B</div>
+                <div class="kpi">@_b2b</div>
+            </div>
+        </div>
+        <div class="col-12 col-md-4">
+            <div class="stat">
+                <div class="muted small">B2C</div>
+                <div class="kpi">@_b2c</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- FILTERS -->
+    <div class="soft-card p-3 mb-3">
+        <div class="row g-2 align-items-end">
+            <div class="col-12 col-lg-6">
+                <label class="form-label">Search</label>
+                <input class="form-control"
+                       value="@_search"
+                       @oninput="OnSearchInput"
+                       placeholder="Search by name / TRN..." />
+              @*   <div class="field-hint">Tip: type few letters, then click Apply.</div> *@
+            </div>
+
+            <div class="col-12 col-lg-3">
+                <label class="form-label">Type</label>
+                <select class="form-select" @onchange="OnTypeFilterChanged">
+                    <option value="" selected="@string.IsNullOrWhiteSpace(_typeFilter)">All</option>
+                    <option value="B2B" selected="@(_typeFilter == "B2B")">B2B</option>
+                    <option value="B2C" selected="@(_typeFilter == "B2C")">B2C</option>
+                </select>
+            </div>
+
+            <div class="col-12 col-lg-3 d-flex gap-2">
+                <button class="btn btn-outline-primary flex-grow-1" type="button" @onclick="ApplyFilters" disabled="@_loading">Apply</button>
+                <button class="btn btn-outline-secondary" type="button" @onclick="ClearFilters" disabled="@_loading">Clear</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- GRID -->
+    <div class="soft-card p-0">
+        <div class="p-3 border-bottom" style="border-color:rgba(0,0,0,.06)!important;">
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <div>
+                    <div class="fw-bold">Customer List</div>
+                    <div class="muted small">Click row or use actions.</div>
+                </div>
+                <span class="pill">Rows: @_rows.Count</span>
+            </div>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table align-middle table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th style="min-width:260px;">Name</th>
+                        <th style="width:110px;">Type</th>
+                        <th style="min-width:180px;">TRN</th>
+                        <th style="min-width:160px;">City</th>
+                        <th style="min-width:220px;">Email</th>
+                        <th class="text-end" style="width:160px;">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var c in _rows)
+                    {
+                        var t = NormalizeType(c.CustomerType);
+
+                        <tr class="row-click" style="cursor:pointer" @onclick="() => EditCustomer(c.CustomerId)">
+                            <td class="fw-semibold">@c.Name</td>
+                            <td>
+                                @if (t == "B2C")
+                                {
+                                    <span class="badge rounded-pill bg-success px-3">B2C</span>
+                                }
+                                else
+                                {
+                                    <span class="badge rounded-pill bg-primary px-3">B2B</span>
+                                }
+                            </td>
+                            <td>@(string.IsNullOrWhiteSpace(c.TRN) ? "-" : c.TRN)</td>
+                            <td>@(string.IsNullOrWhiteSpace(c.City) ? "-" : c.City)</td>
+                            <td>@(string.IsNullOrWhiteSpace(c.Email) ? "-" : c.Email)</td>
+
+                            <td class="text-end" @onclick:stopPropagation="true">
+                                <button class="btn btn-sm btn-outline-primary me-2" type="button" @onclick="() => EditCustomer(c.CustomerId)">Edit</button>
+                                <button class="btn btn-sm btn-outline-danger" type="button" @onclick="() => DeleteCustomer(c.CustomerId)">Delete</button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+
+            @if (_rows.Count == 0 && !_loading)
+            {
+                <div class="text-center text-muted py-5">
+                    No customers found. Change filters or add a new customer.
+                </div>
+            }
+        </div>
+    </div>
+
+    <!-- MODAL -->
+    @if (_showForm)
+    {
+        <div class="modal fade show d-block" tabindex="-1" style="background:rgba(0,0,0,.35);">
+            <div class="modal-dialog modal-lg modal-dialog-centered">
+                <div class="modal-content modal-surface shadow border-0">
+
+                    <div class="modal-header modal-head">
+                        <div>
+                            <div class="fw-bold">
+                                @(_edit.CustomerId == 0 ? "Add Customer" : "Edit Customer")
+                            </div>
+                            <div class="small opacity-75">CompanyId: @_companyId</div>
+                        </div>
+
+                        <button type="button" class="btn btn-sm btn-light" @onclick="CloseForm">Close</button>
+                    </div>
+
+                    <div class="modal-body">
+                        @if (!string.IsNullOrWhiteSpace(_formError))
+                        {
+                            <div class="alert alert-danger soft-card p-3">
+                                <strong>Error:</strong> @_formError
+                            </div>
+                        }
+
+                        <div class="row g-3">
+
+                            <div class="col-12 col-md-8">
+                                <label class="form-label">Customer Name <span class="req">*</span></label>
+                                <input class="form-control"
+                                       value="@(_edit.Name ?? "")"
+                                       @oninput="OnEditNameInput"
+                                       placeholder="e.g., Noor Electronics LLC" />
+                            </div>
+
+                            <div class="col-12 col-md-4">
+                                <label class="form-label">Customer Type <span class="req">*</span></label>
+
+                                <!-- ✅ No ternary templates => fixes CS1662/CS8917 -->
+                                <select class="form-select" @onchange="OnEditTypeChanged">
+                                    <option value="B2B" selected="@(NormalizeType(_edit.CustomerType) == "B2B")">B2B</option>
+                                    <option value="B2C" selected="@(NormalizeType(_edit.CustomerType) == "B2C")">B2C</option>
+                                </select>
+
+                                <div class="field-hint">@(_isB2B ? "B2B requires TRN." : "B2C TRN optional.")</div>
+                            </div>
+
+                            <div class="col-12 col-md-6">
+                                <label class="form-label">
+                                    TRN
+                                    @if (_isB2B)
+                                    {
+                                        <span class="req">*</span>
+                                    }
+                                </label>
+
+                                <!-- ✅ ChangeEventArgs safe => fixes runtime 'ChangeEventArgs cannot be converted to string' -->
+                                <input class="form-control"
+                                       value="@(_edit.TRN ?? "")"
+                                       @oninput="OnEditTrnInput"
+                                       placeholder="15-digit TRN (B2B)"
+                                       maxlength="15" />
+                                <div class="field-hint">For B2B customers, TRN must be exactly 15 digits.</div>
+                            </div>
+
+                            <div class="col-12 col-md-6">
+                                <label class="form-label">Email</label>
+                                <input class="form-control"
+                                       value="@(_edit.Email ?? "")"
+                                       @oninput="OnEditEmailInput"
+                                       placeholder="name@company.com" />
+                            </div>
+
+                            <div class="col-12 col-md-6">
+                                <label class="form-label">Mobile</label>
+                                <input class="form-control"
+                                       value="@(_edit.Mobile ?? "")"
+                                       @oninput="OnEditMobileInput"
+                                       placeholder="+971..." />
+                            </div>
+
+                            <div class="col-12 col-md-6">
+                                <label class="form-label">Address Line 1</label>
+                                <input class="form-control"
+                                       value="@(_edit.AddressLine1 ?? "")"
+                                       @oninput="OnEditAddr1Input" />
+                            </div>
+
+                            <div class="col-12 col-md-4">
+                                <label class="form-label">Emirate</label>
+                                <input class="form-control"
+                                       value="@(_edit.Emirate ?? "")"
+                                       @oninput="OnEditEmirateInput" />
+                            </div>
+
+                            <div class="col-12 col-md-4">
+                                <label class="form-label">City</label>
+                                <input class="form-control"
+                                       value="@(_edit.City ?? "")"
+                                       @oninput="OnEditCityInput" />
+                            </div>
+
+                            <div class="col-12 col-md-4">
+                                <label class="form-label">Country</label>
+                                <input class="form-control"
+                                       value="@(_edit.Country ?? "")"
+                                       @oninput="OnEditCountryInput" />
+                            </div>
+
+                        </div>
+                    </div>
+
+                    <div class="modal-footer">
+                        <button class="btn btn-outline-secondary" type="button" @onclick="CloseForm" disabled="@_saving">Cancel</button>
+                        <button class="btn btn-primary" type="button" @onclick="SaveCustomer" disabled="@_saving">
+                            @(_saving ? "Saving..." : "Save")
+                        </button>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+    }
+
+</div>
+
+@code {
+    private int _companyId;
+    private bool _loading;
+    private string? _error;
+
+    private List<Customer> _rows = new();
+
+    private string _search = "";
+    private string _typeFilter = ""; // "" | B2B | B2C
+
+    private int _total;
+    private int _b2b;
+    private int _b2c;
+
+    private bool _showForm;
+    private bool _saving;
+    private string? _toast;
+    private string? _formError;
+
+    private Customer _edit = new();
+    private bool _isB2B => NormalizeType(_edit.CustomerType) == "B2B";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CurrentCompany.RefreshAsync();
+
+        if (!CurrentCompany.IsAuthenticated)
+        {
+            _error = "Not authenticated. Logout and login again.";
+            return;
+        }
+
+        _companyId = CurrentCompany.CompanyId;
+        if (_companyId <= 0)
+        {
+            _error = "CompanyId claim not found. Logout and login again.";
+            return;
+        }
+
+        await LoadRows();
+    }
+
+    private static string NormalizeType(string? t)
+    {
+        var x = (t ?? "").Trim().ToUpperInvariant();
+        return string.IsNullOrWhiteSpace(x) ? "B2B" : x;
+    }
+
+    private async Task Reload() => await LoadRows();
+
+    private void OnSearchInput(ChangeEventArgs e) => _search = e.Value?.ToString() ?? "";
+    private void OnTypeFilterChanged(ChangeEventArgs e) => _typeFilter = NormalizeType(e.Value?.ToString());
+
+    private async Task ApplyFilters() => await LoadRows();
+
+    private async Task ClearFilters()
+    {
+        _search = "";
+        _typeFilter = "";
+        await LoadRows();
+    }
+
+    private async Task LoadRows()
+    {
+        _loading = true;
+        _error = null;
+
+        try
+        {
+            var qry = Db.Customers.AsNoTracking()
+                .Where(x => x.CompanyId == _companyId);
+
+            if (!string.IsNullOrWhiteSpace(_typeFilter))
+            {
+                var tf = _typeFilter.Trim().ToUpperInvariant();
+                qry = qry.Where(x => (x.CustomerType ?? "B2B").ToUpper() == tf);
+            }
+
+            if (!string.IsNullOrWhiteSpace(_search))
+            {
+                var s = _search.Trim();
+                qry = qry.Where(x =>
+                    EF.Functions.Like((x.Name ?? ""), $"%{s}%") ||
+                    EF.Functions.Like((x.TRN ?? ""), $"%{s}%"));
+            }
+
+            _rows = await qry
+                .OrderByDescending(x => x.CustomerId)
+                .Take(500)
+                .ToListAsync();
+
+            // KPIs
+            _total = await Db.Customers.AsNoTracking().CountAsync(x => x.CompanyId == _companyId);
+            _b2b = await Db.Customers.AsNoTracking().CountAsync(x => x.CompanyId == _companyId && (x.CustomerType ?? "B2B") == "B2B");
+            _b2c = await Db.Customers.AsNoTracking().CountAsync(x => x.CompanyId == _companyId && (x.CustomerType ?? "") == "B2C");
+        }
+        catch (Exception ex)
+        {
+            _error = ex.InnerException?.Message ?? ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void NewCustomer()
+    {
+        _toast = null;
+        _formError = null;
+
+        _edit = new Customer
+            {
+                CompanyId = _companyId,
+                CustomerType = "B2B",
+                Emirate = "Dubai",
+                City = "Dubai",
+                Country = "UAE"
+            };
+
+        _showForm = true;
+    }
+
+    private async Task EditCustomer(int id)
+    {
+        _toast = null;
+        _formError = null;
+
+        var c = await Db.Customers.FirstOrDefaultAsync(x => x.CompanyId == _companyId && x.CustomerId == id);
+        if (c == null)
+        {
+            _toast = "Customer not found.";
+            return;
+        }
+
+        _edit = c;
+        _edit.CustomerType = NormalizeType(_edit.CustomerType);
+        _showForm = true;
+    }
+
+    private void CloseForm()
+    {
+        _showForm = false;
+        _formError = null;
+    }
+
+    // ----------- MODAL INPUT HANDLERS (✅ ChangeEventArgs safe) -----------
+
+    private void OnEditNameInput(ChangeEventArgs e) => _edit.Name = e.Value?.ToString() ?? "";
+
+    private void OnEditTypeChanged(ChangeEventArgs e)
+    {
+        _edit.CustomerType = NormalizeType(e.Value?.ToString());
+        if (!_isB2B) _edit.TRN = ""; // optional: clear TRN for B2C
+    }
+
+    private void OnEditTrnInput(ChangeEventArgs e)
+    {
+        var raw = e.Value?.ToString() ?? "";
+        var digits = new string(raw.Where(char.IsDigit).ToArray());
+        if (digits.Length > 15) digits = digits[..15];
+        _edit.TRN = digits;
+    }
+
+    private void OnEditEmailInput(ChangeEventArgs e) => _edit.Email = e.Value?.ToString() ?? "";
+    private void OnEditMobileInput(ChangeEventArgs e) => _edit.Mobile = e.Value?.ToString() ?? "";
+    private void OnEditAddr1Input(ChangeEventArgs e) => _edit.AddressLine1 = e.Value?.ToString() ?? "";
+    private void OnEditEmirateInput(ChangeEventArgs e) => _edit.Emirate = e.Value?.ToString() ?? "";
+    private void OnEditCityInput(ChangeEventArgs e) => _edit.City = e.Value?.ToString() ?? "";
+    private void OnEditCountryInput(ChangeEventArgs e) => _edit.Country = e.Value?.ToString() ?? "";
+
+    // --------------------------------------------------------------------
+
+    private async Task SaveCustomer()
+    {
+        _saving = true;
+        _formError = null;
+
+        try
+        {
+            _edit.CompanyId = _companyId;
+
+            _edit.CustomerType = NormalizeType(_edit.CustomerType);
+            _edit.Name = (_edit.Name ?? "").Trim();
+            _edit.Email = (_edit.Email ?? "").Trim();
+            _edit.Mobile = (_edit.Mobile ?? "").Trim();
+            _edit.AddressLine1 = (_edit.AddressLine1 ?? "").Trim();
+            _edit.Emirate = (_edit.Emirate ?? "").Trim();
+            _edit.City = (_edit.City ?? "").Trim();
+            _edit.Country = (_edit.Country ?? "").Trim();
+            _edit.TRN = (_edit.TRN ?? "").Trim();
+
+            if (string.IsNullOrWhiteSpace(_edit.Name))
+                throw new Exception("Customer Name is required.");
+
+            if (_isB2B)
+            {
+                if (_edit.TRN.Length != 15 || !_edit.TRN.All(char.IsDigit))
+                    throw new Exception("TRN is required for B2B and must be exactly 15 digits.");
+            }
+            else
+            {
+                // B2C -> TRN optional, keep digits only if provided
+                if (!string.IsNullOrWhiteSpace(_edit.TRN))
+                {
+                    var digits = new string(_edit.TRN.Where(char.IsDigit).ToArray());
+                    _edit.TRN = digits.Length > 15 ? digits[..15] : digits;
+                }
+            }
+
+            if (_edit.CustomerId == 0)
+                Db.Customers.Add(_edit);
+            // else: already tracked because loaded with Db.Customers.FirstOrDefaultAsync
+
+            await Db.SaveChangesAsync();
+
+            _toast = "Customer saved successfully.";
+            _showForm = false;
+
+            await LoadRows();
+        }
+        catch (Exception ex)
+        {
+            _formError = ex.InnerException?.Message ?? ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task DeleteCustomer(int id)
+    {
+        try
+        {
+            var c = await Db.Customers.FirstOrDefaultAsync(x => x.CompanyId == _companyId && x.CustomerId == id);
+            if (c == null)
+            {
+                _toast = "Customer not found.";
+                return;
+            }
+
+            Db.Customers.Remove(c);
+            await Db.SaveChangesAsync();
+
+            _toast = "Customer deleted.";
+            await LoadRows();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.InnerException?.Message ?? ex.Message;
+        }
+    }
+}

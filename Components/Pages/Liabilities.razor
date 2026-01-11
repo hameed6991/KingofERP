@@ -1,0 +1,193 @@
+﻿@page "/liabilities"
+@using UaeEInvoice.Services
+@using UaeEInvoice.Services.Auth
+@inject LedgerService Ledger
+@inject NavigationManager Nav
+@inject ICurrentCompany CurrentCompany
+@using Microsoft.AspNetCore.Authorization
+@attribute [Authorize(Roles = "Admin,Accounting,Purchase")]
+
+<div class="container-xxl py-4">
+
+    <div class="d-flex align-items-start justify-content-between flex-wrap gap-2 mb-3">
+        <div>
+            <h2 class="page-title mb-1">Liabilities</h2>
+            <div class="text-muted">Accounts Payable & VAT Output balances (from General Ledger).</div>
+        </div>
+
+        <div class="d-flex gap-2">
+            <button class="btn btn-outline-secondary" type="button" @onclick="Refresh" disabled="@_loading">
+                @(_loading ? "Loading..." : "Refresh")
+            </button>
+
+            <button class="btn btn-primary" type="button" @onclick="() => OpenLedger(2000)">
+                Open AP Ledger
+            </button>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_error))
+    {
+        <div class="alert alert-danger soft-card">@_error</div>
+    }
+
+    <div class="row g-3">
+
+        <!-- Summary Banner -->
+        <div class="col-12">
+            <div class="card soft-card p-3 liab-hero">
+                <div class="d-flex flex-wrap align-items-center gap-3">
+                    <div class="me-auto">
+                        <div class="text-muted small">Total Liabilities</div>
+                        <div class="display-6 fw-bold mb-0">@_totalLiab.ToString("0.00")</div>
+                        <div class="small text-muted mt-1">AP + VAT Output (shown as positive)</div>
+                    </div>
+
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-light border" type="button" @onclick="() => OpenLedger(2000)">
+                            Accounts Payable Ledger
+                        </button>
+                        <button class="btn btn-light border" type="button" @onclick="() => OpenLedger(2100)">
+                            VAT Output Ledger
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Accounts Payable -->
+        <div class="col-12 col-md-6 col-lg-4">
+            <div class="card soft-card p-3 coa-card" role="button" @onclick="() => OpenLedger(2000)">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <div class="d-flex align-items-center gap-2">
+                            <span class="pill pill-liab">Liability</span>
+                            <span class="text-muted">Accounts Payable</span>
+                        </div>
+                        <div class="small text-muted mt-1">A/c No: 2000</div>
+                        <div class="fs-2 fw-bold mt-2">@_ap.ToString("0.00")</div>
+                        <div class="small text-muted mt-2">Click to open ledger</div>
+                    </div>
+
+                    <div class="icon-badge">
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
+                            <path d="M4 7h16M4 12h16M4 17h10" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                        </svg>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- VAT Output -->
+        <div class="col-12 col-md-6 col-lg-4">
+            <div class="card soft-card p-3 coa-card" role="button" @onclick="() => OpenLedger(2100)">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <div class="d-flex align-items-center gap-2">
+                            <span class="pill pill-liab">Liability</span>
+                            <span class="text-muted">VAT Output</span>
+                        </div>
+                        <div class="small text-muted mt-1">A/c No: 2100</div>
+                        <div class="fs-2 fw-bold mt-2">@_vatOut.ToString("0.00")</div>
+                        <div class="small text-muted mt-2">Click to open ledger</div>
+                    </div>
+
+                    <div class="icon-badge">
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
+                            <path d="M12 2v20M4 8h16M6 12h12M8 16h8" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                        </svg>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+</div>
+
+@code {
+    private bool _loading;
+    private string? _error;
+
+    private int _companyId;
+
+    private decimal _ap, _vatOut, _totalLiab;
+
+    protected override async Task OnInitializedAsync()
+        => await Load();
+
+    private async Task Refresh()
+        => await Load();
+
+    private async Task Load()
+    {
+        _loading = true;
+        _error = null;
+
+        try
+        {
+            await CurrentCompany.RefreshAsync();
+            _companyId = CurrentCompany.CompanyId;
+
+            if (_companyId <= 0)
+                throw new Exception("CompanyId not found from login/session.");
+
+            // GetBalanceAsync = Debit - Credit
+            // Liabilities mostly credit side, so usually negative -> show as positive
+            _ap = Math.Abs(await Ledger.GetBalanceAsync(_companyId, 2000));
+            _vatOut = Math.Abs(await Ledger.GetBalanceAsync(_companyId, 2100));
+            _totalLiab = _ap + _vatOut;
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void OpenLedger(int accountNo)
+        => Nav.NavigateTo($"/ledger/{accountNo}");
+}
+
+<style>
+    .coa-card {
+        cursor: pointer;
+        transition: transform .12s ease, box-shadow .12s ease;
+        border-radius: 16px;
+    }
+
+        .coa-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(0,0,0,.08);
+        }
+
+    .liab-hero {
+        border-radius: 18px;
+        background: linear-gradient(135deg, rgba(13,110,253,.08), rgba(25,135,84,.06));
+    }
+
+    .pill {
+        font-size: 12px;
+        padding: 4px 10px;
+        border-radius: 999px;
+        border: 1px solid rgba(0,0,0,.08);
+    }
+
+    .pill-liab {
+        background: rgba(13,110,253,.08);
+    }
+
+    .icon-badge {
+        width: 48px;
+        height: 48px;
+        border-radius: 14px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(13,110,253,.10);
+        color: #0d6efd;
+    }
+</style>

@@ -1,0 +1,122 @@
+﻿@page "/assets"
+@using UaeEInvoice.Services
+@using UaeEInvoice.Services.Auth
+@inject LedgerService Ledger
+@inject ICurrentCompany CurrentCompany
+
+<h3 class="page-title mb-3">Assets</h3>
+
+<div class="row g-3 mt-2">
+
+    <!-- Cash -->
+    <div class="col-12 col-md-4">
+        <a class="asset-card-link" href="/ledger/1000" title="Open Cash Ledger">
+            <div class="card soft-card asset-card p-3">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <div class="text-muted">Cash (1000)</div>
+                        <div class="fs-3 fw-bold">@cash.ToString("0.00")</div>
+                        <div class="small text-primary mt-1">View Ledger →</div>
+                    </div>
+                    <div class="asset-badge">AED</div>
+                </div>
+            </div>
+        </a>
+    </div>
+
+    <!-- Accounts Receivable -->
+    <div class="col-12 col-md-4">
+        <a class="asset-card-link" href="/ledger/1100" title="Open Accounts Receivable Ledger">
+            <div class="card soft-card asset-card p-3">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <div class="text-muted">Accounts Receivable (1100)</div>
+                        <div class="fs-3 fw-bold">@ar.ToString("0.00")</div>
+                        <div class="small text-primary mt-1">View Ledger →</div>
+                    </div>
+                    <div class="asset-badge">AED</div>
+                </div>
+            </div>
+        </a>
+    </div>
+
+    <!-- Inventory -->
+    <div class="col-12 col-md-4">
+        <a class="asset-card-link" href="/ledger/1200" title="Open Inventory Ledger">
+            <div class="card soft-card asset-card p-3">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <div class="text-muted">Inventory (1200)</div>
+                        <div class="fs-3 fw-bold">@inv.ToString("0.00")</div>
+                        <div class="small text-primary mt-1">View Ledger →</div>
+                    </div>
+                    <div class="asset-badge">AED</div>
+                </div>
+            </div>
+        </a>
+    </div>
+
+</div>
+
+<style>
+    .asset-card-link {
+        text-decoration: none;
+        color: inherit;
+        display: block;
+    }
+
+    .asset-card {
+        cursor: pointer;
+        border: 1px solid rgba(0,0,0,.06);
+        transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease;
+        border-radius: 18px;
+        background: linear-gradient(135deg, rgba(13,110,253,.06), rgba(25,135,84,.05));
+    }
+
+        .asset-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 14px 32px rgba(0,0,0,.10);
+            border-color: rgba(13,110,253,.20);
+        }
+
+        .asset-card:active {
+            transform: translateY(0px);
+            box-shadow: 0 10px 24px rgba(0,0,0,.10);
+        }
+
+    .asset-badge {
+        font-size: .75rem;
+        font-weight: 700;
+        padding: .35rem .6rem;
+        border-radius: 999px;
+        background: rgba(13,110,253,.12);
+        border: 1px solid rgba(13,110,253,.18);
+        color: rgba(13,110,253,.9);
+    }
+</style>
+
+@code {
+    private int _companyId;
+    decimal cash, ar, inv;
+    string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            await CurrentCompany.RefreshAsync();
+            _companyId = CurrentCompany.CompanyId;
+
+            if (_companyId <= 0)
+                throw new Exception("CompanyId not found from login/session.");
+
+            cash = await Ledger.GetBalanceAsync(_companyId, 1000);
+            ar = await Ledger.GetBalanceAsync(_companyId, 1100);
+            inv = await Ledger.GetBalanceAsync(_companyId, 1200);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+}

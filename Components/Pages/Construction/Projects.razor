@@ -1,0 +1,755 @@
+﻿@page "/construction/projects"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+
+@using Microsoft.EntityFrameworkCore
+@using System.ComponentModel.DataAnnotations
+@using UaeEInvoice.Data
+@using UaeEInvoice.Services.Auth
+
+@inject AppDbContext Db
+@inject ICurrentCompany CurrentCompany
+
+<PageTitle>Projects</PageTitle>
+
+<style>
+    /* ---- Ultra premium UI ---- */
+    .cx-hero {
+        border-radius: 18px;
+        padding: 18px 18px;
+        background: radial-gradient(900px 400px at 12% 15%, rgba(13,110,253,.16), transparent 60%), radial-gradient(900px 400px at 80% 20%, rgba(32,201,151,.14), transparent 60%), linear-gradient(180deg, #0b1220 0%, #0a0f1a 100%);
+        border: 1px solid rgba(255,255,255,.08);
+        box-shadow: 0 18px 40px rgba(0,0,0,.35);
+        color: #e9eefc;
+    }
+
+        .cx-hero .mut {
+            color: rgba(233,238,252,.75);
+        }
+
+    .cx-pill {
+        display: inline-flex;
+        gap: 8px;
+        align-items: center;
+        padding: 6px 10px;
+        border-radius: 999px;
+        border: 1px solid rgba(255,255,255,.12);
+        background: rgba(255,255,255,.06);
+        font-size: 12px;
+        color: rgba(233,238,252,.85);
+    }
+
+    .cx-card {
+        border-radius: 16px;
+        border: 1px solid rgba(15, 23, 42, .10);
+        background: #fff;
+        box-shadow: 0 10px 25px rgba(2,6,23,.07);
+    }
+
+        .cx-card .head {
+            padding: 14px 16px;
+            border-bottom: 1px solid rgba(2,6,23,.06);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+        }
+
+        .cx-card .body {
+            padding: 14px 16px;
+        }
+
+    .cx-title {
+        font-weight: 700;
+        letter-spacing: .2px;
+        margin: 0;
+    }
+
+    .cx-sub {
+        color: rgba(2,6,23,.62);
+        font-size: 13px;
+    }
+
+    .cx-kpi {
+        border-radius: 14px;
+        padding: 12px 14px;
+        border: 1px solid rgba(2,6,23,.08);
+        background: linear-gradient(180deg, rgba(248,250,252,1) 0%, rgba(255,255,255,1) 100%);
+    }
+
+        .cx-kpi .n {
+            font-weight: 800;
+            font-size: 20px;
+        }
+
+        .cx-kpi .l {
+            color: rgba(2,6,23,.6);
+            font-size: 12px;
+        }
+
+    .cx-table thead th {
+        font-size: 12px;
+        color: rgba(2,6,23,.62);
+        text-transform: uppercase;
+        letter-spacing: .6px;
+    }
+
+    .badge-soft {
+        border-radius: 999px;
+        padding: 6px 10px;
+        font-weight: 600;
+        font-size: 12px;
+        border: 1px solid rgba(2,6,23,.08);
+        background: rgba(2,6,23,.03);
+        color: rgba(2,6,23,.75);
+    }
+
+    .badge-active {
+        background: rgba(32,201,151,.12);
+        border-color: rgba(32,201,151,.28);
+        color: rgba(17, 94, 89, 1);
+    }
+
+    .badge-hold {
+        background: rgba(255,193,7,.16);
+        border-color: rgba(255,193,7,.35);
+        color: rgba(148, 100, 0, 1);
+    }
+
+    .badge-closed {
+        background: rgba(220,53,69,.12);
+        border-color: rgba(220,53,69,.30);
+        color: rgba(136, 26, 39, 1);
+    }
+
+    .cx-modal-backdrop {
+        position: fixed;
+        inset: 0;
+        background: rgba(2,6,23,.55);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 18px;
+        z-index: 1050;
+    }
+
+    .cx-modal {
+        width: min(860px, 96vw);
+        border-radius: 18px;
+        background: #fff;
+        box-shadow: 0 25px 70px rgba(0,0,0,.45);
+        border: 1px solid rgba(2,6,23,.10);
+        overflow: hidden;
+    }
+
+        .cx-modal .mhead {
+            padding: 14px 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid rgba(2,6,23,.06);
+            background: linear-gradient(180deg, rgba(248,250,252,1) 0%, rgba(255,255,255,1) 100%);
+        }
+
+        .cx-modal .mbody {
+            padding: 16px;
+        }
+
+        .cx-modal .mfoot {
+            padding: 12px 16px;
+            border-top: 1px solid rgba(2,6,23,.06);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 10px;
+            background: #fff;
+        }
+</style>
+
+<div class="container-xxl py-4">
+
+    <!-- Hero -->
+    <div class="cx-hero mb-3">
+        <div class="d-flex align-items-start justify-content-between flex-wrap gap-3">
+            <div>
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <h2 class="mb-1" style="font-weight:800;">Construction Projects</h2>
+                    <span class="cx-pill">
+                        <span class="bi bi-buildings"></span>
+                        Company #@CurrentCompany.CompanyId
+                    </span>
+                </div>
+                <div class="mut">Job/Site master — project-wise costs & AP tracking start here.</div>
+            </div>
+
+            <div class="d-flex gap-2">
+                <button type="button" class="btn btn-outline-light" @onclick="Load" disabled="@_loading">
+                    <span class="bi bi-arrow-repeat me-1"></span> Refresh
+                </button>
+
+                <!-- ✅ FIX: Do NOT block click with !_ready -->
+                <button type="button" class="btn btn-primary" @onclick="OpenCreate" disabled="@_loading">
+                    <span class="bi bi-plus-lg me-1"></span> New Project
+                </button>
+            </div>
+        </div>
+    </div>
+
+    @if (!_ready)
+    {
+        <div class="alert alert-warning">
+            Company session not loaded yet. (CompanyId claim not ready)
+        </div>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(_err))
+    {
+        <div class="alert alert-danger">@_err</div>
+    }
+    @if (!string.IsNullOrWhiteSpace(_msg))
+    {
+        <div class="alert alert-success">@_msg</div>
+    }
+
+    <!-- KPIs + Filters -->
+    <div class="row g-3 mb-3">
+        <div class="col-12 col-lg-8">
+            <div class="cx-card">
+                <div class="head">
+                    <div>
+                        <div class="cx-title">Search & Filters</div>
+                        <div class="cx-sub">Instant filtering. No page reload.</div>
+                    </div>
+                    <div class="d-flex gap-2 flex-wrap">
+                        <select class="form-select" style="min-width:180px" @bind="_statusFilter" disabled="@_loading">
+                            <option value="">All status</option>
+                            <option value="Active">Active</option>
+                            <option value="OnHold">OnHold</option>
+                            <option value="Closed">Closed</option>
+                        </select>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="arch" @bind="_showArchived" />
+                            <label class="form-check-label" for="arch">Show archived</label>
+                        </div>
+                    </div>
+                </div>
+                <div class="body">
+                    <input class="form-control form-control-lg"
+                           placeholder="Search by project code / name / client…"
+                           @bind="_q" @bind:event="oninput" />
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12 col-lg-4">
+            <div class="cx-card">
+                <div class="head">
+                    <div>
+                        <div class="cx-title">Quick Stats</div>
+                        <div class="cx-sub">For current company</div>
+                    </div>
+                </div>
+                <div class="body">
+                    <div class="row g-2">
+                        <div class="col-6"><div class="cx-kpi"><div class="n">@_activeCount</div><div class="l">Active</div></div></div>
+                        <div class="col-6"><div class="cx-kpi"><div class="n">@_closedCount</div><div class="l">Closed</div></div></div>
+                        <div class="col-6"><div class="cx-kpi"><div class="n">@_totalCount</div><div class="l">Total</div></div></div>
+                        <div class="col-6"><div class="cx-kpi"><div class="n">@_archCount</div><div class="l">Archived</div></div></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Table -->
+    <div class="cx-card">
+        <div class="head">
+            <div>
+                <div class="cx-title">Projects</div>
+                <div class="cx-sub">Company-scoped list. Click edit for quick updates.</div>
+            </div>
+            <div class="text-muted small">@(_loading ? "Loading…" : $"{Filtered.Count} shown")</div>
+        </div>
+
+        <div class="body p-0">
+            <div class="table-responsive">
+                <table class="table mb-0 cx-table align-middle">
+                    <thead>
+                        <tr>
+                            <th style="width:140px;">Code</th>
+                            <th>Project</th>
+                            <th style="width:220px;">Client</th>
+                            <th style="width:140px;">Status</th>
+                            <th style="width:140px;" class="text-end">VAT</th>
+                            <th style="width:140px;" class="text-end">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @if (_loading)
+                        {
+                            <tr><td colspan="6" class="p-4 text-center text-muted">Loading projects…</td></tr>
+                        }
+                        else if (Filtered.Count == 0)
+                        {
+                            <tr><td colspan="6" class="p-4 text-center text-muted">No projects found.</td></tr>
+                        }
+                        else
+                        {
+                            @foreach (var p in Filtered)
+                            {
+                                <tr>
+                                    <td class="fw-semibold">@p.ProjectCode</td>
+                                    <td>
+                                        <div class="fw-semibold">@p.ProjectName</div>
+                                        <div class="text-muted small">
+                                            Start: @p.StartDate.ToString("dd-MMM-yyyy")
+                                            @if (p.EndDate != null)
+                                            {
+                                                <span> • End: @p.EndDate.Value.ToString("dd-MMM-yyyy")</span>
+                                            }
+                                            @if (p.IsArchived)
+                                            {
+                                                <span class="ms-2 badge-soft">Archived</span>
+                                            }
+                                        </div>
+                                    </td>
+                                    <td>@(string.IsNullOrWhiteSpace(p.ClientName) ? "-" : p.ClientName)</td>
+                                    <td><span class="badge-soft @StatusBadge(p.Status)">@p.Status</span></td>
+                                    <td class="text-end">@((p.VatRate * 100m).ToString("0.##"))%</td>
+                                    <td class="text-end">
+                                        <button type="button" class="btn btn-sm btn-outline-primary me-1" @onclick="() => OpenEdit(p)">
+                                            <span class="bi bi-pencil-square"></span>
+                                        </button>
+
+                                        @if (!p.IsArchived)
+                                        {
+                                            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => Archive(p)">
+                                                <span class="bi bi-archive"></span>
+                                            </button>
+                                        }
+                                        else
+                                        {
+                                            <button type="button" class="btn btn-sm btn-outline-success" @onclick="() => Unarchive(p)">
+                                                <span class="bi bi-arrow-counterclockwise"></span>
+                                            </button>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    @if (_showModal)
+    {
+        <div class="cx-modal-backdrop" @onclick="BackdropClose">
+            <div class="cx-modal" @onclick:stopPropagation="true">
+                <div class="mhead">
+                    <div>
+                        <div class="fw-bold">@(_editingId == 0 ? "New Project" : "Edit Project")</div>
+                        <div class="text-muted small">Code must be unique per company.</div>
+                    </div>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="CloseModal">
+                        <span class="bi bi-x-lg"></span>
+                    </button>
+                </div>
+
+                <div class="mbody">
+                    @if (!string.IsNullOrWhiteSpace(_modalErr))
+                    {
+                        <div class="alert alert-danger py-2">@_modalErr</div>
+                    }
+
+                    <EditForm Model="_form" OnValidSubmit="Save">
+                        <DataAnnotationsValidator />
+                        <ValidationSummary />
+
+                        <div class="row g-3">
+                            <div class="col-12 col-md-4">
+                                <label class="form-label">Project Code</label>
+                                <InputText class="form-control form-control-lg" @bind-Value="_form.ProjectCode" />
+                            </div>
+
+                            <div class="col-12 col-md-8">
+                                <label class="form-label">Project Name</label>
+                                <InputText class="form-control form-control-lg" @bind-Value="_form.ProjectName" />
+                            </div>
+
+                            <div class="col-12">
+                                <label class="form-label">Client Name</label>
+                                <InputText class="form-control" @bind-Value="_form.ClientName" />
+                            </div>
+
+                            <div class="col-12 col-md-4">
+                                <label class="form-label">Start Date</label>
+                                <InputDate class="form-control" @bind-Value="_form.StartDate" />
+                            </div>
+
+                            <div class="col-12 col-md-4">
+                                <label class="form-label">End Date</label>
+                                <InputDate class="form-control" @bind-Value="_form.EndDate" />
+                            </div>
+
+                            <div class="col-12 col-md-4">
+                                <label class="form-label">Status</label>
+                                <InputSelect class="form-select" @bind-Value="_form.Status">
+                                    <option value="Active">Active</option>
+                                    <option value="OnHold">OnHold</option>
+                                    <option value="Closed">Closed</option>
+                                </InputSelect>
+                            </div>
+
+                            <div class="col-12 col-md-4">
+                                <label class="form-label">VAT %</label>
+                                <InputNumber class="form-control" @bind-Value="_form.VatRatePct" />
+                                <div class="text-muted small mt-1">UAE default 5%</div>
+                            </div>
+                        </div>
+
+                        <div class="mfoot">
+                            <div class="text-muted small">
+                                @if (_saving)
+                                {
+                                    <span><span class="spinner-border spinner-border-sm me-2"></span>Saving…</span>
+                                }
+                            </div>
+
+                            <div class="d-flex gap-2">
+                                <button type="button" class="btn btn-outline-secondary" @onclick="CloseModal" disabled="@_saving">Cancel</button>
+                                <button type="submit" class="btn btn-primary" disabled="@_saving">
+                                    <span class="bi bi-check2-circle me-1"></span> Save
+                                </button>
+                            </div>
+                        </div>
+                    </EditForm>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private bool _ready = false;
+    private bool _loading = true;
+    private bool _showModal = false;
+    private bool _saving = false;
+
+    private string _err = "";
+    private string _msg = "";
+    private string _modalErr = "";
+
+    private string _q = "";
+    private string _statusFilter = "";
+    private bool _showArchived = false;
+
+    private int _editingId = 0;
+
+    private List<ConstructionProject> _items = new();
+
+    private int _activeCount = 0;
+    private int _closedCount = 0;
+    private int _totalCount = 0;
+    private int _archCount = 0;
+
+    private ProjectForm _form = new();
+
+    // ✅ IMPORTANT: AuthState in Blazor becomes stable AFTER first render.
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await CurrentCompany.RefreshAsync();
+            _ready = CurrentCompany.CompanyId > 0;
+
+            await Load();
+            StateHasChanged();
+        }
+    }
+
+    private async Task Load()
+    {
+        _err = "";
+        _msg = "";
+        _loading = true;
+
+        try
+        {
+            await CurrentCompany.RefreshAsync();
+            _ready = CurrentCompany.CompanyId > 0;
+
+            if (!_ready)
+            {
+                _items = new();
+                ComputeStats();
+                return;
+            }
+
+            var cid = CurrentCompany.CompanyId;
+
+            _items = await Db.ConstructionProjects
+                .Where(x => x.CompanyId == cid)
+                .OrderByDescending(x => x.CreatedOn)
+                .ToListAsync();
+
+            ComputeStats();
+        }
+        catch (Exception ex)
+        {
+            _err = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void ComputeStats()
+    {
+        _totalCount = _items.Count;
+        _archCount = _items.Count(x => x.IsArchived);
+        _activeCount = _items.Count(x => x.Status == "Active" && !x.IsArchived);
+        _closedCount = _items.Count(x => x.Status == "Closed" && !x.IsArchived);
+    }
+
+    private List<ConstructionProject> Filtered
+    {
+        get
+        {
+            IEnumerable<ConstructionProject> q = _items;
+
+            if (!_showArchived)
+                q = q.Where(x => !x.IsArchived);
+
+            if (!string.IsNullOrWhiteSpace(_statusFilter))
+                q = q.Where(x => x.Status == _statusFilter);
+
+            if (!string.IsNullOrWhiteSpace(_q))
+            {
+                var s = _q.Trim().ToLower();
+                q = q.Where(x =>
+                    (x.ProjectCode ?? "").ToLower().Contains(s) ||
+                    (x.ProjectName ?? "").ToLower().Contains(s) ||
+                    (x.ClientName ?? "").ToLower().Contains(s));
+            }
+
+            return q.ToList();
+        }
+    }
+
+    private void OpenCreate()
+    {
+        // ✅ Validate here instead of disabling button forever
+        if (!_ready)
+        {
+            _err = "CompanyId claim not ready yet. Please refresh once or relogin.";
+            return;
+        }
+
+        _modalErr = "";
+        _editingId = 0;
+        _form = new ProjectForm
+            {
+                StartDate = DateTime.Today,
+                VatRatePct = 5m,
+                Status = "Active"
+            };
+        _showModal = true;
+    }
+
+    private void OpenEdit(ConstructionProject p)
+    {
+        _modalErr = "";
+        _editingId = p.ConstructionProjectId;
+        _form = new ProjectForm
+            {
+                ProjectCode = p.ProjectCode,
+                ProjectName = p.ProjectName,
+                ClientName = p.ClientName,
+                StartDate = p.StartDate,
+                EndDate = p.EndDate,
+                Status = p.Status,
+                VatRatePct = p.VatRate * 100m
+            };
+        _showModal = true;
+    }
+
+    private void CloseModal()
+    {
+        _showModal = false;
+        _modalErr = "";
+    }
+
+    private void BackdropClose()
+    {
+        if (!_saving) CloseModal();
+    }
+
+    private async Task Save()
+    {
+        _modalErr = "";
+        _msg = "";
+
+        await CurrentCompany.RefreshAsync();
+        _ready = CurrentCompany.CompanyId > 0;
+
+        if (!_ready)
+        {
+            _modalErr = "CompanyId not found in session. Please login again.";
+            return;
+        }
+
+        _saving = true;
+        try
+        {
+            var vat = (_form.VatRatePct / 100m);
+            if (vat < 0) vat = 0;
+
+            if (_editingId == 0)
+            {
+                var row = new ConstructionProject
+                    {
+                        CompanyId = CurrentCompany.CompanyId,
+                        ProjectCode = _form.ProjectCode.Trim(),
+                        ProjectName = _form.ProjectName.Trim(),
+                        ClientName = string.IsNullOrWhiteSpace(_form.ClientName) ? null : _form.ClientName.Trim(),
+                        StartDate = _form.StartDate,
+                        EndDate = _form.EndDate,
+                        Status = _form.Status,
+                        VatRate = vat,
+                        CreatedOn = DateTime.UtcNow
+                    };
+
+                Db.ConstructionProjects.Add(row);
+                await Db.SaveChangesAsync();
+
+                _msg = "Project created.";
+            }
+            else
+            {
+                var row = await Db.ConstructionProjects
+                    .FirstOrDefaultAsync(x => x.ConstructionProjectId == _editingId
+                                           && x.CompanyId == CurrentCompany.CompanyId);
+
+                if (row == null)
+                {
+                    _modalErr = "Project not found.";
+                    return;
+                }
+
+                row.ProjectCode = _form.ProjectCode.Trim();
+                row.ProjectName = _form.ProjectName.Trim();
+                row.ClientName = string.IsNullOrWhiteSpace(_form.ClientName) ? null : _form.ClientName.Trim();
+                row.StartDate = _form.StartDate;
+                row.EndDate = _form.EndDate;
+                row.Status = _form.Status;
+                row.VatRate = vat;
+
+                await Db.SaveChangesAsync();
+                _msg = "Project updated.";
+            }
+
+            await Load();
+            _showModal = false;
+        }
+        catch (DbUpdateException dbx)
+        {
+            _modalErr = "Save failed. Project Code must be unique in this company. " + dbx.GetBaseException().Message;
+        }
+        catch (Exception ex)
+        {
+            _modalErr = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task Archive(ConstructionProject p)
+    {
+        _err = "";
+        _msg = "";
+
+        try
+        {
+            await CurrentCompany.RefreshAsync();
+            if (CurrentCompany.CompanyId <= 0) return;
+
+            var row = await Db.ConstructionProjects
+                .FirstOrDefaultAsync(x => x.ConstructionProjectId == p.ConstructionProjectId
+                                       && x.CompanyId == CurrentCompany.CompanyId);
+
+            if (row == null) return;
+
+            row.IsArchived = true;
+            await Db.SaveChangesAsync();
+
+            _msg = "Project archived.";
+            await Load();
+        }
+        catch (Exception ex)
+        {
+            _err = ex.Message;
+        }
+    }
+
+    private async Task Unarchive(ConstructionProject p)
+    {
+        _err = "";
+        _msg = "";
+
+        try
+        {
+            await CurrentCompany.RefreshAsync();
+            if (CurrentCompany.CompanyId <= 0) return;
+
+            var row = await Db.ConstructionProjects
+                .FirstOrDefaultAsync(x => x.ConstructionProjectId == p.ConstructionProjectId
+                                       && x.CompanyId == CurrentCompany.CompanyId);
+
+            if (row == null) return;
+
+            row.IsArchived = false;
+            await Db.SaveChangesAsync();
+
+            _msg = "Project restored.";
+            await Load();
+        }
+        catch (Exception ex)
+        {
+            _err = ex.Message;
+        }
+    }
+
+    private static string StatusBadge(string status)
+        => status switch
+        {
+            "Active" => "badge-active",
+            "OnHold" => "badge-hold",
+            "Closed" => "badge-closed",
+            _ => ""
+        };
+
+    private class ProjectForm
+    {
+        [Required, MaxLength(30)]
+        public string ProjectCode { get; set; } = "";
+
+        [Required, MaxLength(150)]
+        public string ProjectName { get; set; } = "";
+
+        [MaxLength(150)]
+        public string? ClientName { get; set; }
+
+        public DateTime StartDate { get; set; } = DateTime.Today;
+        public DateTime? EndDate { get; set; }
+
+        [Required]
+        public string Status { get; set; } = "Active";
+
+        [Range(0, 100)]
+        public decimal VatRatePct { get; set; } = 5m;
+    }
+}

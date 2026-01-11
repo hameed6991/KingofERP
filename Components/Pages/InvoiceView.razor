@@ -1,0 +1,835 @@
+﻿@page "/invoice-view/{Id:int}"
+@using Microsoft.EntityFrameworkCore
+@using UaeEInvoice.Data
+@using UaeEInvoice.Services.Auth
+@using UaeEInvoice.Services.Einvoicing
+@inject AppDbContext Db
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@inject ICurrentCompany CurrentCompany
+@inject EinvoiceService EInv
+
+<style>
+    /* ===== PRINT ===== */
+    @@media print {
+        .no-print {
+            display: none !important;
+        }
+
+        body * {
+            visibility: hidden !important;
+        }
+
+        #print-area, #print-area * {
+            visibility: visible !important;
+        }
+
+        #print-area {
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: 100% !important;
+            margin: 0 !important;
+            padding: 0 !important;
+        }
+
+        .card {
+            box-shadow: none !important;
+            border: 0 !important;
+        }
+
+        .invoice-paper {
+            box-shadow: none !important;
+            border: 0 !important;
+        }
+    }
+
+    /* ===== ULTRA PREMIUM SCREEN UI ===== */
+    :root {
+        --bg0: #050816;
+        --bg1: #0b1226;
+        --card: rgba(255,255,255,.06);
+        --border: rgba(255,255,255,.12);
+        --text: rgba(255,255,255,.92);
+        --muted: rgba(255,255,255,.62);
+        --shadow: 0 18px 70px rgba(0,0,0,.45);
+        --r: 22px;
+    }
+
+    .premium-wrap {
+        background: radial-gradient(1100px 650px at 12% -10%, rgba(34,197,94,.22), transparent 60%), radial-gradient(900px 520px at 90% 0%, rgba(59,130,246,.18), transparent 60%), radial-gradient(900px 520px at 50% 120%, rgba(168,85,247,.14), transparent 65%), linear-gradient(180deg, var(--bg1), var(--bg0) 70%, #030513);
+        border-radius: 22px;
+        padding: 18px;
+        min-height: calc(100vh - 70px);
+    }
+
+    .hero {
+        border-radius: var(--r);
+        padding: 16px;
+        border: 1px solid var(--border);
+        background: radial-gradient(900px 460px at 10% -10%, rgba(34,197,94,.20), transparent 62%), radial-gradient(800px 420px at 92% 0%, rgba(59,130,246,.18), transparent 55%), linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,.03));
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(10px);
+        color: var(--text);
+    }
+
+    .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 10px;
+        border-radius: 999px;
+        border: 1px solid rgba(255,255,255,.14);
+        background: rgba(255,255,255,.06);
+        color: rgba(255,255,255,.86);
+        font-size: .85rem;
+        white-space: nowrap;
+    }
+
+    .btn-premium {
+        border-radius: 12px;
+        font-weight: 900;
+        padding: 10px 12px;
+    }
+
+    .glass {
+        border-radius: var(--r);
+        background: rgba(255,255,255,.06);
+        border: 1px solid rgba(255,255,255,.10);
+        box-shadow: 0 14px 35px rgba(0,0,0,.22);
+        backdrop-filter: blur(10px);
+        color: var(--text);
+        overflow: hidden;
+    }
+
+    /* ===== TEMPLATE-BASED PAPER ===== */
+    .invoice-paper {
+        --accent: #3b82f6;
+        --corner: 18px;
+        --wm: rgba(15,23,42,.08);
+        border-radius: var(--corner);
+        background: #ffffff;
+        border: 1px solid rgba(15,23,42,.10);
+        box-shadow: 0 14px 35px rgba(0,0,0,.18);
+        color: #0f172a;
+        position: relative;
+        overflow: hidden;
+    }
+
+        .invoice-paper .muted {
+            color: rgba(15,23,42,.60);
+        }
+
+    .accent-bar {
+        height: 10px;
+        background: linear-gradient(90deg, var(--accent), rgba(255,255,255,0));
+    }
+
+    .logo-box {
+        width: 54px;
+        height: 54px;
+        border-radius: 14px;
+        border: 1px solid rgba(15,23,42,.10);
+        background: #f8fafc;
+        overflow: hidden;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+        .logo-box img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+    .tag-template {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 10px;
+        border-radius: 999px;
+        border: 1px solid rgba(15,23,42,.12);
+        background: rgba(15,23,42,.03);
+        font-weight: 800;
+        font-size: .82rem;
+        color: rgba(15,23,42,.80);
+    }
+
+    .table thead th {
+        background: linear-gradient(180deg, #f8fafc, #f1f5f9) !important;
+        border-bottom: 1px solid rgba(15,23,42,.10) !important;
+        font-size: .80rem;
+        text-transform: uppercase;
+        letter-spacing: .3px;
+        color: rgba(15,23,42,.70);
+    }
+
+    .total-strong {
+        color: var(--accent);
+    }
+
+    .watermark {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        pointer-events: none;
+        user-select: none;
+        z-index: 0;
+    }
+
+        .watermark span {
+            font-weight: 900;
+            letter-spacing: .12em;
+            transform: rotate(-18deg);
+            font-size: 56px;
+            color: var(--wm);
+            text-transform: uppercase;
+            text-align: center;
+            padding: 0 20px;
+        }
+
+    .paper-content {
+        position: relative;
+        z-index: 1;
+    }
+
+    .qr-box {
+        width: 108px;
+        height: 108px;
+        border-radius: 14px;
+        border: 1px solid rgba(15,23,42,.10);
+        background: #fff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+    }
+
+    .section-title {
+        font-weight: 900;
+        letter-spacing: .2px;
+        margin-bottom: 6px;
+    }
+</style>
+
+<!-- ✅ QR library (minimal + works) -->
+<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+<script>
+    window.uaeInvQr = {
+        render: function (elId, text) {
+            try {
+                var el = document.getElementById(elId);
+                if (!el) return;
+                el.innerHTML = "";
+                new QRCode(el, {
+                    text: text || "",
+                    width: 96,
+                    height: 96,
+                    correctLevel: QRCode.CorrectLevel.M
+                });
+            } catch (e) { }
+        }
+    };
+</script>
+
+<div class="container-xxl py-4">
+    <div class="premium-wrap">
+
+        <!-- HEADER (no-print) -->
+        <div class="hero mb-3 no-print">
+            <div class="d-flex align-items-start justify-content-between flex-wrap gap-2">
+                <div>
+                    <div class="d-flex gap-2 flex-wrap">
+                        <span class="pill">🧾 Invoice View</span>
+                        <span class="pill">🖨️ Print Ready</span>
+                        <span class="pill">⚡ eInvoice Draft Ready</span>
+                        @if (_tpl != null)
+                        {
+                            <span class="pill">🎨 Template: @_tpl.Name</span>
+                        }
+                    </div>
+                    <h2 class="mb-1" style="font-weight:900; letter-spacing:.2px;">Invoice</h2>
+                    <div style="color:rgba(255,255,255,.68);">Preview, print and generate eInvoice draft XML.</div>
+                </div>
+
+                <div class="d-flex gap-2 flex-wrap">
+                    <button class="btn btn-light btn-premium" type="button" @onclick="GoBack" disabled="@_loading">Back</button>
+
+                    <button class="btn btn-primary btn-premium" type="button" @onclick="PrintNow" disabled="@_loading">
+                        Print
+                    </button>
+
+                    <a class="btn btn-outline-light btn-premium"
+                       href="@($"/invoice-pdf/{Id}")"
+                       target="_blank">
+                        Download PDF
+                    </a>
+
+                    <button class="btn btn-outline-warning btn-premium" type="button" @onclick="GenerateDraft" disabled="@(_loading || _busyEinv)">
+                        @(_busyEinv ? "Generating..." : "Generate eInvoice Draft")
+                    </button>
+
+                    <button class="btn btn-outline-info btn-premium" type="button" @onclick="OpenOutbox" disabled="@_loading">
+                        Outbox
+                    </button>
+
+                    <button class="btn btn-outline-light btn-premium" type="button" @onclick="GoTemplates" disabled="@_loading">
+                        Templates
+                    </button>
+                </div>
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(_einMsg))
+            {
+                <div class="mt-3 alert alert-info py-2 mb-0" style="border-radius:14px;">
+                    @_einMsg
+                </div>
+            }
+        </div>
+
+        @if (_loading)
+        {
+            <div class="glass p-3">
+                <div class="text-white-50">Loading...</div>
+            </div>
+        }
+        else if (!string.IsNullOrWhiteSpace(_error))
+        {
+            <div class="alert alert-danger">@_error</div>
+        }
+        else if (_inv == null)
+        {
+            <div class="alert alert-warning">Invoice not found.</div>
+        }
+        else
+        {
+            <!-- STATUS STRIP (no-print) -->
+            <div class="glass mb-3 no-print">
+                <div class="p-3 d-flex justify-content-between align-items-start flex-wrap gap-2">
+                    <div>
+                        <div class="text-white-50 small">eInvoice Status</div>
+                        @if (_eDoc == null)
+                        {
+                            <div class="text-white fw-bold">Not generated yet</div>
+                            <div class="text-white-50 small">Click “Generate eInvoice Draft”.</div>
+                        }
+                        else
+                        {
+                            <div class="d-flex align-items-center gap-2 flex-wrap">
+                                <span class="pill">Status: @(_eDoc.Status ?? "Draft")</span>
+                                <span class="pill">Source: @_eDoc.SourceType #@_eDoc.SourceId</span>
+                                @if (!string.IsNullOrWhiteSpace(_eDoc.PayloadHashSha256))
+                                {
+                                    <span class="pill">SHA256: @_eDoc.PayloadHashSha256</span>
+                                }
+                            </div>
+                            <div class="text-white-50 small mt-1">
+                                Updated: @_eDoc.UpdatedAt.ToLocalTime().ToString("dd-MMM-yyyy HH:mm")
+                            </div>
+                        }
+                    </div>
+
+                    <div class="d-flex gap-2 flex-wrap">
+                        <button class="btn btn-outline-light btn-premium" type="button" @onclick="OpenOutbox">View in Outbox</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- INVOICE PAPER (print-area) -->
+            <div id="print-area" class="invoice-print">
+                <div class="invoice-paper card" style="@PaperInlineStyle()">
+                    <div class="accent-bar"></div>
+
+                    @if (!string.IsNullOrWhiteSpace(_tplSettings.WatermarkText))
+                    {
+                        <div class="watermark">
+                            <span>@_tplSettings.WatermarkText</span>
+                        </div>
+                    }
+
+                    <div class="card-body p-4 p-md-5 paper-content">
+
+                        <!-- Template tag -->
+                        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+                            <span class="tag-template">
+                                🎨 @(_tpl?.Name ?? "Default Template")
+                            </span>
+                            <div class="muted small">
+                                Currency: @(_company?.CurrencyCode ?? "AED")
+                            </div>
+                        </div>
+
+                        @if (IsHeaderStacked())
+                        {
+                            <!-- HEADER: STACKED -->
+                            <div class="text-center mb-3">
+                                @if (_tplSettings.ShowLogo)
+                                {
+                                    <div class="d-flex justify-content-center mb-2">
+                                        <div class="logo-box">
+                                            @if (!string.IsNullOrWhiteSpace(_company?.LogoPath))
+                                            {
+                                                <img src="@_company!.LogoPath" alt="Logo" />
+                                            }
+                                            else
+                                            {
+                                                <span class="muted small fw-bold">LOGO</span>
+                                            }
+                                        </div>
+                                    </div>
+                                }
+
+                                <div class="fw-bold fs-4">@(_company?.LegalName ?? "Company")</div>
+
+                                <div class="muted small">
+                                    @($"{_company?.AddressLine1 ?? ""}".Trim())
+                                    @if (!string.IsNullOrWhiteSpace(_company?.AddressLine1))
+                                    {
+                                        <span>, </span>
+                                    }
+                                    @($"{_company?.Emirate ?? ""} {_company?.City ?? ""}".Trim())
+                                </div>
+
+                                @if (_tplSettings.ShowTRN)
+                                {
+                                    <div class="muted small">TRN: @(!string.IsNullOrWhiteSpace(_company?.TRN) ? _company!.TRN : "-")</div>
+                                }
+
+                                @if (!string.IsNullOrWhiteSpace(_company?.Phone) || !string.IsNullOrWhiteSpace(_company?.Email))
+                                {
+                                    <div class="muted small">
+                                        @if (!string.IsNullOrWhiteSpace(_company?.Phone))
+                                        {
+                                            <span>@_company!.Phone</span>
+                                        }
+                                        @if (!string.IsNullOrWhiteSpace(_company?.Phone) && !string.IsNullOrWhiteSpace(_company?.Email))
+                                        {
+                                            <span> • </span>
+                                        }
+                                        @if (!string.IsNullOrWhiteSpace(_company?.Email))
+                                        {
+                                            <span>@_company!.Email</span>
+                                        }
+                                    </div>
+                                }
+
+                                <div class="mt-3">
+                                    <div class="fs-3 fw-black" style="font-weight:900; color: var(--accent);">@_inv.InvoiceNo</div>
+                                    <div class="muted small">Date: @_inv.InvoiceDate.ToString("dd-MM-yyyy")</div>
+                                    @if (_inv.DueDate.HasValue)
+                                    {
+                                        <div class="muted small">Due: @_inv.DueDate.Value.ToString("dd-MM-yyyy")</div>
+                                    }
+                                </div>
+                            </div>
+                        }
+                        else
+                        {
+                            <!-- HEADER: SPLIT (default) -->
+                            <div class="d-flex justify-content-between align-items-start flex-wrap gap-3 mb-3">
+                                <div class="d-flex align-items-start gap-3">
+                                    @if (_tplSettings.ShowLogo)
+                                    {
+                                        <div class="logo-box">
+                                            @if (!string.IsNullOrWhiteSpace(_company?.LogoPath))
+                                            {
+                                                <img src="@_company!.LogoPath" alt="Logo" />
+                                            }
+                                            else
+                                            {
+                                                <span class="muted small fw-bold">LOGO</span>
+                                            }
+                                        </div>
+                                    }
+
+                                    <div>
+                                        <div class="fw-bold fs-5">@(_company?.LegalName ?? "Company")</div>
+                                        <div class="muted small">
+                                            @($"{_company?.AddressLine1 ?? ""}".Trim())
+                                            @if (!string.IsNullOrWhiteSpace(_company?.AddressLine1))
+                                            {
+                                                <span>, </span>
+                                            }
+                                            @($"{_company?.Emirate ?? ""} {_company?.City ?? ""}".Trim())
+                                        </div>
+
+                                        @if (_tplSettings.ShowTRN)
+                                        {
+                                            <div class="muted small">
+                                                TRN: @(!string.IsNullOrWhiteSpace(_company?.TRN) ? _company!.TRN : "-")
+                                            </div>
+                                        }
+
+                                        @if (!string.IsNullOrWhiteSpace(_company?.Phone) || !string.IsNullOrWhiteSpace(_company?.Email))
+                                        {
+                                            <div class="muted small">
+                                                @if (!string.IsNullOrWhiteSpace(_company?.Phone))
+                                                {
+                                                    <span>@_company!.Phone</span>
+                                                }
+                                                @if (!string.IsNullOrWhiteSpace(_company?.Phone) && !string.IsNullOrWhiteSpace(_company?.Email))
+                                                {
+                                                    <span> • </span>
+                                                }
+                                                @if (!string.IsNullOrWhiteSpace(_company?.Email))
+                                                {
+                                                    <span>@_company!.Email</span>
+                                                }
+                                            </div>
+                                        }
+                                    </div>
+                                </div>
+
+                                <div class="text-end">
+                                    <div class="fs-4 fw-black" style="font-weight:900; color: var(--accent);">@_inv.InvoiceNo</div>
+                                    <div class="muted small">Date: @_inv.InvoiceDate.ToString("dd-MM-yyyy")</div>
+                                    @if (_inv.DueDate.HasValue)
+                                    {
+                                        <div class="muted small">Due: @_inv.DueDate.Value.ToString("dd-MM-yyyy")</div>
+                                    }
+                                </div>
+                            </div>
+                        }
+
+                        <hr class="my-4" />
+
+                        <!-- Bill To + QR -->
+                        <div class="row g-3 mb-3 align-items-start">
+                            <div class="col-12 col-md-7">
+                                <div class="muted small text-uppercase" style="letter-spacing:.3px;">Bill To</div>
+                                <div class="fw-bold fs-6">@_inv.CustomerName</div>
+
+                                @if (_tplSettings.ShowTRN)
+                                {
+                                    <div class="muted small">
+                                        TRN: @(string.IsNullOrWhiteSpace(_inv.CustomerTRN) ? "-" : _inv.CustomerTRN)
+                                    </div>
+                                }
+                            </div>
+
+                            <div class="col-12 col-md-5 text-md-end">
+                                @if (_tplSettings.ShowQRCode)
+                                {
+                                    <div class="d-flex justify-content-md-end">
+                                        <div class="qr-box">
+                                            <div id="@_qrElId"></div>
+                                        </div>
+                                    </div>
+                                    <div class="muted small mt-2">
+                                        Scan for invoice: @_inv.InvoiceNo
+                                    </div>
+                                }
+
+                                <div class="mt-2">
+                                    <div class="muted small text-uppercase" style="letter-spacing:.3px;">Invoice Summary</div>
+                                    <div class="small">Subtotal: @_inv.SubTotal.ToString("0.00")</div>
+                                    <div class="small">VAT: @_inv.VatTotal.ToString("0.00")</div>
+                                    <div class="fw-bold fs-5 total-strong">Total: @_inv.GrandTotal.ToString("0.00")</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Lines -->
+                        <div class="table-responsive">
+                            <table class="table table-sm align-middle">
+                                <thead>
+                                    <tr>
+                                        <th style="min-width:220px;">Item</th>
+                                        <th class="text-end" style="width:80px;">Qty</th>
+                                        <th class="text-end" style="width:110px;">Rate</th>
+                                        <th class="text-end" style="width:110px;">VAT</th>
+                                        <th class="text-end" style="width:120px;">Total</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var ln in _lines)
+                                    {
+                                        <tr>
+                                            <td class="fw-semibold">@ln.ItemName</td>
+                                            <td class="text-end">@ln.Qty.ToString("0.##")</td>
+                                            <td class="text-end">@ln.Rate.ToString("0.00")</td>
+                                            <td class="text-end">@ln.LineVat.ToString("0.00")</td>
+                                            <td class="text-end fw-bold">@ln.LineTotal.ToString("0.00")</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <hr class="my-4" />
+
+                        <!-- Totals -->
+                        <div class="d-flex justify-content-end">
+                            <div style="min-width: 320px;">
+                                <div class="d-flex justify-content-between py-1">
+                                    <div class="muted">Subtotal</div>
+                                    <div class="fw-semibold">@_inv.SubTotal.ToString("0.00")</div>
+                                </div>
+                                <div class="d-flex justify-content-between py-1">
+                                    <div class="muted">VAT</div>
+                                    <div class="fw-semibold">@_inv.VatTotal.ToString("0.00")</div>
+                                </div>
+                                <div class="d-flex justify-content-between py-2 border-top mt-2">
+                                    <div class="fw-bold">Grand Total</div>
+                                    <div class="fw-bold fs-4 total-strong">@_inv.GrandTotal.ToString("0.00")</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Optional sections -->
+                        <div class="row g-3 mt-4">
+                            @if (_tplSettings.ShowBankDetails && !string.IsNullOrWhiteSpace(_company?.InvoiceFooterNote))
+                            {
+                                <div class="col-12 col-md-6">
+                                    <div class="section-title">Bank / Payment Details</div>
+                                    <div class="muted small" style="white-space:pre-wrap;">@_company!.InvoiceFooterNote</div>
+                                </div>
+                            }
+
+                            @if (_tplSettings.ShowNotes)
+                            {
+                                <div class="col-12 col-md-6">
+                                    <div class="section-title">Notes</div>
+                                    <div class="muted small">Thank you for your business.</div>
+                                </div>
+                            }
+
+                            @if (_tplSettings.ShowTerms)
+                            {
+                                <div class="col-12">
+                                    <div class="section-title">Terms</div>
+                                    <div class="muted small">
+                                        Payment due within @(_company?.PaymentTermsDays ?? 0) day(s) unless agreed otherwise.
+                                    </div>
+                                </div>
+                            }
+
+                            @if (_tplSettings.ShowSignature)
+                            {
+                                <div class="col-12 col-md-6">
+                                    <div class="section-title">Authorized Signature</div>
+                                    <div style="height:48px; border-bottom:1px solid rgba(15,23,42,.18);"></div>
+                                    <div class="muted small mt-1">Signature</div>
+                                </div>
+                            }
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+        }
+
+    </div>
+</div>
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    [SupplyParameterFromQuery(Name = "print")]
+    public string? AutoPrint { get; set; }
+
+    private bool _loading = true;
+    private string? _error;
+
+    private int _companyId;
+    private Company? _company;
+
+    private Invoice? _inv;
+    private List<InvoiceLine> _lines = new();
+
+    private bool _printedOnce = false;
+
+    // eInvoice UI state
+    private bool _busyEinv = false;
+    private string? _einMsg;
+    private EInvoiceDocument? _eDoc;
+
+    // ✅ Template state
+    private InvoiceTemplate? _tpl;
+    private InvoiceTemplateSettings _tplSettings = new();
+    private string _qrElId = "qr-" + Guid.NewGuid().ToString("N");
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _loading = true;
+        _error = null;
+        _einMsg = null;
+
+        _inv = null;
+        _lines = new();
+        _company = null;
+        _eDoc = null;
+        _printedOnce = false;
+
+        _tpl = null;
+        _tplSettings = new();
+
+        try
+        {
+            await CurrentCompany.RefreshAsync();
+            _companyId = CurrentCompany.CompanyId;
+
+            if (_companyId <= 0)
+                throw new Exception("Company not selected / not found.");
+
+            _company = await Db.Companies
+                .AsNoTracking()
+                .Where(x => x.CompanyId == _companyId)
+                .SingleOrDefaultAsync();
+
+            if (_company == null)
+                throw new Exception("Company setup not found for this login.");
+
+            _inv = await Db.Invoices
+                .AsNoTracking()
+                .AsSplitQuery()
+                .Include(x => x.Lines)
+                .Where(x => x.CompanyId == _companyId && x.InvoiceId == Id)
+                .SingleOrDefaultAsync();
+
+            if (_inv != null)
+            {
+                _lines = _inv.Lines.OrderBy(x => x.InvoiceLineId).ToList();
+
+                // ✅ Load template based on SelectedTemplateId (from invoice-create dropdown)
+                await LoadTemplateForInvoiceAsync();
+
+                await LoadEInvoiceDoc();
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = ex.InnerException?.Message ?? ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task LoadTemplateForInvoiceAsync()
+    {
+        if (_inv == null) return;
+
+        // 1) if invoice has selected template id -> load it (system 0 OR company)
+        if (_inv.SelectedTemplateId.HasValue && _inv.SelectedTemplateId.Value > 0)
+        {
+            var selId = _inv.SelectedTemplateId.Value;
+
+            _tpl = await Db.InvoiceTemplates.AsNoTracking()
+                .Where(t => t.IsActive
+                         && t.InvoiceTemplateId == selId
+                         && (t.CompanyId == 0 || t.CompanyId == _companyId))
+                .FirstOrDefaultAsync();
+        }
+
+        // 2) fallback -> default system template (first active system)
+        if (_tpl == null)
+        {
+            _tpl = await Db.InvoiceTemplates.AsNoTracking()
+                .Where(t => t.IsActive && t.IsSystem && t.CompanyId == 0)
+                .OrderBy(t => t.Name)
+                .FirstOrDefaultAsync();
+        }
+
+        // 3) parse settings
+        _tplSettings = InvoiceTemplateSettings.FromJson(_tpl?.SettingsJson);
+    }
+
+    private async Task LoadEInvoiceDoc()
+    {
+        _eDoc = await Db.EInvoiceDocuments.AsNoTracking()
+            .Where(x => x.CompanyId == _companyId
+                        && x.SourceType == "INV"
+                        && x.SourceId == Id)
+            .OrderByDescending(x => x.UpdatedAt)
+            .FirstOrDefaultAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        if (_inv == null) return;
+
+        // ✅ QR render (template setting)
+        if (_tplSettings.ShowQRCode)
+        {
+            // QR content - you can change to URL later
+            var qrText = $"INV|{_inv.InvoiceNo}|{_inv.InvoiceDate:yyyy-MM-dd}|TOTAL|{_inv.GrandTotal:0.00}|TRN|{_company?.TRN}";
+            await JS.InvokeVoidAsync("uaeInvQr.render", _qrElId, qrText);
+        }
+
+        // ✅ auto print
+        var auto =
+            string.Equals(AutoPrint, "1", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(AutoPrint, "true", StringComparison.OrdinalIgnoreCase);
+
+        if (auto && !_printedOnce)
+        {
+            _printedOnce = true;
+            await Task.Delay(300);
+            await JS.InvokeVoidAsync("window.print");
+        }
+    }
+
+    private string PaperInlineStyle()
+    {
+        var accent = string.IsNullOrWhiteSpace(_tplSettings.AccentHex) ? "#3b82f6" : _tplSettings.AccentHex.Trim();
+        var corner = _tplSettings.Corner <= 0 ? 18 : _tplSettings.Corner;
+
+        // watermark opacity (0-100) -> convert to alpha
+        var op = _tplSettings.WatermarkOpacity;
+        if (op < 0) op = 0;
+        if (op > 100) op = 100;
+        var alpha = (decimal)op / 100m; // 0..1
+
+        // use rgba with alpha for watermark text
+        // keep it subtle for print
+        var wm = $"rgba(15,23,42,{alpha:0.##})";
+
+        return $"--accent:{accent}; --corner:{corner}px; --wm:{wm};";
+    }
+
+    private bool IsHeaderStacked()
+        => string.Equals((_tplSettings.HeaderStyle ?? "split").Trim(), "stacked", StringComparison.OrdinalIgnoreCase);
+
+    private void GoBack() => Nav.NavigateTo("/invoices");
+
+    private void GoTemplates() => Nav.NavigateTo("/settings/invoice-templates");
+
+    private async Task PrintNow()
+        => await JS.InvokeVoidAsync("window.print");
+
+    private void OpenOutbox()
+        => Nav.NavigateTo("/einvoice-outbox", forceLoad: true);
+
+    private async Task GenerateDraft()
+    {
+        if (_inv == null) return;
+
+        _busyEinv = true;
+        _einMsg = null;
+
+        try
+        {
+            var doc = await EInv.GenerateDraftForInvoiceAsync(Id);
+
+            _einMsg = string.IsNullOrWhiteSpace(doc?.PayloadHashSha256)
+                ? "Draft generated."
+                : $"Draft generated. SHA256: {doc.PayloadHashSha256}";
+
+            await LoadEInvoiceDoc();
+        }
+        catch (Exception ex)
+        {
+            _einMsg = "eInvoice error: " + (ex.InnerException?.Message ?? ex.Message);
+        }
+        finally
+        {
+            _busyEinv = false;
+        }
+    }
+}

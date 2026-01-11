@@ -1,0 +1,396 @@
+﻿@page "/bank-accounts"
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+
+@using Microsoft.EntityFrameworkCore
+@using UaeEInvoice.Data
+@using UaeEInvoice.Services.Auth
+@inject AppDbContext Db
+@inject ICurrentCompany CurrentCompany
+@inject NavigationManager Nav
+
+<style>
+    :root {
+        --ba-bg: #060a14;
+        --ba-card: rgba(255,255,255,.07);
+        --ba-border: rgba(255,255,255,.12);
+        --ba-text: rgba(255,255,255,.92);
+        --ba-muted: rgba(255,255,255,.65);
+        --ba-shadow: 0 22px 70px rgba(0,0,0,.45);
+        --ba-radius: 18px;
+    }
+
+    .ba-wrap {
+        background: radial-gradient(1200px 650px at 10% -10%, rgba(34,197,94,.16), transparent 60%), radial-gradient(900px 520px at 90% 0%, rgba(59,130,246,.18), transparent 60%), linear-gradient(180deg,#0b1220,#060a14 70%,#040710);
+        min-height: calc(100vh - 70px);
+        border-radius: 22px;
+        padding: 18px;
+    }
+
+    .ba-hero {
+        border-radius: 22px;
+        padding: 18px;
+        color: var(--ba-text);
+        background: radial-gradient(900px 460px at 10% -10%, rgba(34,197,94,.28), transparent 62%), radial-gradient(800px 420px at 92% 0%, rgba(59,130,246,.22), transparent 55%), linear-gradient(180deg, rgba(255,255,255,.09), rgba(255,255,255,.03));
+        border: 1px solid var(--ba-border);
+        box-shadow: var(--ba-shadow);
+        backdrop-filter: blur(10px);
+    }
+
+    .ba-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 10px;
+        border-radius: 999px;
+        border: 1px solid rgba(255,255,255,.14);
+        background: rgba(255,255,255,.06);
+        color: rgba(255,255,255,.85);
+        font-size: .85rem;
+    }
+
+    .ba-card {
+        border-radius: var(--ba-radius);
+        background: rgba(255,255,255,.06);
+        border: 1px solid rgba(255,255,255,.10);
+        box-shadow: 0 14px 35px rgba(0,0,0,.22);
+        backdrop-filter: blur(10px);
+        overflow: hidden;
+    }
+
+    .ba-head {
+        padding: 12px 14px;
+        border-bottom: 1px solid rgba(255,255,255,.08);
+        background: linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.02));
+        color: rgba(255,255,255,.88);
+        font-weight: 900;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
+    }
+
+    .ba-body {
+        padding: 14px;
+        color: var(--ba-text);
+    }
+
+    .ba-input, .ba-select {
+        border-radius: 12px !important;
+        background: rgba(255,255,255,.92) !important;
+        border: 1px solid rgba(15,23,42,.12) !important;
+    }
+
+    .ba-table {
+        border-radius: 14px;
+        overflow: hidden;
+        border: 1px solid rgba(15,23,42,.10);
+        background: #fff;
+    }
+
+        .ba-table thead th {
+            background: linear-gradient(180deg,#f8fafc,#f1f5f9) !important;
+            border-bottom: 1px solid rgba(15,23,42,.10) !important;
+            font-size: .80rem;
+            text-transform: uppercase;
+            letter-spacing: .3px;
+            color: rgba(15,23,42,.70);
+        }
+
+    .ba-actions .btn {
+        border-radius: 12px;
+        font-weight: 900;
+        padding: 9px 12px;
+    }
+
+    .text-soft {
+        color: rgba(255,255,255,.70);
+    }
+</style>
+
+<div class="container-xxl py-4">
+    <div class="ba-wrap">
+
+        <div class="ba-hero mb-3">
+            <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+                <div>
+                    <div class="d-flex gap-2 flex-wrap">
+                        <span class="ba-pill">🏦 Bank Accounts Mapping</span>
+                        <span class="ba-pill">One-time Setup</span>
+                        <span class="ba-pill">Link to COA (Bank GL)</span>
+                    </div>
+                    <h2 class="fw-black mt-2 mb-1">Bank Account Mapping</h2>
+                    <div class="text-soft">Create bank accounts and map each one to Chart of Accounts (Bank GL AccountNo).</div>
+                </div>
+                <div class="ba-actions d-flex gap-2">
+                    <button class="btn btn-light" type="button" @onclick="OpenNew">+ Add Bank</button>
+                    <button class="btn btn-outline-light" type="button" @onclick="@(() => Nav.NavigateTo("/bank-reconcile"))">← Back to Reconcile</button>
+                    <button class="btn btn-outline-light" type="button" @onclick="Load">Refresh</button>
+                </div>
+            </div>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(err))
+        {
+            <div class="alert alert-danger py-2">@err</div>
+        }
+        @if (!string.IsNullOrWhiteSpace(msg))
+        {
+            <div class="alert alert-success py-2">@msg</div>
+        }
+
+        <div class="row g-3">
+            <div class="col-12 col-lg-7">
+                <div class="ba-card">
+                    <div class="ba-head">
+                        <div>Bank Accounts</div>
+                        <div class="text-soft small">Mapped GL is used for reconciliation & posting</div>
+                    </div>
+                    <div class="ba-body">
+
+                        <div class="row g-2 align-items-end">
+                            <div class="col-12 col-md-8">
+                                <label class="form-label text-soft">Search</label>
+                                <input class="form-control ba-input" @bind="search" @bind:event="oninput"
+                                       placeholder="Bank name / account no / IBAN" />
+                            </div>
+                            <div class="col-12 col-md-4">
+                                <label class="form-label text-soft">Status</label>
+                                <select class="form-select ba-select" @bind="activeFilter">
+                                    <option value="active">Active</option>
+                                    <option value="inactive">Inactive</option>
+                                    <option value="all">All</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="ba-table mt-3">
+                            <table class="table table-hover align-middle">
+                                <thead>
+                                    <tr>
+                                        <th>Bank</th>
+                                        <th>Account</th>
+                                        <th>GL Mapping</th>
+                                        <th class="text-end">Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var b in Filtered())
+                                    {
+                                        <tr style="cursor:pointer" @onclick="@(() => Edit(b.BankAccountId))">
+                                            <td class="fw-semibold">@b.BankName</td>
+                                            <td>
+                                                <div>@b.AccountNo</div>
+                                                @if (!string.IsNullOrWhiteSpace(b.IBAN))
+                                                {
+                                                    <div class="text-muted small">IBAN: @b.IBAN</div>
+                                                }
+                                            </td>
+                                            <td>
+                                                @if (b.GlAccountNo.HasValue)
+                                                {
+                                                    <span class="badge bg-success">@b.GlAccountNo</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="badge bg-warning text-dark">Not Set</span>
+                                                }
+                                            </td>
+                                            <td class="text-end">
+                                                <span class="badge @(b.IsActive ? "bg-primary" : "bg-secondary")">
+                                                    @(b.IsActive ? "Active" : "Inactive")
+                                                </span>
+                                            </td>
+                                        </tr>
+                                    }
+                                    @if (!Filtered().Any())
+                                    {
+                                        <tr>
+                                            <td colspan="4" class="text-center text-muted py-4">No bank accounts.</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <div class="text-muted small mt-2">
+                            Tip: Map <b>GlAccountNo</b> to your COA “Bank” ledger account (example: 1010 / 1020 etc).
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-12 col-lg-5">
+                <div class="ba-card">
+                    <div class="ba-head">
+                        <div>@(editId == 0 ? "Add Bank" : "Edit Bank")</div>
+                        <div class="text-soft small">Save → used in Bank Reconcile</div>
+                    </div>
+                    <div class="ba-body">
+
+                        <div class="row g-2">
+                            <div class="col-12">
+                                <label class="form-label text-soft">Bank Name</label>
+                                <input class="form-control ba-input" @bind="form.BankName" />
+                            </div>
+
+                            <div class="col-12 col-md-6">
+                                <label class="form-label text-soft">Account No</label>
+                                <input class="form-control ba-input" @bind="form.AccountNo" />
+                            </div>
+
+                            <div class="col-12 col-md-6">
+                                <label class="form-label text-soft">Currency</label>
+                                <input class="form-control ba-input" @bind="form.Currency" />
+                            </div>
+
+                            <div class="col-12">
+                                <label class="form-label text-soft">IBAN (optional)</label>
+                                <input class="form-control ba-input" @bind="form.IBAN" />
+                            </div>
+
+                            <div class="col-12">
+                                <label class="form-label text-soft">Mapped Bank GL (ChartOfAccounts.AccountNo)</label>
+                                <select class="form-select ba-select" @bind="form.GlAccountNo">
+                                    <option value="">-- Select Bank GL Account --</option>
+                                    @foreach (var a in coa)
+                                    {
+                                        <option value="@a.AccountNo">@a.AccountNo - @a.AccountName</option>
+                                    }
+                                </select>
+                                <div class="text-muted small mt-1">
+                                    This <b>GL</b> number is used in matching and auto posting.
+                                </div>
+                            </div>
+
+                            <div class="col-12 d-flex align-items-center gap-2 mt-1">
+                                <input class="form-check-input" type="checkbox" id="isActive" @bind="form.IsActive" />
+                                <label class="form-check-label text-soft" for="isActive">Active</label>
+                            </div>
+                        </div>
+
+                        <div class="ba-actions d-flex gap-2 flex-wrap mt-3">
+                            <button class="btn btn-primary" type="button" @onclick="Save" disabled="@saving">
+                                @(saving ? "Saving..." : "Save")
+                            </button>
+
+                            @if (editId != 0)
+                            {
+                                <button class="btn btn-outline-light" type="button" @onclick="NewForm" disabled="@saving">New</button>
+                            }
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+@code {
+    string? err, msg;
+    bool saving;
+
+    List<BankAccount> bankAccounts = new();
+    List<ChartOfAccount> coa = new();
+
+    string search = "";
+    string activeFilter = "active";
+
+    int editId = 0;
+    BankAccount form = new();
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    async Task Load()
+    {
+        err = msg = null;
+        var companyId = CurrentCompany.CompanyId;
+
+        coa = await Db.ChartOfAccounts.AsNoTracking()
+            .Where(x => x.CompanyId == companyId && x.IsActive)
+            .OrderBy(x => x.AccountNo)
+            .ToListAsync();
+
+        bankAccounts = await Db.BankAccounts.AsNoTracking()
+            .Where(x => x.CompanyId == companyId)
+            .OrderByDescending(x => x.BankAccountId)
+            .ToListAsync();
+
+        if (editId == 0) NewForm();
+    }
+
+    IEnumerable<BankAccount> Filtered()
+    {
+        IEnumerable<BankAccount> q = bankAccounts;
+
+        if (activeFilter == "active") q = q.Where(x => x.IsActive);
+        else if (activeFilter == "inactive") q = q.Where(x => !x.IsActive);
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var s = search.Trim();
+            q = q.Where(x =>
+                (x.BankName ?? "").Contains(s, StringComparison.OrdinalIgnoreCase) ||
+                (x.AccountNo ?? "").Contains(s, StringComparison.OrdinalIgnoreCase) ||
+                (x.IBAN ?? "").Contains(s, StringComparison.OrdinalIgnoreCase));
+        }
+
+        return q;
+    }
+
+    void OpenNew() => NewForm();
+
+    void NewForm()
+    {
+        editId = 0;
+        form = new BankAccount
+            {
+                CompanyId = CurrentCompany.CompanyId,
+                Currency = "AED",
+                IsActive = true
+            };
+    }
+
+    async Task Edit(int id)
+    {
+        err = msg = null;
+        var companyId = CurrentCompany.CompanyId;
+
+        var item = await Db.BankAccounts.FirstOrDefaultAsync(x => x.CompanyId == companyId && x.BankAccountId == id);
+        if (item == null) return;
+
+        editId = id;
+        form = item;
+    }
+
+    async Task Save()
+    {
+        err = msg = null;
+
+        if (string.IsNullOrWhiteSpace(form.BankName)) { err = "Bank name required."; return; }
+        if (string.IsNullOrWhiteSpace(form.AccountNo)) { err = "Account number required."; return; }
+        if (!form.GlAccountNo.HasValue || form.GlAccountNo.Value <= 0) { err = "Select Bank GL mapping (GlAccountNo)."; return; }
+
+        saving = true;
+        try
+        {
+            if (editId == 0)
+            {
+                form.CompanyId = CurrentCompany.CompanyId;
+                Db.BankAccounts.Add(form);
+            }
+            else
+            {
+                Db.BankAccounts.Update(form);
+            }
+
+            await Db.SaveChangesAsync();
+            msg = "Saved successfully.";
+            await Load();
+        }
+        catch (Exception ex) { err = ex.Message; }
+        finally { saving = false; }
+    }
+}

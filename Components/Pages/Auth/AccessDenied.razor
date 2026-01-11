@@ -1,0 +1,25 @@
+﻿@page "/access-denied"
+@inject NavigationManager Nav
+
+@code {
+    private string? _returnUrl;
+
+    protected override void OnInitialized()
+    {
+        var uri = Nav.ToAbsoluteUri(Nav.Uri);
+        if (Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(uri.Query)
+            .TryGetValue("returnUrl", out var v))
+        {
+            _returnUrl = v.ToString();
+        }
+    }
+
+    private void GoHome() => Nav.NavigateTo("/");
+    private void GoBack()
+    {
+        if (!string.IsNullOrWhiteSpace(_returnUrl))
+            Nav.NavigateTo(_returnUrl!);
+        else
+            Nav.NavigateTo("/");
+    }
+}

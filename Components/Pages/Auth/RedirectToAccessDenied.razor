@@ -1,0 +1,12 @@
+﻿@inject NavigationManager Nav
+
+@code {
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        // current url encode
+        var returnUrl = Uri.EscapeDataString(Nav.Uri.Replace(Nav.BaseUri, "/"));
+        Nav.NavigateTo($"/access-denied?returnUrl={returnUrl}", forceLoad: false);
+    }
+}

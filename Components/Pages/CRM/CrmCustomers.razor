@@ -1,0 +1,536 @@
+﻿@page "/crm/customers"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+
+@using UaeEInvoice.Services.CRM
+@using UaeEInvoice.Services.Auth
+@inject CustomerHubService Hub
+@inject ICurrentCompany CurrentCompany
+
+<style>
+    :root {
+        --bg0: #070a12;
+        --bg1: #0b1220;
+        --bg2: #0f1a2e;
+        --card: rgba(255,255,255,.06);
+        --bd: rgba(255,255,255,.12);
+        --tx: rgba(255,255,255,.92);
+        --mut: rgba(255,255,255,.62);
+        --sh: 0 22px 80px rgba(0,0,0,.55);
+        --sh2: 0 12px 40px rgba(0,0,0,.35);
+    }
+
+    .wrap {
+        background: radial-gradient(1200px 680px at 10% -10%, rgba(34,197,94,.22), transparent 60%), radial-gradient(980px 580px at 92% -5%, rgba(59,130,246,.22), transparent 60%), radial-gradient(800px 520px at 40% 110%, rgba(168,85,247,.16), transparent 55%), linear-gradient(180deg, var(--bg1), var(--bg0) 70%);
+        min-height: calc(100vh - 70px);
+        border-radius: 24px;
+        padding: 18px;
+        color: var(--tx);
+        box-shadow: var(--sh);
+        border: 1px solid rgba(255,255,255,.08);
+    }
+
+    .hero {
+        border-radius: 22px;
+        padding: 16px;
+        border: 1px solid var(--bd);
+        box-shadow: var(--sh2);
+        background: linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,.03));
+        backdrop-filter: blur(12px);
+    }
+
+    .mut {
+        color: var(--mut);
+    }
+
+    .title {
+        font-weight: 950;
+        letter-spacing: .2px;
+    }
+
+    .btn {
+        border-radius: 14px;
+        font-weight: 900;
+    }
+
+    .inp {
+        border-radius: 14px !important;
+        background: rgba(255,255,255,.94) !important;
+        border: 1px solid rgba(15,23,42,.16) !important;
+        box-shadow: 0 10px 20px rgba(0,0,0,.12);
+    }
+
+    .tile {
+        border-radius: 18px;
+        border: 1px solid rgba(255,255,255,.12);
+        background: rgba(255,255,255,.07);
+        box-shadow: 0 12px 28px rgba(0,0,0,.22);
+        padding: 14px 14px;
+        position: relative;
+        overflow: hidden;
+    }
+
+        .tile:before {
+            content: "";
+            position: absolute;
+            inset: -40% -20%;
+            background: radial-gradient(closest-side, rgba(255,255,255,.14), transparent 70%);
+            transform: rotate(12deg);
+            pointer-events: none;
+        }
+
+        .tile .lbl {
+            color: var(--mut);
+            font-size: .82rem;
+        }
+
+        .tile .val {
+            font-size: 1.65rem;
+            font-weight: 950;
+            letter-spacing: .2px;
+        }
+
+    .cardx {
+        border-radius: 22px;
+        border: 1px solid rgba(255,255,255,.10);
+        background: rgba(255,255,255,.06);
+        box-shadow: 0 14px 35px rgba(0,0,0,.25);
+        overflow: hidden;
+    }
+
+    .head {
+        padding: 14px 16px;
+        border-bottom: 1px solid rgba(255,255,255,.08);
+        font-weight: 950;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
+        background: linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.02));
+    }
+
+    /* ---- Premium table wrapper ---- */
+    .table-wrap {
+        background: #ffffff;
+        color: #0f172a;
+        border-radius: 18px;
+        border: 1px solid rgba(15,23,42,.10);
+        overflow: hidden;
+    }
+
+    .table-responsive {
+        margin: 0;
+    }
+
+    table.crm {
+        width: 100%;
+        border-collapse: separate;
+        border-spacing: 0;
+        font-size: .94rem;
+    }
+
+        table.crm thead th {
+            position: sticky;
+            top: 0;
+            z-index: 2;
+            background: #f1f5f9;
+            font-size: .78rem;
+            text-transform: uppercase;
+            letter-spacing: .08em;
+            color: rgba(15,23,42,.68);
+            padding: 12px 12px;
+            border-bottom: 1px solid rgba(15,23,42,.10);
+            white-space: nowrap;
+        }
+
+        table.crm tbody td {
+            padding: 14px 12px;
+            border-bottom: 1px solid rgba(15,23,42,.08);
+            vertical-align: middle;
+        }
+
+        table.crm tbody tr:nth-child(odd) {
+            background: #ffffff;
+        }
+
+        table.crm tbody tr:nth-child(even) {
+            background: #f8fafc;
+        }
+
+        table.crm tbody tr:hover {
+            background: #eef2ff;
+            transition: .12s ease-in-out;
+        }
+
+    .col-customer {
+        min-width: 260px;
+        font-weight: 900;
+    }
+
+    .pill {
+        display: inline-flex;
+        align-items: center;
+        padding: .30rem .65rem;
+        border-radius: 999px;
+        font-weight: 900;
+        font-size: .78rem;
+        line-height: 1;
+    }
+
+    .pill-b2b {
+        background: #1d4ed8;
+        color: #fff;
+    }
+
+    .pill-b2c {
+        background: #16a34a;
+        color: #fff;
+    }
+
+    .money {
+        font-variant-numeric: tabular-nums;
+        text-align: right;
+        white-space: nowrap;
+        font-weight: 900;
+    }
+
+        .money.soft {
+            font-weight: 800;
+            color: rgba(2,6,23,.85);
+        }
+
+        .money.big {
+            font-size: 1.02rem;
+            color: #0f172a;
+        }
+
+    .risk {
+        display: inline-flex;
+        align-items: center;
+        gap: .35rem;
+        padding: .30rem .65rem;
+        border-radius: 999px;
+        font-weight: 950;
+        font-size: .78rem;
+        letter-spacing: .04em;
+    }
+
+    .risk-green {
+        background: rgba(22,163,74,.16);
+        color: #166534;
+        border: 1px solid rgba(22,163,74,.28);
+    }
+
+    .risk-amber {
+        background: rgba(234,179,8,.18);
+        color: #854d0e;
+        border: 1px solid rgba(234,179,8,.30);
+    }
+
+    .risk-red {
+        background: rgba(239,68,68,.16);
+        color: #7f1d1d;
+        border: 1px solid rgba(239,68,68,.28);
+    }
+
+    .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        display: inline-block;
+    }
+
+    .dot-green {
+        background: #16a34a;
+    }
+
+    .dot-amber {
+        background: #eab308;
+    }
+
+    .dot-red {
+        background: #ef4444;
+    }
+
+    .mini {
+        font-size: .82rem;
+        color: rgba(15,23,42,.70);
+        white-space: nowrap;
+    }
+
+    .btn-open {
+        border-radius: 12px;
+        font-weight: 950;
+        padding: .35rem .7rem;
+    }
+
+    .right {
+        text-align: right;
+        white-space: nowrap;
+    }
+</style>
+
+<div class="container-xxl py-4">
+    <div class="wrap">
+
+        <div class="hero mb-3">
+            <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+                <div>
+                    <div class="title h3 mb-1">CRM — Customer Hub</div>
+                    <div class="mut">Today: <b>@_asOf.ToString("dd-MMM-yyyy")</b> | CompanyId: <b>@_companyId</b></div>
+                    <div class="mut">Collections dashboard: Outstanding • Overdue • Follow-ups • Risk</div>
+                </div>
+                <div class="d-flex gap-2">
+                    <button class="btn btn-light" @onclick="Load" disabled="@_loading">@(_loading ? "Loading..." : "Refresh")</button>
+                </div>
+            </div>
+
+            <div class="row g-2 align-items-end mt-3">
+                <div class="col-12 col-md-4">
+                    <label class="form-label mut">Search</label>
+                    <input class="form-control inp" @bind="_search" @bind:event="oninput" placeholder="Customer name / TRN / City..." />
+                </div>
+                <div class="col-12 col-md-2">
+                    <label class="form-label mut">Type</label>
+                    <select class="form-select inp" @bind="_type">
+                        <option value="">All</option>
+                        <option value="B2B">B2B</option>
+                        <option value="B2C">B2C</option>
+                    </select>
+                </div>
+                <div class="col-12 col-md-2">
+                    <label class="form-label mut">Risk</label>
+                    <select class="form-select inp" @bind="_risk">
+                        <option value="">All</option>
+                        <option value="Red">Red</option>
+                        <option value="Amber">Amber</option>
+                        <option value="Green">Green</option>
+                    </select>
+                </div>
+                <div class="col-12 col-md-2">
+                    <label class="form-label mut">Follow-up</label>
+                    <select class="form-select inp" @bind="_followUp">
+                        <option value="">All</option>
+                        <option value="today">Due Today</option>
+                        <option value="overdue">Overdue Follow-ups</option>
+                        <option value="none">No Follow-up Set</option>
+                    </select>
+                </div>
+                <div class="col-12 col-md-2 d-grid">
+                    <button class="btn btn-primary" @onclick="Load" disabled="@_loading">Apply</button>
+                </div>
+            </div>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(_err))
+        {
+            <div class="alert alert-danger py-2">@_err</div>
+        }
+
+        @if (_vm == null)
+        {
+            <div class="cardx"><div class="p-5 text-center mut">No data.</div></div>
+        }
+        else
+        {
+            <div class="row g-3 mb-3">
+                <div class="col-12 col-md-3">
+                    <div class="tile">
+                        <div class="lbl">Total Customers</div>
+                        <div class="val">@_vm.Summary.TotalCustomers</div>
+                    </div>
+                </div>
+                <div class="col-12 col-md-3">
+                    <div class="tile">
+                        <div class="lbl">Total Outstanding</div>
+                        <div class="val">@_vm.Summary.TotalOutstanding.ToString("0.00")</div>
+                    </div>
+                </div>
+                <div class="col-12 col-md-3">
+                    <div class="tile">
+                        <div class="lbl">Overdue Invoices</div>
+                        <div class="val">@_vm.Summary.TotalOverdueInvoices</div>
+                    </div>
+                </div>
+                <div class="col-12 col-md-3">
+                    <div class="tile">
+                        <div class="lbl">Follow-ups Due Today</div>
+                        <div class="val">@_vm.Summary.FollowUpsDueToday</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="cardx">
+                <div class="head">
+                    <div>Customer Hub List</div>
+                    <div class="mut small">Rows: <b>@Filtered().Count()</b></div>
+                </div>
+
+                <div class="p-3">
+                    <div class="table-wrap">
+                        <div class="table-responsive" style="max-height: 520px;">
+                            <table class="crm">
+                                <thead>
+                                    <tr>
+                                        <th class="col-customer">Customer</th>
+                                        <th style="width:90px;">Type</th>
+                                        <th style="width:140px;">City</th>
+                                        <th style="width:170px;">TRN</th>
+                                        <th class="right" style="width:150px;">Outstanding</th>
+                                        <th class="right" style="width:90px;">Overdue</th>
+                                        <th style="width:135px;">Last Inv</th>
+                                        <th style="width:135px;">Last Pay</th>
+                                        <th style="width:160px;">Next Follow-up</th>
+                                        <th style="width:110px;">Risk</th>
+                                        <th style="width:110px;">Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var r in Filtered())
+                                    {
+                                        <tr>
+                                            <td class="col-customer">@r.Name</td>
+                                            <td>
+                                                <span class="pill @(r.CustomerType=="B2B" ? "pill-b2b" : "pill-b2c")">@r.CustomerType</span>
+                                            </td>
+                                            <td>@(string.IsNullOrWhiteSpace(r.City) ? "—" : r.City)</td>
+                                            <td>@(string.IsNullOrWhiteSpace(r.TRN) ? "—" : r.TRN)</td>
+
+                                            <td class="money big">@r.Outstanding.ToString("0.00")</td>
+                                            <td class="money soft">@r.OverdueCount</td>
+
+                                            <td class="mini">@(r.LastInvoiceDate?.ToString("dd-MMM-yyyy") ?? "—")</td>
+                                            <td class="mini">@(r.LastPaymentDate?.ToString("dd-MMM-yyyy") ?? "—")</td>
+
+                                            <td class="mini">
+                                                @if (r.NextFollowUpDate.HasValue)
+                                                {
+                                                    @r.NextFollowUpDate.Value.ToString("dd-MMM-yyyy")
+                                                }
+                                                else
+                                                {
+                                                    <span class="text-muted">—</span>
+                                                }
+                                            </td>
+
+                                            <td>
+                                                @if (r.Risk == "Red")
+                                                {
+                                                    <span class="risk risk-red"><span class="dot dot-red"></span>RED</span>
+                                                }
+                                                else if (r.Risk == "Amber")
+                                                {
+                                                    <span class="risk risk-amber"><span class="dot dot-amber"></span>AMBER</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="risk risk-green"><span class="dot dot-green"></span>GREEN</span>
+                                                }
+                                            </td>
+                                            <td>
+                                                <a class="btn btn-sm btn-primary btn-open" href="@($"/crm/customer/{r.CustomerId}")">Open</a>
+                                            </td>
+                                        </tr>
+                                    }
+
+                                    @if (!Filtered().Any())
+                                    {
+                                        <tr>
+                                            <td colspan="11" class="text-center text-muted py-4">No matching customers</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div class="mut small mt-2">
+                        Risk logic: Green = no overdue • Amber = overdue ≤ 30 days • Red = overdue &gt; 30 days.
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    int _companyId;
+    bool _loading;
+    string? _err;
+
+    DateTime _asOf = DateTime.Today;
+
+    string _search = "";
+    string _type = "";
+    string _risk = "";
+    string _followUp = "";
+
+    CustomerHubService.CustomerHubDto? _vm;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CurrentCompany.RefreshAsync();
+        _companyId = CurrentCompany.CompanyId;
+        await Load();
+    }
+
+    async Task Load()
+    {
+        if (_loading) return;
+        _loading = true;
+        _err = null;
+
+        try
+        {
+            await CurrentCompany.RefreshAsync();
+            _companyId = CurrentCompany.CompanyId;
+            if (_companyId <= 0) throw new Exception("Company not resolved.");
+
+            _asOf = DateTime.Today;
+            _vm = await Hub.GetAsync(_companyId, _asOf);
+        }
+        catch (Exception ex)
+        {
+            _vm = null;
+            _err = ex.InnerException?.Message ?? ex.Message;
+        }
+        finally { _loading = false; }
+    }
+
+    IEnumerable<CustomerHubService.CustomerHubRow> Filtered()
+    {
+        if (_vm == null) return Enumerable.Empty<CustomerHubService.CustomerHubRow>();
+
+        var q = _vm.Rows.AsEnumerable();
+
+        if (!string.IsNullOrWhiteSpace(_type))
+            q = q.Where(x => (x.CustomerType ?? "") == _type);
+
+        if (!string.IsNullOrWhiteSpace(_risk))
+            q = q.Where(x => (x.Risk ?? "") == _risk);
+
+        if (!string.IsNullOrWhiteSpace(_followUp))
+        {
+            var today = DateTime.Today.Date;
+
+            if (_followUp == "today")
+                q = q.Where(x => x.NextFollowUpDate.HasValue && x.NextFollowUpDate.Value.Date == today);
+
+            if (_followUp == "overdue")
+                q = q.Where(x => x.NextFollowUpDate.HasValue && x.NextFollowUpDate.Value.Date < today);
+
+            if (_followUp == "none")
+                q = q.Where(x => !x.NextFollowUpDate.HasValue);
+        }
+
+        if (!string.IsNullOrWhiteSpace(_search))
+        {
+            var s = _search.Trim();
+            q = q.Where(x =>
+                (x.Name ?? "").Contains(s, StringComparison.OrdinalIgnoreCase) ||
+                (x.TRN ?? "").Contains(s, StringComparison.OrdinalIgnoreCase) ||
+                (x.City ?? "").Contains(s, StringComparison.OrdinalIgnoreCase));
+        }
+
+        return q;
+    }
+}

@@ -1,0 +1,465 @@
+﻿@page "/profit-loss"
+
+@using System.Reflection
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.AspNetCore.Components.Forms
+
+@using UaeEInvoice.Data
+
+
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject AuthenticationStateProvider AuthStateProvider
+@inject UserManager<ApplicationUser> UserManager
+
+<h1 class="mb-1">Profit &amp; Loss</h1>
+<p class="text-muted mb-4">Revenue vs Expense summary for selected period.</p>
+
+<div class="pl-hero mb-4">
+    <div class="pl-controls">
+        <div class="pl-field">
+            <label class="form-label">From</label>
+            <InputDate TValue="DateTime" class="form-control" @bind-Value="From" />
+        </div>
+
+        <div class="pl-field">
+            <label class="form-label">To</label>
+            <InputDate TValue="DateTime" class="form-control" @bind-Value="To" />
+        </div>
+
+        <div class="pl-actions">
+            <button class="btn btn-primary px-4" @onclick="ApplyAsync" disabled="@_loading">Apply Filter</button>
+            <button class="btn btn-outline-secondary px-4" @onclick="ClearAsync" disabled="@_loading">Clear</button>
+        </div>
+
+        <div class="pl-kpis">
+            <div class="pl-kpi">
+                <div class="pl-kpi-label">Revenue</div>
+                <div class="pl-kpi-value">@RevenueTotal.ToString("0.00")</div>
+            </div>
+            <div class="pl-kpi">
+                <div class="pl-kpi-label">Expense</div>
+                <div class="pl-kpi-value">@ExpenseTotal.ToString("0.00")</div>
+            </div>
+            <div class="pl-kpi">
+                <div class="pl-kpi-label">Net Profit</div>
+                <div class="pl-kpi-value">@NetProfit.ToString("0.00")</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="pl-period text-muted">
+        Period: @From.ToString("dd-MM-yyyy") → @To.ToString("dd-MM-yyyy")
+    </div>
+
+    @if (_debug)
+    {
+        <div class="mt-2 text-muted small text-center">
+            Debug: LedgerEntry rows: @_dbgLedgerRows | RevenueFromLedger: @_dbgRevenueFromLedger | RevenueFromInvoiceFallback: @_dbgRevenueFromInvoice
+        </div>
+    }
+</div>
+
+@if (!string.IsNullOrWhiteSpace(_error))
+{
+    <div class="alert alert-danger">@_error</div>
+}
+
+<div class="row g-4">
+    <div class="col-lg-6">
+        <div class="pl-card">
+            <div class="pl-card-head">
+                <div class="pl-card-title">Revenue</div>
+                <div class="pl-card-total">Total: @RevenueTotal.ToString("0.00")</div>
+            </div>
+
+            <table class="table mb-0">
+                <thead>
+                    <tr>
+                        <th>ACCOUNT</th>
+                        <th class="text-end">AMOUNT</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (RevenueRows.Count == 0)
+                    {
+                        <tr><td colspan="2" class="text-center text-muted py-4">No revenue in range.</td></tr>
+                    }
+                    else
+                    {
+                        @foreach (var r in RevenueRows)
+                        {
+                            <tr>
+                                <td>@r.AccountName (@r.AccountNo)</td>
+                                <td class="text-end">@r.Amount.ToString("0.00")</td>
+                            </tr>
+                        }
+                        <tr class="fw-bold">
+                            <td>Total Revenue</td>
+                            <td class="text-end">@RevenueTotal.ToString("0.00")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="col-lg-6">
+        <div class="pl-card">
+            <div class="pl-card-head">
+                <div class="pl-card-title">Expenses</div>
+                <div class="pl-card-total">Total: @ExpenseTotal.ToString("0.00")</div>
+            </div>
+
+            <table class="table mb-0">
+                <thead>
+                    <tr>
+                        <th>ACCOUNT</th>
+                        <th class="text-end">AMOUNT</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (ExpenseRows.Count == 0)
+                    {
+                        <tr><td colspan="2" class="text-center text-muted py-4">No expenses in range.</td></tr>
+                    }
+                    else
+                    {
+                        @foreach (var r in ExpenseRows)
+                        {
+                            <tr>
+                                <td>@r.AccountName (@r.AccountNo)</td>
+                                <td class="text-end">@r.Amount.ToString("0.00")</td>
+                            </tr>
+                        }
+                        <tr class="fw-bold">
+                            <td>Total Expense</td>
+                            <td class="text-end">@ExpenseTotal.ToString("0.00")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<style>
+    .pl-hero {
+        border-radius: 18px;
+        background: linear-gradient(135deg, rgba(13,110,253,.08), rgba(0,0,0,0));
+        padding: 18px;
+        box-shadow: 0 14px 40px rgba(0,0,0,.06);
+    }
+
+    .pl-controls {
+        display: grid;
+        grid-template-columns: 1fr 1fr auto 1.3fr;
+        gap: 14px;
+        align-items: end;
+    }
+
+    .pl-field .form-control {
+        border-radius: 14px;
+    }
+
+    .pl-actions {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+    }
+
+    .pl-kpis {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 12px;
+    }
+
+    .pl-kpi {
+        background: #fff;
+        border-radius: 16px;
+        padding: 14px 16px;
+        box-shadow: 0 10px 26px rgba(0,0,0,.06);
+    }
+
+    .pl-kpi-label {
+        font-size: .9rem;
+        color: #6c757d;
+    }
+
+    .pl-kpi-value {
+        font-size: 1.55rem;
+        font-weight: 800;
+    }
+
+    .pl-period {
+        margin-top: 10px;
+        text-align: center;
+    }
+
+    .pl-card {
+        background: #fff;
+        border-radius: 18px;
+        box-shadow: 0 14px 40px rgba(0,0,0,.06);
+        overflow: hidden;
+    }
+
+    .pl-card-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 14px 16px;
+        border-bottom: 1px solid rgba(0,0,0,.08);
+    }
+
+    .pl-card-title {
+        font-weight: 800;
+        font-size: 1.05rem;
+    }
+
+    .pl-card-total {
+        color: #6c757d;
+        font-weight: 600;
+    }
+
+    @@media (max-width: 992px) {
+        .pl-controls {
+            grid-template-columns: 1fr 1fr;
+        }
+
+        .pl-actions {
+            grid-column: 1 / -1;
+        }
+
+        .pl-kpis {
+            grid-column: 1 / -1;
+        }
+    }
+</style>
+
+@code {
+    private bool _loading;
+    private string? _error;
+
+    private DateTime From = DateTime.Today.AddDays(-29);
+    private DateTime To = DateTime.Today;
+
+    private List<PnLRow> RevenueRows = new();
+    private List<PnLRow> ExpenseRows = new();
+
+    private decimal RevenueTotal => RevenueRows.Sum(x => x.Amount);
+    private decimal ExpenseTotal => ExpenseRows.Sum(x => x.Amount);
+    private decimal NetProfit => RevenueTotal - ExpenseTotal;
+
+    // debug counters
+    private bool _debug = true;
+    private int _dbgLedgerRows;
+    private decimal _dbgRevenueFromLedger;
+    private decimal _dbgRevenueFromInvoice;
+
+    protected override async Task OnInitializedAsync() => await ApplyAsync();
+
+    private async Task<int> GetLoggedInCompanyIdAsync()
+    {
+        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = auth.User;
+
+        if (user?.Identity?.IsAuthenticated != true)
+            return 0;
+
+        var appUser = await UserManager.GetUserAsync(user);
+        return appUser?.CompanyId ?? 0;
+    }
+
+    private async Task ApplyAsync()
+    {
+        _error = null;
+        _loading = true;
+
+        try
+        {
+            var companyId = await GetLoggedInCompanyIdAsync();
+            if (companyId <= 0) throw new Exception("Company not detected for logged-in user.");
+
+            var fromDate = From.Date;
+            var toExclusive = To.Date.AddDays(1);
+
+            await using var db = await DbFactory.CreateDbContextAsync();
+
+            // Accounts master (NO AccountId!)
+            var accounts = await db.Set<ChartOfAccount>()
+                .AsNoTracking()
+                .Where(a => a.CompanyId == companyId)
+                .Select(a => new { a.AccountNo, a.AccountName })
+                .ToListAsync();
+
+            var nameByNo = accounts.ToDictionary(x => x.AccountNo, x => x.AccountName);
+
+            // account ranges
+            var revenueAccNos = accounts.Where(a => a.AccountNo >= 4000 && a.AccountNo < 5000)
+                .Select(a => a.AccountNo).ToHashSet();
+
+            var expenseAccNos = accounts.Where(a => a.AccountNo >= 5000 && a.AccountNo < 6000)
+                .Select(a => a.AccountNo).ToHashSet();
+
+            // LedgerEntry transactions
+            var ledger = await db.Set<LedgerEntry>()
+                .AsNoTracking()
+                .Where(l => l.CompanyId == companyId && l.TxnDate >= fromDate && l.TxnDate < toExclusive)
+                .Select(l => new GLRow { AccountNo = l.AccountNo, Debit = l.Debit, Credit = l.Credit })
+                .ToListAsync();
+
+            _dbgLedgerRows = ledger.Count;
+
+            // Revenue from ledger = Credit - Debit
+            var revenueFromLedger = ledger
+                .Where(x => revenueAccNos.Contains(x.AccountNo))
+                .GroupBy(x => x.AccountNo)
+                .Select(g => new { AccountNo = g.Key, Amount = g.Sum(z => z.Credit - z.Debit) })
+                .Where(x => x.Amount != 0)
+                .OrderByDescending(x => x.Amount)
+                .ToList();
+
+            _dbgRevenueFromLedger = revenueFromLedger.Sum(x => x.Amount);
+
+            // Expense from ledger = Debit - Credit
+            var expenseGrouped = ledger
+                .Where(x => expenseAccNos.Contains(x.AccountNo))
+                .GroupBy(x => x.AccountNo)
+                .Select(g => new { AccountNo = g.Key, Amount = g.Sum(z => z.Debit - z.Credit) })
+                .Where(x => x.Amount != 0)
+                .OrderByDescending(x => x.Amount)
+                .ToList();
+
+            RevenueRows = revenueFromLedger.Select(x => new PnLRow
+                {
+                    AccountNo = x.AccountNo,
+                    AccountName = nameByNo.TryGetValue(x.AccountNo, out var n) ? n : "Sales Revenue",
+                    Amount = x.Amount
+                }).ToList();
+
+            ExpenseRows = expenseGrouped.Select(x => new PnLRow
+                {
+                    AccountNo = x.AccountNo,
+                    AccountName = nameByNo.TryGetValue(x.AccountNo, out var n) ? n : "Expense",
+                    Amount = x.Amount
+                }).ToList();
+
+            // ✅ FALLBACK: If revenue missing in ledger, calculate from Invoice table totals (reflection)
+            if (RevenueRows.Count == 0)
+            {
+                var allInv = await db.Set<Invoice>().AsNoTracking().ToListAsync();
+
+                decimal invRevenue = 0m;
+
+                foreach (var inv in allInv)
+                {
+                    var invCompanyId = UtilGetInt(inv, "CompanyId");
+                    if (invCompanyId != companyId) continue;
+
+                    var dt = UtilGetDate(inv, "InvoiceDate", "InvDate", "Date", "TxnDate", "DocDate");
+                    if (dt == null) continue;
+
+                    var d = dt.Value.Date;
+                    if (d < fromDate || d >= toExclusive) continue;
+
+                    var total = UtilGetDec(inv, "GrandTotal", "NetTotal", "Total", "TotalAmount", "Amount");
+                    if (total == 0m)
+                    {
+                        // if no total field, try: SubTotal - Discount + Vat etc
+                        var sub = UtilGetDec(inv, "SubTotal", "Subtotal");
+                        var disc = UtilGetDec(inv, "Discount", "DiscountAmount");
+                        var vat = UtilGetDec(inv, "Vat", "VAT", "VatAmount", "Tax", "TaxAmount");
+                        total = (sub - disc) + vat;
+                    }
+
+                    invRevenue += total;
+                }
+
+                _dbgRevenueFromInvoice = invRevenue;
+
+                if (invRevenue != 0m)
+                {
+                    RevenueRows = new List<PnLRow>
+                    {
+                        new PnLRow { AccountNo = 4000, AccountName = nameByNo.TryGetValue(4000, out var n) ? n : "Sales Revenue", Amount = invRevenue }
+                    };
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            RevenueRows = new();
+            ExpenseRows = new();
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task ClearAsync()
+    {
+        From = DateTime.Today.AddDays(-29);
+        To = DateTime.Today;
+        await ApplyAsync();
+    }
+
+    // ---------- helpers (reflection safe) ----------
+    private static int UtilGetInt(object obj, params string[] names)
+    {
+        foreach (var n in names)
+        {
+            var p = obj.GetType().GetProperty(n, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+            if (p == null) continue;
+            var v = p.GetValue(obj);
+            if (v == null) continue;
+            if (v is int i) return i;
+            if (int.TryParse(v.ToString(), out var parsed)) return parsed;
+        }
+        return 0;
+    }
+
+    private static decimal UtilGetDec(object obj, params string[] names)
+    {
+        foreach (var n in names)
+        {
+            var p = obj.GetType().GetProperty(n, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+            if (p == null) continue;
+            var v = p.GetValue(obj);
+            if (v == null) continue;
+            if (v is decimal d) return d;
+            if (decimal.TryParse(v.ToString(), out var parsed)) return parsed;
+        }
+        return 0m;
+    }
+
+    private static DateTime? UtilGetDate(object obj, params string[] names)
+    {
+        foreach (var n in names)
+        {
+            var p = obj.GetType().GetProperty(n, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+            if (p == null) continue;
+            var v = p.GetValue(obj);
+            if (v == null) continue;
+            if (v is DateTime dt) return dt;
+            if (DateTime.TryParse(v.ToString(), out var parsed)) return parsed;
+        }
+        return null;
+    }
+
+    private sealed class PnLRow
+    {
+        public int AccountNo { get; set; }
+        public string AccountName { get; set; } = "";
+        public decimal Amount { get; set; }
+    }
+
+    private sealed class GLRow
+    {
+        public int AccountNo { get; set; }
+        public decimal Debit { get; set; }
+        public decimal Credit { get; set; }
+    }
+}

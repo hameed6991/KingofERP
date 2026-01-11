@@ -1,0 +1,39 @@
+﻿@using Microsoft.AspNetCore.Components.Routing
+
+<AuthorizeView>
+    <Authorized Context="auth">
+        <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+            <div class="container-xxl">
+                <a class="navbar-brand fw-semibold" href="/">UaeEInvoice</a>
+
+                <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#topnav"
+                        aria-controls="topnav" aria-expanded="false" aria-label="Toggle navigation">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+
+                <div class="collapse navbar-collapse" id="topnav">
+                    <ul class="navbar-nav me-auto align-items-lg-center">
+                        <li class="nav-item">
+                            <NavLink class="nav-link" href="/" Match="NavLinkMatch.All">Home</NavLink>
+                        </li>
+                        <li class="nav-item"><NavLink class="nav-link" href="/dashboard">Dashboard</NavLink></li>
+                        <li class="nav-item"><NavLink class="nav-link" href="/company-setup">Company Setup</NavLink></li>
+                        <li class="nav-item"><NavLink class="nav-link" href="/customers">Customers</NavLink></li>
+                        <li class="nav-item"><NavLink class="nav-link" href="/items">Items</NavLink></li>
+                        <li class="nav-item"><NavLink class="nav-link" href="/vendors">Vendors</NavLink></li>
+                        <li class="nav-item"><NavLink class="nav-link" href="/purchases">Purchases</NavLink></li>
+                        <li class="nav-item"><NavLink class="nav-link" href="/purchase-create">New Purchase</NavLink></li>
+                        <li class="nav-item"><NavLink class="nav-link" href="/inventory">Inventory</NavLink></li>
+                        <li class="nav-item"><NavLink class="nav-link" href="/invoice-create">Create Invoice</NavLink></li>
+                        <li class="nav-item"><NavLink class="nav-link" href="/invoices">Invoices</NavLink></li>
+                    </ul>
+
+                    <div class="d-flex align-items-center gap-3">
+                        <span class="text-white-50 small">@auth.User.Identity?.Name</span>
+                        <a class="btn btn-outline-light btn-sm" href="/logout">Logout</a>
+                    </div>
+                </div>
+            </div>
+        </nav>
+    </Authorized>
+</AuthorizeView>

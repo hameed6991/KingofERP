@@ -1,0 +1,353 @@
+﻿@page "/employee-edit/{Id:int}"
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Authorization
+@using UaeEInvoice.Data
+@using UaeEInvoice.Services.Auth
+
+@attribute [Authorize(Roles = "Admin")]
+
+@inject AppDbContext Db
+@inject NavigationManager Nav
+@inject ICurrentCompany CurrentCompany
+
+<style>
+    .soft-card {
+        border: 1px solid rgba(0,0,0,.06);
+        border-radius: 22px;
+        box-shadow: 0 10px 30px rgba(0,0,0,.06);
+        background: #fff;
+    }
+
+    .hero {
+        border-radius: 22px;
+        border: 1px solid rgba(0,0,0,.06);
+        background: linear-gradient(135deg, rgba(13,110,253,.10), rgba(255,255,255,0));
+        padding: 18px;
+    }
+
+    .title {
+        font-weight: 900;
+        letter-spacing: .2px;
+        margin: 0;
+    }
+
+    .muted {
+        color: rgba(0,0,0,.55);
+    }
+
+    .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: .45rem;
+        padding: .30rem .70rem;
+        border-radius: 999px;
+        border: 1px solid rgba(0,0,0,.08);
+        background: #fff;
+        font-size: .85rem;
+    }
+
+    .preview {
+        border-radius: 22px;
+        border: 1px solid rgba(0,0,0,.06);
+        background: linear-gradient(180deg, rgba(13,110,253,.06), rgba(0,0,0,0));
+        padding: 14px;
+    }
+
+    .kv {
+        display: flex;
+        justify-content: space-between;
+        padding: 8px 0;
+        border-bottom: 1px solid rgba(0,0,0,.06);
+    }
+
+        .kv:last-child {
+            border-bottom: 0;
+        }
+
+    .sticky {
+        position: sticky;
+        top: 18px;
+    }
+</style>
+
+<div class="container-xxl py-4">
+
+    <div class="hero mb-3">
+        <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+            <div>
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <h2 class="title">Edit Employee</h2>
+                    <span class="chip">✏️ Update</span>
+                    <span class="chip">👤 HR Master</span>
+                </div>
+                <div class="muted">Typing pannumbodhu crash varama safe binding. Net Pay preview live.</div>
+
+                <div class="d-flex flex-wrap gap-2 mt-2">
+                    <span class="chip">🏢 CompanyId: @_companyId</span>
+                    <span class="chip">🆔 Code: @(_e?.EmpCode ?? "—")</span>
+                    <span class="chip">💰 Net: @NetPay.ToString("0.00")</span>
+                </div>
+            </div>
+
+            <button class="btn btn-outline-secondary" type="button" @onclick="Back" disabled="@(_loading || _saving)">
+                Back
+            </button>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_error))
+    {
+        <div class="alert alert-danger soft-card p-3"><strong>Error:</strong> @_error</div>
+    }
+
+    @if (_loading)
+    {
+        <div class="soft-card p-4">
+            <div class="d-flex align-items-center gap-2">
+                <div class="spinner-border" role="status"></div>
+                <div class="fw-semibold">Loading employee...</div>
+            </div>
+        </div>
+    }
+    else if (_e == null)
+    {
+        <div class="alert alert-warning soft-card p-3">Employee not found.</div>
+    }
+    else
+    {
+        <div class="row g-3">
+            <div class="col-12 col-lg-8">
+                <div class="soft-card p-3 p-md-4">
+
+                    <EditForm Model="_e" OnValidSubmit="Save">
+                        <DataAnnotationsValidator />
+                        <ValidationSummary />
+
+                        <h5 class="fw-bold mb-1">Employee Info</h5>
+                        <div class="muted">Basic details</div>
+                        <hr />
+
+                        <div class="row g-3">
+                            <div class="col-12 col-md-4">
+                                <label class="form-label">Emp Code</label>
+                                <InputText class="form-control" @bind-Value="_e.EmpCode" readonly />
+                                <div class="form-text">Code cannot be changed.</div>
+                            </div>
+
+                            <div class="col-12 col-md-8">
+                                <label class="form-label">Employee Name <span class="text-danger">*</span></label>
+                                <InputText class="form-control" @bind-Value="_e.EmpName" placeholder="e.g., Mohamed Ali" />
+                            </div>
+
+                            <div class="col-12 col-md-4">
+                                <label class="form-label">Join Date</label>
+                                <InputDate class="form-control" @bind-Value="_e.JoinDate" />
+                            </div>
+
+                            <div class="col-12 col-md-8 d-flex align-items-center">
+                                <div class="form-check mt-4">
+                                    <InputCheckbox class="form-check-input" @bind-Value="_e.IsActive" />
+                                    <label class="form-check-label fw-semibold">Active</label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <hr />
+
+                        <h5 class="fw-bold mb-1">Compensation</h5>
+                        <div class="muted">Monthly salary components</div>
+                        <hr />
+
+                        <div class="row g-3">
+                            <div class="col-12 col-md-4">
+                                <label class="form-label">Basic Salary</label>
+                                <InputNumber class="form-control" @bind-Value="_e.BasicSalary" />
+                                <div class="form-text">Monthly base pay.</div>
+                            </div>
+
+                            <div class="col-12 col-md-4">
+                                <label class="form-label">Allowance</label>
+                                <InputNumber class="form-control" @bind-Value="_e.Allowance" />
+                                <div class="form-text">Housing / transport / other.</div>
+                            </div>
+
+                            <div class="col-12 col-md-4">
+                                <label class="form-label">Net Pay (Preview)</label>
+                                <input class="form-control" value="@NetPay.ToString("0.00")" readonly />
+                                <div class="form-text">Basic + Allowance (preview only).</div>
+                            </div>
+                        </div>
+
+                        <hr />
+
+                        <h5 class="fw-bold mb-1">Payment Details</h5>
+                        <div class="muted">How salary is paid</div>
+                        <hr />
+
+                        <div class="row g-3">
+                            <div class="col-12 col-md-4">
+                                <label class="form-label">Payment Method</label>
+                                <InputSelect class="form-select" @bind-Value="_e.PaymentMethod">
+                                    <option value="Bank">Bank</option>
+                                    <option value="Cash">Cash</option>
+                                </InputSelect>
+                                <div class="form-text">Cash selected → Bank fields disabled.</div>
+                            </div>
+
+                            <div class="col-12 col-md-4">
+                                <label class="form-label">Bank Name</label>
+                                <InputText class="form-control" @bind-Value="_e.BankName" disabled="@IsCash" placeholder="e.g., Emirates NBD" />
+                            </div>
+
+                            <div class="col-12 col-md-4">
+                                <label class="form-label">IBAN</label>
+                                <InputText class="form-control" @bind-Value="_e.IBAN" disabled="@IsCash" placeholder="AE12 3456 7890 1234 5678 901" />
+                            </div>
+
+                            <div class="col-12">
+                                <label class="form-label">Notes</label>
+                                <InputTextArea class="form-control" @bind-Value="_e.Notes" rows="3" />
+                            </div>
+                        </div>
+
+                        <hr />
+
+                        <div class="d-flex gap-2 justify-content-end">
+                            <button class="btn btn-outline-secondary" type="button" @onclick="Back" disabled="@_saving">
+                                Cancel
+                            </button>
+
+                            <button class="btn btn-primary" type="submit" disabled="@_saving">
+                                @(_saving ? "Saving..." : "Save Changes")
+                            </button>
+                        </div>
+
+                    </EditForm>
+                </div>
+            </div>
+
+            <div class="col-12 col-lg-4">
+                <div class="sticky">
+                    <div class="soft-card p-3">
+                        <h5 class="fw-bold mb-1">Preview</h5>
+                        <div class="muted small">Live preview while editing</div>
+
+                        <div class="preview mt-3">
+                            <div class="kv"><div class="muted">Employee</div><div class="fw-bold">@(_e.EmpName ?? "—")</div></div>
+                            <div class="kv"><div class="muted">Emp Code</div><div class="fw-bold">@(_e.EmpCode ?? "—")</div></div>
+                            <div class="kv"><div class="muted">Join Date</div><div class="fw-bold">@_e.JoinDate.ToString("dd-MMM-yyyy")</div></div>
+                            <div class="kv"><div class="muted">Status</div><div class="fw-bold">@(_e.IsActive ? "Active" : "Inactive")</div></div>
+                            <div class="kv"><div class="muted">Basic</div><div class="fw-bold">@_e.BasicSalary.ToString("0.00")</div></div>
+                            <div class="kv"><div class="muted">Allowance</div><div class="fw-bold">@_e.Allowance.ToString("0.00")</div></div>
+                            <div class="kv"><div class="muted">Net Pay</div><div class="fw-bold">@NetPay.ToString("0.00")</div></div>
+                            <div class="kv"><div class="muted">Payment</div><div class="fw-bold">@(_e.PaymentMethod ?? "—")</div></div>
+                        </div>
+
+                        <div class="d-grid mt-3">
+                            <button class="btn btn-outline-secondary" @onclick="Back" disabled="@_saving">Back</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    }
+
+</div>
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private bool _loading;
+    private bool _saving;
+    private string? _error;
+
+    private int _companyId;
+    private Employee? _e;
+
+    private bool IsCash =>
+        string.Equals(_e?.PaymentMethod, "Cash", StringComparison.OrdinalIgnoreCase);
+
+    private decimal NetPay =>
+        (_e?.BasicSalary ?? 0m) + (_e?.Allowance ?? 0m);
+
+    protected override async Task OnInitializedAsync()
+    {
+        _loading = true;
+        _error = null;
+
+        try
+        {
+            await CurrentCompany.RefreshAsync();
+
+            if (!CurrentCompany.IsAuthenticated)
+            {
+                _error = "Not authenticated. Logout and login again.";
+                return;
+            }
+
+            _companyId = CurrentCompany.CompanyId;
+            if (_companyId <= 0)
+            {
+                _error = "CompanyId claim not found. Logout and login again.";
+                return;
+            }
+
+            _e = await Db.Employees.FirstOrDefaultAsync(x => x.CompanyId == _companyId && x.EmployeeId == Id);
+
+            if (_e != null)
+            {
+                // Null safety
+                _e.EmpName ??= "";
+                _e.PaymentMethod ??= "Bank";
+                _e.BankName ??= "";
+                _e.IBAN ??= "";
+                _e.Notes ??= "";
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = ex.InnerException?.Message ?? ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void Back() => Nav.NavigateTo("/employees");
+
+    private async Task Save()
+    {
+        _saving = true;
+        _error = null;
+
+        try
+        {
+            if (_e == null) return;
+
+            if (string.IsNullOrWhiteSpace(_e.EmpName))
+                throw new Exception("Employee name is required.");
+
+            // safety: keep company fixed
+            _e.CompanyId = _companyId;
+
+            if (IsCash)
+            {
+                _e.BankName = "";
+                _e.IBAN = "";
+            }
+
+            await Db.SaveChangesAsync();
+            Nav.NavigateTo("/employees", forceLoad: true);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.InnerException?.Message ?? ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+}

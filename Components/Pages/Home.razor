@@ -1,0 +1,301 @@
+﻿
+@using Microsoft.EntityFrameworkCore
+@using UaeEInvoice.Data
+@inject AppDbContext Db
+@inject NavigationManager Nav
+@attribute [Authorize]
+<div class="container-xxl py-4">
+
+    <!-- Header -->
+    <div class="d-flex align-items-start justify-content-between flex-wrap gap-2 mb-3">
+        <div>
+            <h2 class="page-title mb-1">ERP Dashboard</h2>
+            <div class="text-muted">
+                Sales • Purchase • Inventory • Vendors — one place to control everything.
+            </div>
+        </div>
+
+        <div class="d-flex gap-2">
+            <button class="btn btn-primary" type="button" @onclick="GoCreateInvoice" disabled="@_loading">
+                + Create Sale Invoice
+            </button>
+            <button class="btn btn-outline-secondary" type="button" @onclick="Reload" disabled="@_loading">
+                @(_loading ? "Loading..." : "Refresh")
+            </button>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_error))
+    {
+        <div class="alert alert-danger soft-card">@_error</div>
+    }
+
+    <!-- Company strip -->
+    <div class="card soft-card mb-3">
+        <div class="card-body d-flex justify-content-between flex-wrap gap-2 align-items-center">
+            <div>
+                <div class="fw-semibold">@(_company?.LegalName ?? "Company not setup")</div>
+                <div class="text-muted small">
+                    TRN: @(!string.IsNullOrWhiteSpace(_company?.TRN) ? _company!.TRN : "-")
+                </div>
+            </div>
+
+            <div class="d-flex gap-2">
+                <button class="btn btn-sm btn-outline-primary" type="button" @onclick="GoCompanySetup">
+                    Company Setup
+                </button>
+                <button class="btn btn-sm btn-outline-secondary" type="button" @onclick="GoCustomers">
+                    Customers
+                </button>
+                <button class="btn btn-sm btn-outline-secondary" type="button" @onclick="GoItems">
+                    Items
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- KPI row -->
+    <div class="row g-3 mb-3">
+        <div class="col-12 col-md-6 col-lg-3">
+            <div class="card soft-card">
+                <div class="card-body">
+                    <div class="text-muted small">Sales (This Month)</div>
+                    <div class="fs-3 fw-bold">@_salesMonth.ToString("0.00")</div>
+                    <div class="small text-muted">Invoices: @_invoiceCountMonth</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12 col-md-6 col-lg-3">
+            <div class="card soft-card">
+                <div class="card-body">
+                    <div class="text-muted small">VAT Collected (This Month)</div>
+                    <div class="fs-3 fw-bold">@_vatMonth.ToString("0.00")</div>
+                    <div class="small text-muted">Based on saved invoices</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12 col-md-6 col-lg-3">
+            <div class="card soft-card">
+                <div class="card-body">
+                    <div class="text-muted small">Customers</div>
+                    <div class="fs-3 fw-bold">@_customerCount</div>
+                    <div class="small text-muted">Customer master</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12 col-md-6 col-lg-3">
+            <div class="card soft-card">
+                <div class="card-body">
+                    <div class="text-muted small">Items</div>
+                    <div class="fs-3 fw-bold">@_itemCount</div>
+                    <div class="small text-muted">Item master</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modules -->
+    <div class="row g-3">
+        <div class="col-12 col-lg-6">
+            <div class="card soft-card h-100">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div>
+                            <div class="fw-semibold fs-5">Sales</div>
+                            <div class="text-muted">Create invoice, view history, download PDF.</div>
+                        </div>
+                        <span class="badge text-bg-success">Ready</span>
+                    </div>
+
+                    <hr />
+
+                    <div class="d-flex flex-wrap gap-2">
+                        <button class="btn btn-outline-primary" type="button" @onclick="GoCreateInvoice">
+                            Create Invoice
+                        </button>
+                        <button class="btn btn-outline-secondary" type="button" @onclick="GoInvoices">
+                            View Invoices
+                        </button>
+                    </div>
+
+                    <div class="small text-muted mt-3">
+                        Next: credit note / void workflow + due payments.
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12 col-lg-6">
+            <div class="card soft-card h-100">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div>
+                            <div class="fw-semibold fs-5">Purchase + Vendors</div>
+                            <div class="text-muted">Record purchases, vendor bills, cost tracking.</div>
+                        </div>
+                        <span class="badge text-bg-warning">Next</span>
+                    </div>
+
+                    <hr />
+
+                    <div class="d-flex flex-wrap gap-2">
+                        <button class="btn btn-outline-secondary" type="button" disabled>
+                            Add Vendor
+                        </button>
+                        <button class="btn btn-outline-secondary" type="button" disabled>
+                            New Purchase
+                        </button>
+                    </div>
+
+                    <div class="small text-muted mt-3">
+                        Next module: Vendor master + Purchase invoice + payable ledger.
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12 col-lg-6">
+            <div class="card soft-card h-100">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div>
+                            <div class="fw-semibold fs-5">Inventory</div>
+                            <div class="text-muted">Stock in/out, item balance, valuation.</div>
+                        </div>
+                        <span class="badge text-bg-warning">Next</span>
+                    </div>
+
+                    <hr />
+
+                    <div class="d-flex flex-wrap gap-2">
+                        <button class="btn btn-outline-secondary" type="button" disabled>
+                            Stock Dashboard
+                        </button>
+                        <button class="btn btn-outline-secondary" type="button" disabled>
+                            Stock Entry (IN/OUT)
+                        </button>
+                    </div>
+
+                    <div class="small text-muted mt-3">
+                        Next module: Stock ledger + valuation (phase 2).
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12 col-lg-6">
+            <div class="card soft-card h-100">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div>
+                            <div class="fw-semibold fs-5">Reports</div>
+                            <div class="text-muted">VAT summary, sales by customer, item wise profit.</div>
+                        </div>
+                        <span class="badge text-bg-warning">Next</span>
+                    </div>
+
+                    <hr />
+
+                    <div class="d-flex flex-wrap gap-2">
+                        <button class="btn btn-outline-secondary" type="button" disabled>
+                            VAT Report
+                        </button>
+                        <button class="btn btn-outline-secondary" type="button" disabled>
+                            Profit Report
+                        </button>
+                    </div>
+
+                    <div class="small text-muted mt-3">
+                        We will generate VAT summary by rate (5%, 0%, exempt).
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+@code {
+    private bool _loading;
+    private string? _error;
+
+    private Company? _company;
+    private int _companyId;
+
+    private decimal _salesMonth;
+    private decimal _vatMonth;
+    private int _invoiceCountMonth;
+
+    private int _customerCount;
+    private int _itemCount;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Load();
+    }
+
+    private void GoCreateInvoice() => Nav.NavigateTo("/invoice-create");
+    private void GoInvoices() => Nav.NavigateTo("/invoices");
+    private void GoCompanySetup() => Nav.NavigateTo("/company-setup");
+    private void GoCustomers() => Nav.NavigateTo("/customers");
+    private void GoItems() => Nav.NavigateTo("/items");
+
+    private async Task Reload() => await Load();
+
+    private async Task Load()
+    {
+        _loading = true;
+        _error = null;
+
+        try
+        {
+            _companyId = await Db.Companies
+                .OrderBy(x => x.CompanyId)
+                .Select(x => x.CompanyId)
+                .FirstOrDefaultAsync();
+
+            _company = _companyId > 0
+                ? await Db.Companies.FirstOrDefaultAsync(x => x.CompanyId == _companyId)
+                : null;
+
+            var start = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
+            var end = start.AddMonths(1);
+
+            if (_companyId > 0)
+            {
+                var monthInv = await Db.Invoices.AsNoTracking()
+                    .Where(x => x.CompanyId == _companyId && x.InvoiceDate >= start && x.InvoiceDate < end)
+                    .ToListAsync();
+
+                _invoiceCountMonth = monthInv.Count;
+                _salesMonth = monthInv.Sum(x => x.GrandTotal);
+                _vatMonth = monthInv.Sum(x => x.VatTotal);
+
+                _customerCount = await Db.Customers.AsNoTracking()
+                    .CountAsync(x => x.CompanyId == _companyId);
+
+                _itemCount = await Db.Items.AsNoTracking()
+                    .CountAsync(x => x.CompanyId == _companyId);
+            }
+            else
+            {
+                _invoiceCountMonth = 0;
+                _salesMonth = 0;
+                _vatMonth = 0;
+                _customerCount = 0;
+                _itemCount = 0;
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+}

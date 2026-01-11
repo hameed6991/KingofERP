@@ -1,0 +1,955 @@
+﻿@page "/pettycash"
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Components.Forms
+@using UaeEInvoice.Data
+@using UaeEInvoice.Services
+@using UaeEInvoice.Services.Auth
+@inject AppDbContext Db
+@inject ICurrentCompany CurrentCompany
+@inject PettyCashService Petty
+
+<style>
+    :root {
+        --pc-bg: #0b1220;
+        --pc-card: rgba(255,255,255,.08);
+        --pc-border: rgba(255,255,255,.12);
+        --pc-text: rgba(255,255,255,.92);
+        --pc-muted: rgba(255,255,255,.65);
+        --pc-shadow: 0 18px 55px rgba(0,0,0,.35);
+        --pc-radius: 18px;
+    }
+
+    .pc-wrap {
+        background: radial-gradient(1200px 650px at 10% -10%, rgba(99,102,241,.18), transparent 55%), radial-gradient(900px 520px at 90% 0%, rgba(16,185,129,.16), transparent 55%), radial-gradient(800px 500px at 50% 120%, rgba(56,189,248,.10), transparent 60%), linear-gradient(180deg, #0b1220, #060a14 65%, #040710);
+        min-height: calc(100vh - 70px);
+        border-radius: 22px;
+        padding: 18px;
+    }
+
+    .pc-hero {
+        border-radius: 22px;
+        padding: 18px;
+        color: var(--pc-text);
+        background: radial-gradient(900px 460px at 12% -10%, rgba(99,102,241,.40), transparent 62%), radial-gradient(800px 420px at 92% 0%, rgba(16,185,129,.22), transparent 55%), linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.03));
+        border: 1px solid var(--pc-border);
+        box-shadow: var(--pc-shadow);
+        backdrop-filter: blur(10px);
+    }
+
+    .pc-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 10px;
+        border-radius: 999px;
+        border: 1px solid rgba(255,255,255,.14);
+        background: rgba(255,255,255,.06);
+        color: rgba(255,255,255,.85);
+        font-size: .85rem;
+    }
+
+    .pc-title {
+        font-weight: 900;
+        letter-spacing: .3px;
+        margin: 8px 0 2px 0;
+    }
+
+    .pc-sub {
+        color: var(--pc-muted);
+        margin: 0;
+    }
+
+    .pc-card {
+        border-radius: var(--pc-radius);
+        background: rgba(255,255,255,.06);
+        border: 1px solid rgba(255,255,255,.10);
+        box-shadow: 0 14px 35px rgba(0,0,0,.22);
+        backdrop-filter: blur(10px);
+        overflow: hidden;
+    }
+
+    .pc-card-head {
+        padding: 12px 14px;
+        border-bottom: 1px solid rgba(255,255,255,.08);
+        background: linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.02));
+        color: rgba(255,255,255,.88);
+        font-weight: 800;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+    }
+
+    .pc-card-body {
+        padding: 14px;
+        color: var(--pc-text);
+    }
+
+    .pc-kpi {
+        border-radius: 16px;
+        border: 1px solid rgba(255,255,255,.10);
+        background: rgba(255,255,255,.06);
+        padding: 12px;
+        height: 100%;
+    }
+
+        .pc-kpi .t {
+            color: rgba(255,255,255,.70);
+            font-size: .85rem;
+            margin: 0;
+        }
+
+        .pc-kpi .v {
+            font-size: 1.25rem;
+            font-weight: 900;
+            margin-top: 4px;
+        }
+
+    .pc-input, .pc-select {
+        border-radius: 12px !important;
+        border: 1px solid rgba(15,23,42,.12) !important;
+        background: rgba(255,255,255,.92) !important;
+    }
+
+    .pc-table {
+        border-radius: 14px;
+        overflow: hidden;
+        border: 1px solid rgba(15,23,42,.10);
+        background: #fff;
+    }
+
+        .pc-table table {
+            margin: 0;
+        }
+
+        .pc-table thead th {
+            background: linear-gradient(180deg, #f8fafc, #f1f5f9) !important;
+            border-bottom: 1px solid rgba(15,23,42,.10) !important;
+            font-size: .85rem;
+            letter-spacing: .3px;
+            text-transform: uppercase;
+            color: rgba(15,23,42,.70);
+        }
+
+    .pc-badge {
+        border-radius: 999px;
+        padding: 6px 10px;
+        font-weight: 800;
+        font-size: .78rem;
+        border: 1px solid rgba(15,23,42,.10);
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+        .pc-badge.draft {
+            background: #eef2ff;
+            color: #3730a3;
+        }
+
+        .pc-badge.submitted {
+            background: #e0f2fe;
+            color: #075985;
+        }
+
+        .pc-badge.approved {
+            background: #fff7ed;
+            color: #9a3412;
+        }
+
+        .pc-badge.rejected {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        .pc-badge.vouchered {
+            background: #dcfce7;
+            color: #166534;
+        }
+
+    .pc-actions .btn {
+        border-radius: 12px;
+        font-weight: 800;
+        padding: 9px 12px;
+    }
+
+    /* Modal */
+    .pc-backdrop {
+        position: fixed;
+        inset: 0;
+        background: rgba(2,6,23,.55);
+        backdrop-filter: blur(6px);
+        z-index: 1040;
+    }
+
+    .pc-modal {
+        position: fixed;
+        inset: 0;
+        z-index: 1050;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 18px;
+    }
+
+    .pc-modal-card {
+        width: min(1150px, 98vw);
+        max-height: 90vh;
+        overflow: auto;
+        border-radius: 22px;
+        border: 1px solid rgba(255,255,255,.12);
+        box-shadow: 0 30px 90px rgba(0,0,0,.50);
+        background: radial-gradient(1200px 650px at 10% -10%, rgba(99,102,241,.22), transparent 60%), radial-gradient(900px 520px at 90% 0%, rgba(16,185,129,.18), transparent 60%), linear-gradient(180deg, rgba(255,255,255,.09), rgba(255,255,255,.03));
+        color: rgba(255,255,255,.92);
+        backdrop-filter: blur(10px);
+    }
+
+    .pc-modal-head {
+        padding: 14px 16px;
+        border-bottom: 1px solid rgba(255,255,255,.10);
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+    }
+
+    .pc-modal-body {
+        padding: 16px;
+    }
+
+    .pc-line {
+        border-radius: 16px;
+        border: 1px solid rgba(255,255,255,.12);
+        background: rgba(255,255,255,.06);
+        padding: 12px;
+    }
+
+    .text-soft {
+        color: rgba(255,255,255,.70);
+    }
+
+    /* ✅ IMPORTANT: Razor escape for responsive CSS */
+    @@media (max-width: 992px) {
+        .pc-wrap {
+            padding: 14px;
+        }
+
+        .pc-title {
+            font-size: 1.6rem;
+        }
+    }
+</style>
+
+<div class="container-xxl py-4">
+    <div class="pc-wrap">
+
+        <!-- HERO -->
+        <div class="pc-hero mb-3">
+            <div class="d-flex align-items-start justify-content-between flex-wrap gap-2">
+                <div>
+                    <div class="d-flex gap-2 flex-wrap">
+                        <span class="pc-pill">💸 Petty Cash</span>
+                        <span class="pc-pill">Claim → Submit → Approve → Voucher (PCV)</span>
+                        <span class="pc-pill">Auto Ledger Posting</span>
+                    </div>
+                    <h2 class="pc-title">Petty Cash Voucher</h2>
+                    <p class="pc-sub">Create claims, manage approvals, generate PCV, and auto-post to General Ledger.</p>
+                </div>
+
+                <div class="pc-actions d-flex gap-2">
+                    <button class="btn btn-light" type="button" @onclick="OpenNewClaim">+ New Claim</button>
+                    <button class="btn btn-outline-light" type="button" @onclick="Load">Refresh</button>
+                </div>
+            </div>
+
+            <div class="row g-2 mt-3">
+                <div class="col-6 col-lg-3">
+                    <div class="pc-kpi">
+                        <p class="t mb-0">Draft/Submitted</p>
+                        <div class="v">@kpiPending</div>
+                    </div>
+                </div>
+                <div class="col-6 col-lg-3">
+                    <div class="pc-kpi">
+                        <p class="t mb-0">Approved</p>
+                        <div class="v">@kpiApproved</div>
+                    </div>
+                </div>
+                <div class="col-6 col-lg-3">
+                    <div class="pc-kpi">
+                        <p class="t mb-0">Vouchered</p>
+                        <div class="v">@kpiVouchered</div>
+                    </div>
+                </div>
+                <div class="col-6 col-lg-3">
+                    <div class="pc-kpi">
+                        <p class="t mb-0">Total This Month</p>
+                        <div class="v">@kpiMonthTotal.ToString("0.00")</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(err))
+        {
+            <div class="alert alert-danger py-2">@err</div>
+        }
+        @if (!string.IsNullOrWhiteSpace(msg))
+        {
+            <div class="alert alert-success py-2">@msg</div>
+        }
+
+        <div class="row g-3">
+            <!-- LEFT: LIST -->
+            <div class="col-12 col-lg-7">
+                <div class="pc-card">
+                    <div class="pc-card-head">
+                        <div>Claims</div>
+                        <div class="text-soft small">Click a row to preview</div>
+                    </div>
+
+                    <div class="pc-card-body">
+                        <div class="row g-2 align-items-end">
+                            <div class="col-12 col-md-7">
+                                <label class="form-label text-soft">Search</label>
+                                <input class="form-control pc-input"
+                                       @bind="search" @bind:event="oninput"
+                                       placeholder="Claim No / Requested By" />
+                            </div>
+                            <div class="col-12 col-md-5">
+                                <label class="form-label text-soft">Status</label>
+                                <select class="form-select pc-select" @bind="statusFilter">
+                                    <option value="">All</option>
+                                    <option value="Draft">Draft</option>
+                                    <option value="Submitted">Submitted</option>
+                                    <option value="Approved">Approved</option>
+                                    <option value="Rejected">Rejected</option>
+                                    <option value="Vouchered">Vouchered</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="pc-table mt-3">
+                            <table class="table table-hover align-middle">
+                                <thead>
+                                    <tr>
+                                        <th>Claim</th>
+                                        <th>Requested By</th>
+                                        <th>Date</th>
+                                        <th class="text-end">Total</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var c in FilteredClaims())
+                                    {
+                                        var active = selected != null && selected.PettyCashClaimId == c.PettyCashClaimId;
+                                        <tr style="cursor:pointer" class="@(active ? "table-primary" : "")"
+                                            @onclick="() => SelectClaim(c.PettyCashClaimId)">
+                                            <td class="fw-bold">@c.ClaimNo</td>
+                                            <td>@c.RequestedBy</td>
+                                            <td>@c.ClaimDate.ToString("dd-MMM-yyyy")</td>
+                                            <td class="text-end fw-bold">@c.TotalAmount.ToString("0.00")</td>
+                                            <td>
+                                                <span class="pc-badge @BadgeClass(c.Status)">@c.Status</span>
+                                            </td>
+                                        </tr>
+                                    }
+
+                                    @if (!FilteredClaims().Any())
+                                    {
+                                        <tr>
+                                            <td colspan="5" class="text-center text-muted py-4">
+                                                No claims found. Click <b>+ New Claim</b> to add entry.
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+
+            <!-- RIGHT: PREVIEW -->
+            <div class="col-12 col-lg-5">
+                <div class="pc-card">
+                    <div class="pc-card-head">
+                        <div>Preview</div>
+                        <div class="text-soft small">Actions based on status</div>
+                    </div>
+
+                    <div class="pc-card-body">
+                        @if (selected == null)
+                        {
+                            <div class="text-soft">Select a claim to view details.</div>
+                        }
+                        else
+                        {
+                            <div class="d-flex justify-content-between align-items-start gap-2">
+                                <div>
+                                    <div class="fw-bold fs-5">@selected.ClaimNo</div>
+                                    <div class="text-soft">@selected.RequestedBy • @selected.ClaimDate.ToString("dd-MMM-yyyy")</div>
+                                    <div class="text-soft small">@selected.Purpose</div>
+                                    <div class="mt-2">
+                                        <span class="pc-badge @BadgeClass(selected.Status)">@selected.Status</span>
+                                    </div>
+                                </div>
+                                <div class="text-end">
+                                    <div class="text-soft small">Total</div>
+                                    <div class="fw-bold fs-3">@selected.TotalAmount.ToString("0.00")</div>
+                                </div>
+                            </div>
+
+                            <hr style="border-color: rgba(255,255,255,.12);" />
+
+                            <div class="pc-table">
+                                <table class="table table-sm align-middle">
+                                    <thead>
+                                        <tr>
+                                            <th>Description</th>
+                                            <th class="text-end">Net</th>
+                                            <th class="text-end">VAT</th>
+                                            <th class="text-end">Total</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var l in selected.Lines)
+                                        {
+                                            <tr>
+                                                <td class="fw-semibold">@l.Description</td>
+                                                <td class="text-end">@l.Amount.ToString("0.00")</td>
+                                                <td class="text-end">@l.VatAmount.ToString("0.00")</td>
+                                                <td class="text-end fw-bold">@((l.Amount + l.VatAmount).ToString("0.00"))</td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <div class="pc-actions d-flex gap-2 flex-wrap mt-3">
+                                @if (selected.Status == PettyClaimStatus.Draft)
+                                {
+                                    <button class="btn btn-outline-light" type="button" @onclick="Submit">Submit</button>
+                                }
+                                @if (selected.Status == PettyClaimStatus.Submitted)
+                                {
+                                    <button class="btn btn-warning" type="button" @onclick="Approve">Approve</button>
+                                    <button class="btn btn-outline-light" type="button" @onclick="Reject">Reject</button>
+                                }
+
+                                <button class="btn btn-light" type="button" @onclick="OpenVoucher"
+                                        disabled="@(selected.Status != PettyClaimStatus.Approved)">
+                                    Create Voucher (PCV)
+                                </button>
+                            </div>
+
+                            @if (showVoucher)
+                            {
+                                <div class="pc-line mt-3">
+                                    <div class="fw-bold mb-2">Voucher Details</div>
+
+                                    <div class="row g-2">
+                                        <div class="col-12">
+                                            <label class="form-label text-soft">Paid To</label>
+                                            <input class="form-control pc-input" @bind="paidTo" />
+                                        </div>
+
+                                        <div class="col-12">
+                                            <label class="form-label text-soft">Cash / Bank Account</label>
+                                            <select class="form-select pc-select" @bind="cashAccountNo">
+                                                @foreach (var a in cashAccounts)
+                                                {
+                                                    <option value="@a.AccountNo">@a.AccountNo - @a.AccountName</option>
+                                                }
+                                            </select>
+                                        </div>
+
+                                        <div class="col-12">
+                                            <label class="form-label text-soft">Payment Method</label>
+                                            <select class="form-select pc-select" @bind="payMethod">
+                                                <option value="Cash">Cash</option>
+                                                <option value="Bank">Bank</option>
+                                            </select>
+                                        </div>
+                                    </div>
+
+                                    <div class="pc-actions d-flex gap-2 mt-3">
+                                        <button class="btn btn-primary" type="button" @onclick="PostVoucher" disabled="@savingVoucher">
+                                            @(savingVoucher ? "Posting..." : "Post Voucher")
+                                        </button>
+                                        <button class="btn btn-outline-light" type="button" @onclick="CloseVoucher" disabled="@savingVoucher">
+                                            Cancel
+                                        </button>
+                                    </div>
+                                </div>
+                            }
+                        }
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- MODAL: NEW CLAIM -->
+        @if (showNew)
+        {
+            <div class="pc-backdrop" @onclick="CloseNewClaim"></div>
+            <div class="pc-modal">
+                <div class="pc-modal-card">
+                    <div class="pc-modal-head">
+                        <div>
+                            <div class="d-flex gap-2 flex-wrap">
+                                <span class="pc-pill">🧾 New Claim</span>
+                                <span class="pc-pill text-soft">Draft entry</span>
+                            </div>
+                            <div class="text-soft small mt-2">Add expense lines + VAT. Save Draft then Submit from preview.</div>
+                        </div>
+
+                        <div class="pc-actions d-flex gap-2">
+                            <button class="btn btn-outline-light" type="button" @onclick="CloseNewClaim">Close</button>
+                        </div>
+                    </div>
+
+                    <div class="pc-modal-body">
+                        @if (!string.IsNullOrWhiteSpace(modalErr))
+                        {
+                            <div class="alert alert-danger py-2">@modalErr</div>
+                        }
+
+                        <div class="pc-line mb-3">
+                            <div class="row g-2">
+                                <div class="col-12 col-md-4">
+                                    <label class="form-label text-soft">Date</label>
+                                    <InputDate class="form-control pc-input" @bind-Value="newDate" />
+                                </div>
+                                <div class="col-12 col-md-4">
+                                    <label class="form-label text-soft">Requested By</label>
+                                    <InputText class="form-control pc-input" @bind-Value="newRequestedBy" />
+                                </div>
+                                <div class="col-12 col-md-4">
+                                    <label class="form-label text-soft">Purpose</label>
+                                    <InputText class="form-control pc-input" @bind-Value="newPurpose" />
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="pc-line">
+                            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                                <div class="fw-bold">Expense Lines</div>
+                                <div class="text-soft small">Net + VAT auto</div>
+                            </div>
+
+                            <div class="row g-2 align-items-end mt-2">
+                                <div class="col-12 col-lg-5">
+                                    <label class="form-label text-soft">Line Description</label>
+                                    <InputText class="form-control pc-input" @bind-Value="lineDesc" />
+                                </div>
+                                <div class="col-12 col-lg-3">
+                                    <label class="form-label text-soft">Expense Account</label>
+                                    <select class="form-select pc-select" @bind="lineExpAcc">
+                                        @foreach (var a in expenseAccounts)
+                                        {
+                                            <option value="@a.AccountNo">@a.AccountNo - @a.AccountName</option>
+                                        }
+                                    </select>
+                                </div>
+                                <div class="col-6 col-lg-2">
+                                    <label class="form-label text-soft">Amount</label>
+                                    <InputNumber class="form-control pc-input" @bind-Value="lineAmt" step="0.01" />
+                                </div>
+                                <div class="col-6 col-lg-2">
+                                    <label class="form-label text-soft">VAT %</label>
+                                    <select class="form-select pc-select" @bind="lineVatRate">
+                                        <option value="0">0%</option>
+                                        <option value="0.05">5%</option>
+                                    </select>
+                                </div>
+
+                                <div class="col-12">
+                                    <button class="btn btn-light" type="button" @onclick="AddLine">+ Add Line</button>
+                                </div>
+                            </div>
+
+                            <div class="pc-table mt-3">
+                                <table class="table table-sm align-middle">
+                                    <thead>
+                                        <tr>
+                                            <th>Description</th>
+                                            <th>Exp A/c</th>
+                                            <th class="text-end">Net</th>
+                                            <th class="text-end">VAT</th>
+                                            <th class="text-end">Total</th>
+                                            <th></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @for (int i = 0; i < newLines.Count; i++)
+                                        {
+                                            var l = newLines[i];
+                                            <tr>
+                                                <td class="fw-semibold">@l.Description</td>
+                                                <td>@l.ExpenseAccountNo</td>
+                                                <td class="text-end">@l.Amount.ToString("0.00")</td>
+                                                <td class="text-end">@l.VatAmount.ToString("0.00")</td>
+                                                <td class="text-end fw-bold">@((l.Amount + l.VatAmount).ToString("0.00"))</td>
+                                                <td class="text-end">
+                                                    <button class="btn btn-sm btn-outline-danger" type="button" @onclick="() => RemoveNewLine(i)">Remove</button>
+                                                </td>
+                                            </tr>
+                                        }
+
+                                        @if (newLines.Count == 0)
+                                        {
+                                            <tr>
+                                                <td colspan="6" class="text-center text-muted py-4">No lines added yet.</td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mt-3">
+                                <div>
+                                    <div class="text-soft small">Grand Total</div>
+                                    <div class="fw-bold fs-3">@NewTotal().ToString("0.00")</div>
+                                </div>
+
+                                <div class="pc-actions d-flex gap-2">
+                                    <button class="btn btn-primary" type="button" @onclick="SaveNew" disabled="@savingNew">
+                                        @(savingNew ? "Saving..." : "Save Draft")
+                                    </button>
+                                    <button class="btn btn-outline-light" type="button" @onclick="CloseNewClaim" disabled="@savingNew">
+                                        Close
+                                    </button>
+                                </div>
+                            </div>
+
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+
+    </div>
+</div>
+
+@code
+{
+    string? err, msg;
+
+    string search = "";
+    string statusFilter = "";
+
+    List<PettyCashClaim> claims = new();
+    PettyCashClaim? selected;
+
+    List<ChartOfAccount> expenseAccounts = new();
+    List<ChartOfAccount> cashAccounts = new();
+
+    int kpiPending, kpiApproved, kpiVouchered;
+    decimal kpiMonthTotal;
+
+    // Voucher panel
+    bool showVoucher = false;
+    bool savingVoucher = false;
+    string paidTo = "";
+    int cashAccountNo = 1000;
+    string payMethod = "Cash";
+
+    // New Claim modal
+    bool showNew = false;
+    bool savingNew = false;
+    string? modalErr;
+
+    DateTime newDate = DateTime.Today;
+    string newRequestedBy = "";
+    string newPurpose = "";
+
+    string lineDesc = "";
+    int lineExpAcc = 0;
+    decimal lineAmt = 0m;
+    decimal lineVatRate = 0.05m;
+
+    List<PettyCashClaimLine> newLines = new();
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    async Task Load()
+    {
+        err = msg = null;
+
+        var companyId = CurrentCompany.CompanyId;
+
+        expenseAccounts = await Db.ChartOfAccounts.AsNoTracking()
+            .Where(x => x.CompanyId == companyId && x.IsActive && x.AccountType == "Expense")
+            .OrderBy(x => x.AccountNo)
+            .ToListAsync();
+
+        // Cash/Bank selection: keep it simple (Asset accounts)
+        cashAccounts = await Db.ChartOfAccounts.AsNoTracking()
+            .Where(x => x.CompanyId == companyId && x.IsActive && x.AccountType == "Asset")
+            .OrderBy(x => x.AccountNo)
+            .ToListAsync();
+
+        if (expenseAccounts.Count > 0 && lineExpAcc == 0)
+            lineExpAcc = expenseAccounts[0].AccountNo;
+
+        if (cashAccounts.Count > 0 && !cashAccounts.Any(x => x.AccountNo == cashAccountNo))
+            cashAccountNo = cashAccounts[0].AccountNo;
+
+        // load claims
+        claims = await Db.PettyCashClaims
+            .Include(x => x.Lines)
+            .Where(x => x.CompanyId == companyId)
+            .OrderByDescending(x => x.PettyCashClaimId)
+            .AsNoTracking()
+            .ToListAsync();
+
+        // KPIs
+        kpiPending = claims.Count(x => x.Status == PettyClaimStatus.Draft || x.Status == PettyClaimStatus.Submitted);
+        kpiApproved = claims.Count(x => x.Status == PettyClaimStatus.Approved);
+        kpiVouchered = claims.Count(x => x.Status == PettyClaimStatus.Vouchered);
+
+        var monthStart = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
+        kpiMonthTotal = claims.Where(x => x.ClaimDate >= monthStart).Sum(x => x.TotalAmount);
+
+        showVoucher = false;
+    }
+
+    IEnumerable<PettyCashClaim> FilteredClaims()
+    {
+        var q = claims.AsEnumerable();
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            q = q.Where(x =>
+                (x.ClaimNo?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (x.RequestedBy?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false));
+        }
+
+        if (!string.IsNullOrWhiteSpace(statusFilter))
+            q = q.Where(x => x.Status.ToString() == statusFilter);
+
+        return q;
+    }
+
+    async Task SelectClaim(int id)
+    {
+        err = msg = null;
+
+        selected = await Db.PettyCashClaims
+            .Include(x => x.Lines)
+            .FirstOrDefaultAsync(x => x.CompanyId == CurrentCompany.CompanyId && x.PettyCashClaimId == id);
+
+        showVoucher = false;
+        paidTo = selected?.RequestedBy ?? "";
+    }
+
+    // ---- Status actions (use service to avoid mistakes) ----
+    async Task Submit()
+    {
+        if (selected == null) return;
+
+        err = msg = null;
+        try
+        {
+            await Petty.SubmitAsync(CurrentCompany.CompanyId, selected.PettyCashClaimId);
+            msg = "Claim submitted.";
+            await Load();
+            await SelectClaim(selected.PettyCashClaimId);
+        }
+        catch (Exception ex) { err = ex.Message; }
+    }
+
+    async Task Approve()
+    {
+        if (selected == null) return;
+
+        err = msg = null;
+        try
+        {
+            await Petty.ApproveAsync(CurrentCompany.CompanyId, selected.PettyCashClaimId);
+            msg = "Claim approved.";
+            await Load();
+            await SelectClaim(selected.PettyCashClaimId);
+        }
+        catch (Exception ex) { err = ex.Message; }
+    }
+
+    async Task Reject()
+    {
+        if (selected == null) return;
+
+        err = msg = null;
+        try
+        {
+            await Petty.RejectAsync(CurrentCompany.CompanyId, selected.PettyCashClaimId);
+            msg = "Claim rejected.";
+            await Load();
+            await SelectClaim(selected.PettyCashClaimId);
+        }
+        catch (Exception ex) { err = ex.Message; }
+    }
+
+    // ---- Voucher ----
+    void OpenVoucher()
+    {
+        if (selected == null) return;
+        showVoucher = true;
+        paidTo = selected.RequestedBy ?? "";
+        payMethod = "Cash";
+    }
+
+    void CloseVoucher() => showVoucher = false;
+
+    async Task PostVoucher()
+    {
+        if (selected == null) return;
+
+        err = msg = null;
+
+        if (string.IsNullOrWhiteSpace(paidTo))
+        {
+            err = "Paid To required.";
+            return;
+        }
+        if (cashAccountNo <= 0)
+        {
+            err = "Select cash/bank account.";
+            return;
+        }
+
+        savingVoucher = true;
+        try
+        {
+            var method = payMethod == "Bank" ? PettyPaymentMethod.Bank : PettyPaymentMethod.Cash;
+
+            var v = await Petty.CreateAndPostVoucherFromClaimAsync(
+                companyId: CurrentCompany.CompanyId,
+                claimId: selected.PettyCashClaimId,
+                cashAccountNo: cashAccountNo,
+                paidTo: paidTo,
+                method: method,
+                referenceNo: null,
+                notes: null
+            );
+
+            msg = $"Voucher posted: {v.VoucherNo} ✅ Ledger updated";
+            showVoucher = false;
+
+            await Load();
+            await SelectClaim(selected.PettyCashClaimId);
+        }
+        catch (Exception ex)
+        {
+            err = ex.Message;
+        }
+        finally
+        {
+            savingVoucher = false;
+        }
+    }
+
+    // ---- New Claim ----
+    void OpenNewClaim()
+    {
+        modalErr = null;
+        showNew = true;
+        savingNew = false;
+
+        newDate = DateTime.Today;
+        newRequestedBy = "";
+        newPurpose = "";
+        newLines = new List<PettyCashClaimLine>();
+
+        lineDesc = "";
+        lineAmt = 0m;
+        lineVatRate = 0.05m;
+
+        if (expenseAccounts.Count > 0)
+            lineExpAcc = expenseAccounts[0].AccountNo;
+    }
+
+    void CloseNewClaim()
+    {
+        if (savingNew) return;
+        showNew = false;
+        modalErr = null;
+    }
+
+    void AddLine()
+    {
+        modalErr = null;
+
+        if (string.IsNullOrWhiteSpace(lineDesc)) { modalErr = "Line description required."; return; }
+        if (lineExpAcc <= 0) { modalErr = "Select expense account."; return; }
+        if (lineAmt <= 0) { modalErr = "Amount must be > 0."; return; }
+
+        var vat = Math.Round(lineAmt * lineVatRate, 2, MidpointRounding.AwayFromZero);
+
+        newLines.Add(new PettyCashClaimLine
+            {
+                Description = lineDesc.Trim(),
+                ExpenseAccountNo = lineExpAcc,
+                Amount = lineAmt,
+                VatRate = lineVatRate,
+                VatAmount = vat
+            });
+
+        lineDesc = "";
+        lineAmt = 0m;
+    }
+
+    void RemoveNewLine(int i)
+    {
+        if (i < 0 || i >= newLines.Count) return;
+        newLines.RemoveAt(i);
+    }
+
+    decimal NewTotal() => newLines.Sum(x => x.Amount + x.VatAmount);
+
+    async Task SaveNew()
+    {
+        modalErr = null;
+        if (newLines.Count == 0) { modalErr = "Add at least one line."; return; }
+        if (string.IsNullOrWhiteSpace(newRequestedBy)) { modalErr = "Requested By required."; return; }
+
+        savingNew = true;
+        try
+        {
+            // ✅ Use service to generate ClaimNo + compute VAT + save lines properly
+            var id = await Petty.CreateDraftAsync(
+                companyId: CurrentCompany.CompanyId,
+                claimDate: newDate,
+                requestedBy: newRequestedBy,
+                purpose: newPurpose,
+                lines: newLines
+            );
+
+            msg = $"Draft saved ✅ (ID: {id})";
+            showNew = false;
+
+            await Load();
+            await SelectClaim(id);
+        }
+        catch (Exception ex)
+        {
+            modalErr = ex.Message;
+        }
+        finally
+        {
+            savingNew = false;
+        }
+    }
+
+    string BadgeClass(PettyClaimStatus s) => s switch
+    {
+        PettyClaimStatus.Draft => "draft",
+        PettyClaimStatus.Submitted => "submitted",
+        PettyClaimStatus.Approved => "approved",
+        PettyClaimStatus.Rejected => "rejected",
+        PettyClaimStatus.Vouchered => "vouchered",
+        _ => "draft"
+    };
+}

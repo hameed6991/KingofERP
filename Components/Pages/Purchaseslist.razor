@@ -1,0 +1,333 @@
+﻿@page "/purchase-view/{Id:int}"
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Authorization
+@using UaeEInvoice.Data
+@using UaeEInvoice.Services.Auth
+@inject AppDbContext Db
+@inject NavigationManager Nav
+@inject ICurrentCompany CurrentCompany
+@attribute [Authorize(Roles = "Admin,Purchase")]
+
+<style>
+    :root {
+        --r: 22px;
+        --b: 1px solid rgba(0,0,0,.06);
+        --shadow: 0 14px 45px rgba(0,0,0,.08);
+        --shadow-soft: 0 10px 30px rgba(0,0,0,.06);
+    }
+
+    .hero-pro {
+        border-radius: 26px;
+        border: var(--b);
+        background: radial-gradient(900px 260px at 10% 0%, rgba(13,110,253,.18), transparent 60%), radial-gradient(700px 260px at 70% 0%, rgba(25,135,84,.14), transparent 60%), linear-gradient(180deg, rgba(255,255,255,.94), rgba(255,255,255,.86));
+        backdrop-filter: blur(8px);
+        box-shadow: var(--shadow-soft);
+        padding: 18px;
+    }
+
+    .soft-card-pro {
+        border-radius: var(--r);
+        border: var(--b);
+        box-shadow: var(--shadow-soft);
+        background: rgba(255,255,255,.92);
+        backdrop-filter: blur(6px);
+    }
+
+    .pill {
+        border-radius: 999px;
+        border: var(--b);
+        background: #fff;
+        padding: .42rem .7rem;
+        font-weight: 800;
+        font-size: .82rem;
+        display: inline-flex;
+        gap: .45rem;
+        align-items: center;
+        white-space: nowrap;
+    }
+
+    .btn-pro {
+        border-radius: 999px;
+        padding: .55rem 1rem;
+        font-weight: 800;
+    }
+
+    .table thead th {
+        font-size: .74rem;
+        letter-spacing: .10em;
+        text-transform: uppercase;
+        color: rgba(0,0,0,.55);
+        white-space: nowrap;
+        border-bottom: 1px solid rgba(0,0,0,.06) !important;
+    }
+
+    .money {
+        font-variant-numeric: tabular-nums;
+    }
+
+    .badge-soft {
+        border-radius: 999px;
+        padding: .35rem .6rem;
+        font-weight: 900;
+        font-size: .78rem;
+        border: var(--b);
+        background: #fff;
+        display: inline-flex;
+        align-items: center;
+        gap: .4rem;
+        white-space: nowrap;
+    }
+
+    .kv {
+        border: var(--b);
+        border-radius: 18px;
+        padding: 12px;
+        background: #fff;
+        height: 100%;
+    }
+
+        .kv .k {
+            color: rgba(0,0,0,.55);
+            font-size: .82rem;
+        }
+
+        .kv .v {
+            font-weight: 900;
+            font-size: 1.05rem;
+        }
+
+    .skeleton {
+        height: 14px;
+        border-radius: 999px;
+        background: linear-gradient(90deg, rgba(0,0,0,.06), rgba(0,0,0,.03), rgba(0,0,0,.06));
+        background-size: 200% 100%;
+        animation: sk 1.2s infinite linear;
+    }
+
+    @@keyframes sk {
+        0% {
+            background-position: 0 0
+        }
+
+        100% {
+            background-position: 200% 0
+        }
+    }
+</style>
+
+<div class="container-xxl py-4">
+
+    <!-- HERO -->
+    <div class="hero-pro mb-3">
+        <div class="d-flex align-items-start justify-content-between flex-wrap gap-2">
+            <div>
+                <h2 class="mb-1 fw-black" style="font-weight:900;">Purchase Invoice</h2>
+                <div class="text-muted">Vendor purchase invoice details & line items.</div>
+
+                @if (_pi != null)
+                {
+                    <div class="d-flex flex-wrap gap-2 mt-2">
+                        <span class="pill">🧾 @_pi.PurchaseNo</span>
+                        <span class="pill">📅 @_pi.PurchaseDate.ToString("dd-MM-yyyy")</span>
+                        <span class="pill">💰 <span class="money">@_pi.GrandTotal.ToString("0.00")</span> <span class="text-muted fw-semibold">AED</span></span>
+                    </div>
+                }
+            </div>
+
+            <div class="d-flex gap-2">
+                <button class="btn btn-outline-secondary btn-pro" type="button" @onclick="Back">
+                    ← Back
+                </button>
+                <button class="btn btn-outline-secondary btn-pro" type="button" @onclick="Reload" disabled="@_loading">
+                    @(_loading ? "Loading..." : "Reload")
+                </button>
+            </div>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_err))
+    {
+        <div class="alert alert-danger soft-card-pro p-3">@_err</div>
+    }
+
+    @if (_loading && _pi == null)
+    {
+        <div class="card soft-card-pro mb-3">
+            <div class="card-body">
+                <div class="skeleton" style="width:220px;"></div>
+                <div class="skeleton mt-3" style="width:420px;"></div>
+                <div class="row g-2 mt-3">
+                    <div class="col-12 col-md-4"><div class="skeleton" style="height:44px;"></div></div>
+                    <div class="col-12 col-md-4"><div class="skeleton" style="height:44px;"></div></div>
+                    <div class="col-12 col-md-4"><div class="skeleton" style="height:44px;"></div></div>
+                </div>
+            </div>
+        </div>
+    }
+
+    @if (_pi != null)
+    {
+        <!-- INFO CARD -->
+        <div class="card soft-card-pro mb-3">
+            <div class="card-body">
+                <div class="row g-2">
+                    <div class="col-12 col-md-4">
+                        <div class="kv">
+                            <div class="k">Purchase No</div>
+                            <div class="v">@_pi.PurchaseNo</div>
+                        </div>
+                    </div>
+                    <div class="col-12 col-md-4">
+                        <div class="kv">
+                            <div class="k">Purchase Date</div>
+                            <div class="v">@_pi.PurchaseDate.ToString("dd-MM-yyyy")</div>
+                        </div>
+                    </div>
+                    <div class="col-12 col-md-4">
+                        <div class="kv">
+                            <div class="k">Vendor Invoice No</div>
+                            <div class="v">@(_pi.VendorInvoiceNo ?? "-")</div>
+                        </div>
+                    </div>
+
+                    <div class="col-12 col-md-6">
+                        <div class="kv">
+                            <div class="k">Vendor</div>
+                            <div class="v">@_pi.VendorName</div>
+                        </div>
+                    </div>
+                    <div class="col-12 col-md-6">
+                        <div class="kv">
+                            <div class="k">Vendor TRN</div>
+                            <div class="v">@(_pi.VendorTRN ?? "-")</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- LINES + TOTALS -->
+        <div class="card soft-card-pro">
+            <div class="card-body">
+
+                <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+                    <div class="fw-bold">Line Items</div>
+                    <span class="badge-soft">Items: @_lines.Count</span>
+                </div>
+
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle">
+                        <thead>
+                            <tr>
+                                <th style="min-width:220px;">Item</th>
+                                <th class="text-end" style="width:110px;">Qty</th>
+                                <th class="text-end" style="width:140px;">Rate</th>
+                                <th class="text-end" style="width:110px;">VAT %</th>
+                                <th class="text-end" style="width:140px;">VAT</th>
+                                <th class="text-end" style="width:160px;">Total</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var ln in _lines)
+                            {
+                                <tr>
+                                    <td class="fw-semibold">@ln.ItemName</td>
+                                    <td class="text-end money">@ln.Qty.ToString("0.##")</td>
+                                    <td class="text-end money">@ln.Rate.ToString("0.00")</td>
+                                    <td class="text-end money">@((ln.VatRate * 100m).ToString("0.##"))</td>
+                                    <td class="text-end money">@ln.LineVat.ToString("0.00")</td>
+                                    <td class="text-end fw-bold money">@ln.LineTotal.ToString("0.00")</td>
+                                </tr>
+                            }
+
+                            @if (_lines.Count == 0)
+                            {
+                                <tr>
+                                    <td colspan="6" class="text-center text-muted py-4">No line items found.</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+
+                <hr />
+
+                <div class="d-flex justify-content-end">
+                    <div style="min-width:340px;">
+                        <div class="d-flex justify-content-between py-1">
+                            <div class="text-muted">Subtotal</div>
+                            <div class="fw-semibold money">@_pi.SubTotal.ToString("0.00")</div>
+                        </div>
+                        <div class="d-flex justify-content-between py-1">
+                            <div class="text-muted">VAT</div>
+                            <div class="fw-semibold money">@_pi.VatTotal.ToString("0.00")</div>
+                        </div>
+                        <div class="d-flex justify-content-between py-2 border-top mt-2">
+                            <div class="fw-bold">Grand Total</div>
+                            <div class="fw-bold fs-5 money">@_pi.GrandTotal.ToString("0.00")</div>
+                        </div>
+                        <div class="small text-muted mt-1">Currency: AED</div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private int _companyId;
+    private bool _loading;
+    private string? _err;
+
+    private PurchaseInvoice? _pi;
+    private List<PurchaseInvoiceLine> _lines = new();
+
+    // ✅ this page needs to load by Id
+    protected override async Task OnParametersSetAsync()
+    {
+        await Load();
+    }
+
+    private async Task Reload() => await Load();
+
+    private async Task Load()
+    {
+        _loading = true;
+        _err = null;
+        _pi = null;
+        _lines = new();
+
+        try
+        {
+            await CurrentCompany.RefreshAsync();
+            _companyId = CurrentCompany.CompanyId;
+
+            if (_companyId <= 0)
+                throw new Exception("Company not resolved for current user. Please login again / select company.");
+
+            _pi = await Db.PurchaseInvoices.AsNoTracking()
+                .FirstOrDefaultAsync(x => x.CompanyId == _companyId && x.PurchaseInvoiceId == Id);
+
+            if (_pi == null)
+                throw new Exception("Purchase invoice not found (or not belongs to this company).");
+
+            _lines = await Db.PurchaseInvoiceLines.AsNoTracking()
+                .Where(x => x.CompanyId == _companyId && x.PurchaseInvoiceId == Id)
+                .OrderBy(x => x.PurchaseInvoiceLineId)
+                .ToListAsync();
+        }
+        catch (Exception ex)
+        {
+            _err = ex.InnerException?.Message ?? ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void Back() => Nav.NavigateTo("/purchases");
+}

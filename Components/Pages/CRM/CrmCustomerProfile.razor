@@ -1,0 +1,765 @@
+﻿@page "/crm/customer/{Id:int}"
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.Components.Forms
+@using UaeEInvoice.Data
+@using UaeEInvoice.Services.Auth
+@inject AppDbContext Db
+@inject ICurrentCompany CurrentCompany
+@inject NavigationManager Nav
+@inject AuthenticationStateProvider AuthStateProvider
+@inject UaeEInvoice.Services.CRM.CustomerAttachmentsService Attachments
+
+@attribute [Authorize]
+
+<style>
+    .crm-shell {
+        max-width: 1250px;
+        margin: 0 auto;
+        padding: 18px 14px 32px;
+    }
+
+    .hero {
+        border-radius: 22px;
+        padding: 18px 18px 16px;
+        border: 1px solid rgba(255,255,255,.10);
+        background: radial-gradient(1200px 380px at 20% 0%, rgba(46,125,255,.28), rgba(0,0,0,0)), linear-gradient(135deg, rgba(8,18,32,.96), rgba(10,22,44,.92));
+        box-shadow: 0 18px 55px rgba(0,0,0,.25);
+        color: #fff;
+        position: relative;
+        overflow: hidden;
+    }
+
+        .hero:before {
+            content: "";
+            position: absolute;
+            inset: -2px;
+            background: radial-gradient(900px 260px at 80% 10%, rgba(0,220,255,.18), rgba(0,0,0,0));
+            pointer-events: none;
+        }
+
+    .title {
+        font-weight: 900;
+        font-size: 2.1rem;
+        margin: 0;
+        letter-spacing: .2px;
+    }
+
+    .sub {
+        color: rgba(255,255,255,.70);
+        margin-top: 4px;
+    }
+
+    .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: .45rem;
+        padding: .35rem .75rem;
+        border-radius: 999px;
+        border: 1px solid rgba(255,255,255,.14);
+        background: rgba(255,255,255,.06);
+        color: rgba(255,255,255,.92);
+        font-size: .85rem;
+        white-space: nowrap;
+    }
+
+        .chip b {
+            color: #fff;
+            font-weight: 800;
+        }
+
+    .hero-actions {
+        display: flex;
+        gap: .5rem;
+    }
+
+    .btn-ghost {
+        border-radius: 999px;
+        padding: .55rem 1rem;
+        border: 1px solid rgba(255,255,255,.16);
+        background: rgba(255,255,255,.08);
+        color: #fff;
+    }
+
+        .btn-ghost:hover {
+            background: rgba(255,255,255,.12);
+        }
+
+    .cardx {
+        margin-top: 14px;
+        border-radius: 22px;
+        border: 1px solid rgba(255,255,255,.10);
+        background: linear-gradient(135deg, rgba(9,18,34,.92), rgba(10,22,44,.88));
+        box-shadow: 0 14px 50px rgba(0,0,0,.22);
+        overflow: hidden;
+        position: relative;
+        color: #fff;
+    }
+
+        .cardx:before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(850px 220px at 15% 0%, rgba(255,255,255,.07), rgba(0,0,0,0));
+            pointer-events: none;
+        }
+
+    .head {
+        padding: 14px 16px 10px;
+        border-bottom: 1px solid rgba(255,255,255,.10);
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 12px;
+        position: relative;
+        z-index: 1;
+    }
+
+        .head > div:first-child {
+            font-weight: 900;
+            font-size: 1.15rem;
+        }
+
+    .mut {
+        color: rgba(255,255,255,.68);
+    }
+
+        .mut.small {
+            font-size: .86rem;
+        }
+
+    .body {
+        padding: 14px 16px 16px;
+        position: relative;
+        z-index: 1;
+    }
+
+    .inp {
+        border-radius: 14px;
+        border: 1px solid rgba(255,255,255,.14);
+        background: rgba(255,255,255,.92);
+        color: #111;
+    }
+
+        .inp:focus {
+            box-shadow: 0 0 0 .2rem rgba(13,110,253,.25);
+        }
+
+    .tbl {
+        border-radius: 16px;
+        overflow: hidden;
+        border: 1px solid rgba(255,255,255,.10);
+        background: rgba(255,255,255,.95);
+        color: #111;
+    }
+
+        .tbl thead th {
+            font-size: .78rem;
+            letter-spacing: .08em;
+            color: rgba(0,0,0,.55);
+            background: rgba(0,0,0,.03);
+        }
+
+    button, a {
+        position: relative;
+        z-index: 2;
+    }
+</style>
+
+<div class="crm-shell">
+
+    @if (!string.IsNullOrWhiteSpace(_pageErr))
+    {
+        <div class="alert alert-danger">@_pageErr</div>
+    }
+
+    @if (_customer == null)
+    {
+        <div class="hero">
+            <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+                <div>
+                    <h2 class="title">Customer</h2>
+                    <div class="sub">Customer not found.</div>
+                </div>
+                <div class="hero-actions">
+                    <button class="btn-ghost" type="button" @onclick="GoBack">← Back</button>
+                </div>
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="hero">
+            <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+                <div>
+                    <h2 class="title">@_customer.Name</h2>
+                    <div class="sub">Customer profile • Follow-ups • Notes timeline • Attachments</div>
+
+                    <div class="d-flex flex-wrap gap-2 mt-2">
+                        <span class="chip">🏷️ Type: <b>@_customer.CustomerType</b></span>
+                        <span class="chip">🧾 TRN: <b>@(string.IsNullOrWhiteSpace(_customer.TRN) ? "-" : _customer.TRN)</b></span>
+                        <span class="chip">📍 City: <b>@(_customer.City ?? "-")</b></span>
+                        <span class="chip">🏢 CompanyId: <b>@_companyId</b></span>
+                    </div>
+                </div>
+
+                <div class="hero-actions">
+                    <button class="btn-ghost" type="button" @onclick="GoBack">← Back</button>
+                    <button class="btn-ghost" type="button" @onclick="Reload" disabled="@_loading">
+                        @(_loading ? "Refreshing..." : "Refresh")
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Next Follow-up -->
+        <div class="cardx">
+            <div class="head">
+                <div>Next Follow-up</div>
+                <div class="mut small">Set reminder date + note</div>
+            </div>
+            <div class="body">
+
+                @if (!string.IsNullOrWhiteSpace(_fuErr))
+                {
+                    <div class="alert alert-danger py-2">@_fuErr</div>
+                }
+                @if (!string.IsNullOrWhiteSpace(_fuMsg))
+                {
+                    <div class="alert alert-success py-2">@_fuMsg</div>
+                }
+
+                <div class="row g-2 align-items-end">
+                    <div class="col-12 col-md-4">
+                        <label class="form-label mut">Next Follow-up Date</label>
+                        <InputDate class="form-control inp" @bind-Value="_fuDate" />
+                    </div>
+
+                    <div class="col-12 col-md-6">
+                        <label class="form-label mut">Follow-up Note</label>
+                        <InputText class="form-control inp" @bind-Value="_fuNote" placeholder="Call / WhatsApp / reminder note..." />
+                    </div>
+
+                    <div class="col-12 col-md-2 text-md-end">
+                        <button class="btn btn-primary w-100" type="button" @onclick="SaveFollowUp" disabled="@_fuSaving">
+                            @(_fuSaving ? "Saving..." : "Save")
+                        </button>
+
+                        <button class="btn btn-outline-light w-100 mt-2" type="button" @onclick="ClearFollowUp" disabled="@_fuSaving">
+                            Clear
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- Notes Timeline -->
+        <div class="cardx">
+            <div class="head">
+                <div>Notes Timeline</div>
+                <div class="mut small">Call • WhatsApp • Meeting • Important pin • Search</div>
+            </div>
+            <div class="body">
+
+                @if (!string.IsNullOrWhiteSpace(_noteErr))
+                {
+                    <div class="alert alert-danger py-2">@_noteErr</div>
+                }
+                @if (!string.IsNullOrWhiteSpace(_noteMsg))
+                {
+                    <div class="alert alert-success py-2">@_noteMsg</div>
+                }
+
+                <div class="row g-2 align-items-end">
+                    <div class="col-12 col-md-2">
+                        <label class="form-label mut">Type</label>
+                        <select class="form-select inp" @bind="_noteType">
+                            <option>Call</option>
+                            <option>WhatsApp</option>
+                            <option>Meeting</option>
+                            <option>Other</option>
+                        </select>
+                    </div>
+
+                    <div class="col-12 col-md-2">
+                        <label class="form-label mut">Important</label>
+                        <div class="d-flex align-items-center gap-2 bg-white inp px-3" style="height:38px;">
+                            <InputCheckbox @bind-Value="_noteImportant" />
+                            <span class="text-dark">Pin</span>
+                        </div>
+                    </div>
+
+                    <div class="col-12 col-md-6">
+                        <label class="form-label mut">Note</label>
+                        <InputText class="form-control inp" @bind-Value="_noteText" placeholder="What happened / what you spoke..." />
+                    </div>
+
+                    <div class="col-12 col-md-2 text-md-end">
+                        <button class="btn btn-primary w-100" type="button" @onclick="AddNote"
+                                disabled="@(_noteSaving || string.IsNullOrWhiteSpace(_noteText))">
+                            @(_noteSaving ? "Adding..." : "+ Add")
+                        </button>
+                    </div>
+                </div>
+
+                <div class="row g-2 mt-3 align-items-end">
+                    <div class="col-12 col-md-6">
+                        <label class="form-label mut">Search Notes</label>
+                        <input class="form-control inp" @bind="_noteSearch" @bind:event="oninput" placeholder="search in notes..." />
+                    </div>
+                    <div class="col-12 col-md-3">
+                        <label class="form-label mut">Filter Type</label>
+                        <select class="form-select inp" @bind="_noteFilterType">
+                            <option value="">All</option>
+                            <option>Call</option>
+                            <option>WhatsApp</option>
+                            <option>Meeting</option>
+                            <option>Other</option>
+                        </select>
+                    </div>
+                    <div class="col-12 col-md-3 text-md-end">
+                        <div class="mut small">Total notes</div>
+                        <div class="fw-bold">@FilteredNotes().Count</div>
+                    </div>
+                </div>
+
+                <hr class="my-3" style="border-color: rgba(255,255,255,.14);" />
+
+                @if (_notes.Count == 0)
+                {
+                    <div class="text-center mut py-4">No notes yet.</div>
+                }
+                else
+                {
+                    @foreach (var n in FilteredNotes())
+                    {
+                        <div class="bg-white text-dark rounded-4 p-3 mb-2" style="border:1px solid rgba(0,0,0,.08);">
+                            <div class="d-flex justify-content-between align-items-start gap-2">
+                                <div class="d-flex flex-wrap gap-2 align-items-center">
+                                    <span class="badge bg-secondary">@n.NoteType</span>
+                                    @if (n.IsImportant)
+                                    {
+                                        <span class="badge bg-warning text-dark">IMPORTANT</span>
+                                    }
+                                    <span class="mut small">🕒 @n.CreatedAt.ToLocalTime().ToString("dd-MMM-yyyy hh:mm tt")</span>
+                                    <span class="mut small">👤 @n.CreatedBy</span>
+                                </div>
+
+                                <button class="btn btn-sm btn-outline-danger" type="button"
+                                        @onclick="() => DeleteNote(n.CustomerNoteId)" disabled="@_noteSaving">
+                                    Delete
+                                </button>
+                            </div>
+
+                            <div class="mt-2 fw-semibold">@n.NoteText</div>
+                        </div>
+                    }
+                }
+
+            </div>
+        </div>
+
+        <!-- Attachments -->
+        <div class="cardx">
+            <div class="head">
+                <div>Attachments</div>
+                <div class="mut small">Upload customer documents</div>
+            </div>
+            <div class="body">
+
+                @if (!string.IsNullOrWhiteSpace(_attErr))
+                {
+                    <div class="alert alert-danger py-2">@_attErr</div>
+                }
+                @if (!string.IsNullOrWhiteSpace(_attMsg))
+                {
+                    <div class="alert alert-success py-2">@_attMsg</div>
+                }
+
+                <div class="row g-2 align-items-end">
+                    <div class="col-12 col-md-3">
+                        <label class="form-label mut">Type</label>
+                        <select class="form-select inp" @bind="_attType">
+                            <option>TRN</option>
+                            <option>Contract</option>
+                            <option>Quote</option>
+                            <option>Other</option>
+                        </select>
+                    </div>
+
+                    <div class="col-12 col-md-6">
+                        <label class="form-label mut">File</label>
+                        <InputFile OnChange="OnFileSelected" class="form-control inp" />
+
+                        @if (_selectedFile != null)
+                        {
+                            <div class="mut small mt-1">
+                                Selected: <b>@_selectedFile.Name</b> (@FormatBytes(_selectedFile.Size))
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="mut small mt-1">Max 20MB. PDF / Images supported.</div>
+                        }
+                    </div>
+
+                    <div class="col-12 col-md-3 text-md-end">
+                        <button class="btn btn-primary w-100" type="button" @onclick="UploadAttachment"
+                                disabled="@(_attUploading || _selectedFile is null)">
+                            @(_attUploading ? "Uploading..." : "Upload")
+                        </button>
+                    </div>
+                </div>
+
+                <hr class="my-3" style="border-color: rgba(255,255,255,.14);" />
+
+                @if (_attachments.Count == 0)
+                {
+                    <div class="text-center mut py-4">No attachments.</div>
+                }
+                else
+                {
+                    <div class="table-responsive tbl">
+                        <table class="table table-hover align-middle mb-0">
+                            <thead>
+                                <tr>
+                                    <th>Type</th>
+                                    <th>File</th>
+                                    <th class="text-end">Size</th>
+                                    <th>Date</th>
+                                    <th class="text-end" style="width:160px;">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var a in _attachments)
+                                {
+                                    <tr>
+                                        <td><span class="badge bg-secondary">@a.FileType</span></td>
+                                        <td class="fw-semibold">@a.FileName</td>
+                                        <td class="text-end">@FormatBytes(a.SizeBytes)</td>
+                                        <td>@a.CreatedAt.ToLocalTime().ToString("dd-MMM-yyyy")</td>
+                                        <td class="text-end">
+                                            <a class="btn btn-sm btn-outline-primary me-2" target="_blank"
+                                               href="@Attachments.GetPublicUrl(a)">View</a>
+
+                                            <button class="btn btn-sm btn-outline-danger" type="button"
+                                                    @onclick="() => DeleteAttachment(a.CustomerAttachmentId)">
+                                                Delete
+                                            </button>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    int _companyId;
+    int _customerId;
+
+    bool _loading;
+    string? _pageErr;
+
+    Customer? _customer;
+
+    DateTime? _fuDate;
+    string _fuNote = "";
+    bool _fuSaving;
+    string? _fuErr;
+    string? _fuMsg;
+
+    List<CustomerNote> _notes = new();
+    string _noteType = "Call";
+    bool _noteImportant;
+    string _noteText = "";
+    string _noteSearch = "";
+    string _noteFilterType = "";
+    bool _noteSaving;
+    string? _noteErr;
+    string? _noteMsg;
+
+    List<CustomerAttachment> _attachments = new();
+    string _attType = "Other";
+    IBrowserFile? _selectedFile;
+    bool _attUploading;
+    string? _attErr;
+    string? _attMsg;
+
+    string _userName = "admin";
+
+    protected override async Task OnInitializedAsync() => await LoadAll();
+
+    async Task LoadAll()
+    {
+        _loading = true;
+        _pageErr = null;
+
+        try
+        {
+            await CurrentCompany.RefreshAsync();
+            _companyId = CurrentCompany.CompanyId;
+            _customerId = Id;
+
+            var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+            _userName = auth.User?.Identity?.Name ?? "admin";
+
+            _customer = await Db.Customers.AsNoTracking()
+                .FirstOrDefaultAsync(x => x.CompanyId == _companyId && x.CustomerId == _customerId);
+
+            if (_customer != null)
+            {
+                _fuDate = _customer.NextFollowUpDate;
+                _fuNote = _customer.NextFollowUpNote ?? "";
+
+                await LoadNotes();
+                await LoadAttachments();
+            }
+        }
+        catch (Exception ex)
+        {
+            _pageErr = ex.InnerException?.Message ?? ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    async Task Reload() => await LoadAll();
+    void GoBack() => Nav.NavigateTo("/crm/customers");
+
+    async Task SaveFollowUp()
+    {
+        _fuErr = _fuMsg = null;
+        _fuSaving = true;
+
+        try
+        {
+            var c = await Db.Customers.FirstOrDefaultAsync(x => x.CompanyId == _companyId && x.CustomerId == _customerId);
+            if (c == null) { _fuErr = "Customer not found."; return; }
+
+            c.NextFollowUpDate = _fuDate;
+            c.NextFollowUpNote = string.IsNullOrWhiteSpace(_fuNote) ? null : _fuNote.Trim();
+
+            await Db.SaveChangesAsync();
+            _fuMsg = "Saved.";
+        }
+        catch (Exception ex)
+        {
+            _fuErr = ex.InnerException?.Message ?? ex.Message;
+        }
+        finally
+        {
+            _fuSaving = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    async Task ClearFollowUp()
+    {
+        _fuErr = _fuMsg = null;
+        _fuSaving = true;
+
+        try
+        {
+            _fuDate = null;
+            _fuNote = "";
+
+            var c = await Db.Customers.FirstOrDefaultAsync(x => x.CompanyId == _companyId && x.CustomerId == _customerId);
+            if (c == null) { _fuErr = "Customer not found."; return; }
+
+            c.NextFollowUpDate = null;
+            c.NextFollowUpNote = null;
+
+            await Db.SaveChangesAsync();
+            _fuMsg = "Cleared.";
+        }
+        catch (Exception ex)
+        {
+            _fuErr = ex.InnerException?.Message ?? ex.Message;
+        }
+        finally
+        {
+            _fuSaving = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    async Task LoadNotes()
+    {
+        _notes = await Db.Set<CustomerNote>()
+            .AsNoTracking()
+            .Where(x => x.CompanyId == _companyId && x.CustomerId == _customerId)
+            .OrderByDescending(x => x.IsImportant)
+            .ThenByDescending(x => x.CreatedAt)
+            .ToListAsync();
+    }
+
+    List<CustomerNote> FilteredNotes()
+    {
+        IEnumerable<CustomerNote> q = _notes;
+
+        if (!string.IsNullOrWhiteSpace(_noteFilterType))
+            q = q.Where(x => (x.NoteType ?? "").Trim() == _noteFilterType);
+
+        if (!string.IsNullOrWhiteSpace(_noteSearch))
+        {
+            var s = _noteSearch.Trim().ToLowerInvariant();
+            q = q.Where(x => (x.NoteText ?? "").ToLowerInvariant().Contains(s)
+                          || (x.CreatedBy ?? "").ToLowerInvariant().Contains(s));
+        }
+
+        return q.ToList();
+    }
+
+    async Task AddNote()
+    {
+        _noteErr = _noteMsg = null;
+
+        var text = (_noteText ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            _noteErr = "Note is required.";
+            return;
+        }
+
+        _noteSaving = true;
+        try
+        {
+            var note = new CustomerNote
+                {
+                    CompanyId = _companyId,
+                    CustomerId = _customerId,
+                    NoteType = _noteType,
+                    NoteText = text,
+                    IsImportant = _noteImportant,
+                    CreatedAt = DateTime.UtcNow,
+                    CreatedBy = _userName
+                };
+
+            Db.Add(note);
+            await Db.SaveChangesAsync();
+
+            _noteText = "";
+            _noteImportant = false;
+            _noteMsg = "Added.";
+
+            await LoadNotes();
+        }
+        catch (Exception ex)
+        {
+            _noteErr = ex.InnerException?.Message ?? ex.Message;
+        }
+        finally
+        {
+            _noteSaving = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    async Task DeleteNote(int noteId)
+    {
+        _noteErr = _noteMsg = null;
+        _noteSaving = true;
+
+        try
+        {
+            var note = await Db.Set<CustomerNote>()
+                .FirstOrDefaultAsync(x => x.CompanyId == _companyId && x.CustomerNoteId == noteId);
+
+            if (note == null) { _noteMsg = "Already deleted."; return; }
+
+            Db.Remove(note);
+            await Db.SaveChangesAsync();
+
+            _noteMsg = "Deleted.";
+            await LoadNotes();
+        }
+        catch (Exception ex)
+        {
+            _noteErr = ex.InnerException?.Message ?? ex.Message;
+        }
+        finally
+        {
+            _noteSaving = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    async Task LoadAttachments()
+    {
+        _attachments = await Attachments.ListAsync(_companyId, _customerId);
+    }
+
+    async Task OnFileSelected(InputFileChangeEventArgs e)
+    {
+        _attErr = _attMsg = null;
+        _selectedFile = e.File;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    async Task UploadAttachment()
+    {
+        _attErr = _attMsg = null;
+        if (_selectedFile == null)
+        {
+            _attErr = "Please choose a file.";
+            return;
+        }
+
+        _attUploading = true;
+        try
+        {
+            await Attachments.UploadAsync(_companyId, _customerId, _selectedFile, _attType);
+            _attMsg = "Uploaded.";
+            _selectedFile = null;
+            await LoadAttachments();
+        }
+        catch (Exception ex)
+        {
+            _attErr = ex.InnerException?.Message ?? ex.Message;
+        }
+        finally
+        {
+            _attUploading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    async Task DeleteAttachment(int attachmentId)
+    {
+        _attErr = _attMsg = null;
+        try
+        {
+            await Attachments.DeleteAsync(_companyId, attachmentId);
+            _attMsg = "Deleted.";
+            await LoadAttachments();
+        }
+        catch (Exception ex)
+        {
+            _attErr = ex.InnerException?.Message ?? ex.Message;
+        }
+        finally
+        {
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    static string FormatBytes(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024d:0.#} KB";
+        return $"{bytes / (1024d * 1024d):0.#} MB";
+    }
+}

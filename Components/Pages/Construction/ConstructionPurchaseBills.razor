@@ -1,0 +1,478 @@
+﻿@page "/construction/purchase-bills"
+@page "/construction/purchase_bills"   
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.EntityFrameworkCore
+@using UaeEInvoice.Data
+@using UaeEInvoice.Services.Auth
+@attribute [Authorize]
+
+@inject AppDbContext Db
+@inject ICurrentCompany CurrentCompany
+@inject NavigationManager Nav
+
+<PageTitle>Construction Purchase Bills</PageTitle>
+
+<style>
+    /* -------- Ultra Premium (scoped) -------- */
+    .cpb {
+        --bg0: #0b1220;
+        --bg1: #0a0f1a;
+        --card: rgba(255,255,255,.92);
+        --card2: rgba(255,255,255,.75);
+        --line: rgba(15,23,42,.10);
+        --mut: #6b7280;
+        --ink: #0f172a;
+        --ring: rgba(13,110,253,.22);
+    }
+
+    .cpb-wrap {
+        padding: 22px 12px;
+        background:
+            radial-gradient(900px 450px at 15% 10%, rgba(13,110,253,.14), transparent 60%),
+            radial-gradient(900px 450px at 85% 15%, rgba(111,66,193,.12), transparent 60%),
+            radial-gradient(700px 420px at 55% 90%, rgba(32,201,151,.10), transparent 60%),
+            linear-gradient(180deg, var(--bg0) 0%, var(--bg1) 100%);
+        min-height: calc(100vh - 56px);
+    }
+
+    .cpb-shell {
+        max-width: 1260px;
+        margin: 0 auto;
+    }
+
+    .cpb-hero {
+        border-radius: 22px;
+        padding: 18px 18px;
+        color: #eaf1ff;
+        background:
+            radial-gradient(800px 420px at 12% 10%, rgba(13,110,253,.26), transparent 55%),
+            radial-gradient(780px 420px at 88% 20%, rgba(111,66,193,.20), transparent 55%),
+            linear-gradient(135deg, rgba(255,255,255,.06), rgba(255,255,255,.02));
+        border: 1px solid rgba(255,255,255,.10);
+        box-shadow: 0 18px 50px rgba(0,0,0,.18);
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+        margin-bottom: 14px;
+    }
+
+    .cpb-title {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+    }
+
+    .cpb-icon {
+        width: 46px;
+        height: 46px;
+        border-radius: 16px;
+        display: grid;
+        place-items: center;
+        background: rgba(255,255,255,.10);
+        border: 1px solid rgba(255,255,255,.14);
+        box-shadow: inset 0 0 0 1px rgba(255,255,255,.06);
+        flex: 0 0 auto;
+    }
+
+    .cpb-h1 {
+        margin: 0;
+        font-weight: 900;
+        letter-spacing: .2px;
+        font-size: 20px;
+        line-height: 1.25;
+    }
+
+    .cpb-sub {
+        margin-top: 4px;
+        opacity: .86;
+        font-size: 12.5px;
+    }
+
+    .btnx {
+        border-radius: 999px !important;
+        padding: .58rem 1.05rem !important;
+        font-weight: 900 !important;
+        letter-spacing: .2px;
+    }
+
+    .glass {
+        background: rgba(255,255,255,.10);
+        border: 1px solid rgba(255,255,255,.14);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+    }
+
+    .cpb-card {
+        border-radius: 18px;
+        border: 1px solid var(--line);
+        background: linear-gradient(180deg, var(--card), #fbfdff);
+        box-shadow: 0 16px 40px rgba(0,0,0,.10);
+    }
+
+    .kpis {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 10px;
+        margin-bottom: 12px;
+    }
+
+    @@media (max-width: 992px) { .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    @@media (max-width: 520px) { .kpis { grid-template-columns: 1fr; } }
+
+    .kpi {
+        border-radius: 18px;
+        padding: 12px 12px;
+        border: 1px solid rgba(255,255,255,.10);
+        background: linear-gradient(135deg, rgba(255,255,255,.10), rgba(255,255,255,.06));
+        color: #eaf1ff;
+        box-shadow: 0 12px 34px rgba(0,0,0,.14);
+    }
+
+    .kpi .t { font-size: 12px; opacity: .82; }
+    .kpi .v { font-size: 18px; font-weight: 900; margin-top: 2px; }
+    .kpi .s { font-size: 12px; opacity: .78; margin-top: 2px; }
+
+    .filters {
+        padding: 12px;
+    }
+
+    .filters .form-control,
+    .filters .form-select {
+        border-radius: 14px;
+        border: 1px solid rgba(15,23,42,.14);
+        box-shadow: none;
+    }
+
+    .filters .form-control:focus,
+    .filters .form-select:focus {
+        border-color: rgba(13,110,253,.35);
+        box-shadow: 0 0 0 .25rem var(--ring);
+    }
+
+    .table-card {
+        overflow: hidden;
+    }
+
+    .table thead th {
+        font-size: 11px;
+        letter-spacing: .09em;
+        text-transform: uppercase;
+        color: var(--mut);
+        border-bottom: 1px solid rgba(15,23,42,.10) !important;
+        background: #f8fafc;
+    }
+
+    .table tbody td {
+        border-bottom: 1px solid rgba(15,23,42,.08);
+        color: var(--ink);
+        vertical-align: middle;
+    }
+
+    .chip {
+        border-radius: 999px;
+        padding: .25rem .6rem;
+        font-size: 12px;
+        font-weight: 800;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        border: 1px solid rgba(15,23,42,.10);
+        background: rgba(255,255,255,.75);
+    }
+
+    .dot {
+        width: 8px; height: 8px; border-radius: 99px;
+        background: #adb5bd;
+    }
+    .dot.ok { background: #20c997; }
+    .dot.draft { background: #6c757d; }
+
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+
+    .action-btn {
+        border-radius: 999px !important;
+        font-weight: 900 !important;
+        padding: .45rem .85rem !important;
+    }
+
+    .mut { color: var(--mut); font-size: 12px; }
+</style>
+
+<div class="cpb cpb-wrap">
+    <div class="cpb-shell">
+
+        <!-- HERO -->
+        <div class="cpb-hero">
+            <div class="cpb-title">
+                <div class="cpb-icon">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                        <path d="M4 20V8l8-4 8 4v12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                        <path d="M9 20v-6h6v6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                    </svg>
+                </div>
+                <div>
+                    <h3 class="cpb-h1 mb-0">Construction Purchase Bills</h3>
+                    <div class="cpb-sub">Store (Inventory) vs Direct to Site • CompanyId: <b>@_companyId</b></div>
+                </div>
+            </div>
+
+            <div class="d-flex gap-2">
+                <button class="btn btn-light btnx glass" type="button" @onclick="Load" disabled="@_loading">
+                    <span class="mono">↻</span>&nbsp;Refresh
+                </button>
+                <button class="btn btn-primary btnx" type="button" @onclick="NewBill">
+                    + New Bill
+                </button>
+            </div>
+        </div>
+
+        <!-- KPI -->
+        <div class="kpis">
+            <div class="kpi">
+                <div class="t">Bills (filtered)</div>
+                <div class="v">@_kpiCount</div>
+                <div class="s">Showing current filter</div>
+            </div>
+            <div class="kpi">
+                <div class="t">Total Amount</div>
+                <div class="v">@_kpiTotal.ToString("N2")</div>
+                <div class="s">AED</div>
+            </div>
+            <div class="kpi">
+                <div class="t">Posted</div>
+                <div class="v">@_kpiPosted</div>
+                <div class="s">Ready in Accounts</div>
+            </div>
+            <div class="kpi">
+                <div class="t">Draft</div>
+                <div class="v">@_kpiDraft</div>
+                <div class="s">Need post</div>
+            </div>
+        </div>
+
+        <!-- FILTERS -->
+        <div class="cpb-card filters mb-3">
+            <div class="row g-2 align-items-end">
+                <div class="col-12 col-lg-5">
+                    <label class="form-label mut mb-1">Search</label>
+                    <input class="form-control" @bind="_q" @bind:event="oninput" placeholder="Bill no / vendor / project" />
+                </div>
+
+                <div class="col-6 col-lg-2">
+                    <label class="form-label mut mb-1">From</label>
+                    <input class="form-control" type="date" @bind="_from" />
+                </div>
+
+                <div class="col-6 col-lg-2">
+                    <label class="form-label mut mb-1">To</label>
+                    <input class="form-control" type="date" @bind="_to" />
+                </div>
+
+                <div class="col-12 col-lg-2">
+                    <label class="form-label mut mb-1">Mode</label>
+                    <select class="form-select" @bind="_mode">
+                        <option value="">All</option>
+                        <option value="Store">Store</option>
+                        <option value="DirectToSite">DirectToSite</option>
+                    </select>
+                </div>
+
+                <div class="col-12 col-lg-1">
+                    <button class="btn btn-outline-secondary w-100 btnx" type="button" @onclick="Load" disabled="@_loading">
+                        Go
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(_err))
+        {
+            <div class="alert alert-danger py-2">@_err</div>
+        }
+
+        <!-- TABLE -->
+        <div class="cpb-card table-card">
+            <div class="table-responsive">
+                <table class="table mb-0 align-middle">
+                    <thead>
+                        <tr>
+                            <th style="min-width:120px;">Date</th>
+                            <th style="min-width:140px;">Bill No</th>
+                            <th style="min-width:220px;">Vendor</th>
+                            <th style="min-width:240px;">Project</th>
+                            <th style="min-width:140px;">Mode</th>
+                            <th style="min-width:140px;">Status</th>
+                            <th class="text-end" style="min-width:140px;">Total</th>
+                            <th class="text-end" style="min-width:120px;"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var r in _rows)
+                        {
+                            <tr>
+                                <td>@r.BillDate.ToString("dd-MMM-yyyy")</td>
+                                <td class="fw-semibold mono">@r.BillNo</td>
+                                <td>@r.VendorName</td>
+                                <td>@(string.IsNullOrWhiteSpace(r.ProjectName) ? "-" : r.ProjectName)</td>
+                                <td>
+                                    <span class="chip">
+                                        <span class="dot"></span>
+                                        @r.ReceiveMode
+                                    </span>
+                                </td>
+                                <td>
+                                    @if (r.Status == "Posted")
+                                    {
+                                        <span class="chip">
+                                            <span class="dot ok"></span>
+                                            Posted
+                                        </span>
+                                    }
+                                    else
+                                    {
+                                        <span class="chip">
+                                            <span class="dot draft"></span>
+                                            Draft
+                                        </span>
+                                    }
+                                </td>
+                                <td class="text-end fw-bold">@r.GrandTotal.ToString("N2")</td>
+                                <td class="text-end">
+                                    <button class="btn btn-sm btn-outline-primary action-btn"
+                                            type="button"
+                                            @onclick="@(() => OpenBill(r.Id))">
+                                        Open
+                                    </button>
+                                </td>
+                            </tr>
+                        }
+
+                        @if (_rows.Count == 0)
+                        {
+                            <tr>
+                                <td colspan="8" class="text-center text-muted py-4">
+                                    No bills found for the current filter.
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="mut mt-2">
+            Tip: Use <b>Store</b> when goods come to your company inventory. Use <b>DirectToSite</b> when supplier delivers to the site (no stock).
+        </div>
+    </div>
+</div>
+
+@code {
+    private int _companyId;
+    private string? _err;
+    private bool _loading;
+
+    // filters
+    private string _q = "";
+    private DateTime _from = DateTime.Today.AddDays(-30);
+    private DateTime _to = DateTime.Today;
+    private string _mode = "";
+
+    // rows
+    private List<RowVm> _rows = new();
+
+    // KPIs
+    private int _kpiCount;
+    private int _kpiPosted;
+    private int _kpiDraft;
+    private decimal _kpiTotal;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CurrentCompany.RefreshAsync();
+        _companyId = CurrentCompany.CompanyId;
+
+        await Load();
+    }
+
+    private void NewBill()
+    {
+        // your create page route (adjust if you used different route)
+        Nav.NavigateTo("/construction/purchase-bills/create");
+    }
+
+    private void OpenBill(int id)
+    {
+        Nav.NavigateTo($"/construction/purchase-bills/{id}");
+    }
+
+    private async Task Load()
+    {
+        _loading = true;
+        _err = null;
+
+        try
+        {
+            // base query
+            var query = Db.ConstructionPurchaseBills.AsNoTracking()
+                .Where(x => x.CompanyId == _companyId &&
+                            x.BillDate >= _from &&
+                            x.BillDate <= _to);
+
+            if (!string.IsNullOrWhiteSpace(_mode))
+                query = query.Where(x => x.ReceiveMode == _mode);
+
+            if (!string.IsNullOrWhiteSpace(_q))
+            {
+                var s = _q.Trim();
+                query = query.Where(x =>
+                    x.BillNo.Contains(s) ||
+                    x.VendorName.Contains(s) ||
+                    (x.ProjectName != null && x.ProjectName.Contains(s)));
+            }
+
+            _rows = await query
+                .OrderByDescending(x => x.BillDate)
+                .ThenByDescending(x => x.ConstructionPurchaseBillId)
+                .Select(x => new RowVm
+                {
+                    Id = x.ConstructionPurchaseBillId,
+                    BillDate = x.BillDate,
+                    BillNo = x.BillNo,
+                    VendorName = x.VendorName,
+                    ProjectName = x.ProjectName,
+                    ReceiveMode = x.ReceiveMode,
+                    Status = x.Status,
+                    GrandTotal = x.GrandTotal
+                })
+                .ToListAsync();
+
+            // KPIs
+            _kpiCount = _rows.Count;
+            _kpiPosted = _rows.Count(x => x.Status == "Posted");
+            _kpiDraft = _rows.Count(x => x.Status != "Posted");
+            _kpiTotal = _rows.Sum(x => x.GrandTotal);
+        }
+        catch (Exception ex)
+        {
+            _err = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private sealed class RowVm
+    {
+        public int Id { get; set; }
+        public DateTime BillDate { get; set; }
+        public string BillNo { get; set; } = "";
+        public string VendorName { get; set; } = "";
+        public string? ProjectName { get; set; }
+        public string ReceiveMode { get; set; } = "";
+        public string Status { get; set; } = "";
+        public decimal GrandTotal { get; set; }
+    }
+}

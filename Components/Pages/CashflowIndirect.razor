@@ -1,0 +1,666 @@
+﻿@page "/cashflow-indirect"
+@using System.Globalization
+@using Microsoft.AspNetCore.Authorization
+@using UaeEInvoice.Services
+@using UaeEInvoice.Services.Auth
+@inject CashFlowService CashFlowSvc
+@inject ICurrentCompany CurrentCompany
+@attribute [Authorize(Roles = "Admin,Accounts,Finance")]
+
+<div class="container-xxl py-4 cfi">
+
+    <!-- Header -->
+    <div class="d-flex align-items-start justify-content-between flex-wrap gap-3 mb-3">
+        <div class="d-flex align-items-center gap-3">
+            <div class="cfi-hero">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                    <path d="M4 14c2.2 0 3.5-1.6 5-1.6S12 14 14 14s3.3-1.6 5-1.6S22 14 22 14"
+                          stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+                    <path d="M2 7h20" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+                    <path d="M2 21h20" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+                    <path d="M6 7v14M18 7v14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+                </svg>
+            </div>
+
+            <div>
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <h2 class="cfi-title mb-0">Cash Flow</h2>
+                    <span class="badge cfi-badge">Indirect Method</span>
+                </div>
+                <div class="text-muted mt-1">Net income adjusted for non-cash items, working capital, investing and financing.</div>
+            </div>
+        </div>
+
+        <div class="d-flex align-items-center gap-2">
+            <span class="cfi-pill">
+                Period:
+                <b class="ms-1">@_from.ToString("dd-MM-yyyy")</b>
+                <span class="mx-2 text-muted">→</span>
+                <b>@_to.ToString("dd-MM-yyyy")</b>
+            </span>
+
+            <button class="btn btn-outline-secondary cfi-btn" @onclick="Reload" disabled="@_loading">
+                @if (_loading)
+                {
+                    <span class="spinner-border spinner-border-sm me-2"></span>
+                    <span>Loading...</span>
+                }
+                else
+                {
+                    <span>Reload</span>
+                }
+            </button>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_error))
+    {
+        <div class="alert alert-danger cfi-alert">@_error</div>
+    }
+
+    <!-- Filters -->
+    <div class="card cfi-card mb-3">
+        <div class="card-body p-3 p-md-4">
+            <div class="row g-3 align-items-end">
+                <div class="col-12 col-md-4 col-lg-3">
+                    <label class="form-label mb-1">From</label>
+                    <input type="date" class="form-control cfi-input" @bind="_from" />
+                </div>
+
+                <div class="col-12 col-md-4 col-lg-3">
+                    <label class="form-label mb-1">To</label>
+                    <input type="date" class="form-control cfi-input" @bind="_to" />
+                </div>
+
+                <div class="col-12 col-md-4 col-lg-3">
+                    <button class="btn btn-primary cfi-btn w-100" @onclick="Load" disabled="@_loading">
+                        @if (_loading)
+                        {
+                            <span class="spinner-border spinner-border-sm me-2"></span>
+                            <span>Generating…</span>
+                        }
+                        else
+                        {
+                            <span>Generate Report</span>
+                        }
+                    </button>
+                </div>
+
+                <div class="col-12 col-lg-3">
+                    <div class="d-flex gap-2 justify-content-lg-end flex-wrap">
+                        <button class="btn btn-outline-secondary cfi-btn" @onclick="Preset30" disabled="@_loading">Last 30 days</button>
+                        <button class="btn btn-outline-secondary cfi-btn" @onclick="PresetYtd" disabled="@_loading">YTD</button>
+                    </div>
+                </div>
+            </div>
+
+            @if (_r != null)
+            {
+                <div class="d-flex flex-wrap gap-2 mt-3 align-items-center">
+                    <span class="cfi-chip">GL Rows: <b class="ms-1">@_r.PeriodGlRows</b></span>
+                    <span class="cfi-chip">Income A/c: <b class="ms-1">@_r.IncomeStatementAccounts</b></span>
+                    <span class="cfi-chip">Cash Tagged: <b class="ms-1">@_r.CashAccountsTagged</b></span>
+                    <span class="cfi-chip">WC Tagged: <b class="ms-1">@_r.WorkingCapitalTagged</b></span>
+                    <span class="cfi-chip">Investing Tagged: <b class="ms-1">@_r.InvestingTagged</b></span>
+                    <span class="cfi-chip">Financing Tagged: <b class="ms-1">@_r.FinancingTagged</b></span>
+                    <span class="cfi-chip">Non-Cash Tagged: <b class="ms-1">@_r.NonCashTagged</b></span>
+
+                    <span class="ms-auto text-muted small">
+                        Currency: AED (format)
+                    </span>
+                </div>
+
+                @if (_r.LooksUntagged)
+                {
+                    <div class="alert alert-warning mt-3 cfi-alert">
+                        <b>Numbers are 0 because accounts are not tagged.</b>
+                        <div class="small mt-1">
+                            Set tags in ChartOfAccounts:
+                            <code>IsCashAccount</code>, <code>IsWorkingCapital</code>, <code>CashFlowGroup = Investing/Financing</code>, <code>IsNonCashExpense</code>.
+                        </div>
+                    </div>
+                }
+                else if (_r.PeriodGlRows == 0)
+                {
+                    <div class="alert alert-warning mt-3 cfi-alert">
+                        <b>No GL entries in selected period.</b>
+                        <div class="small mt-1">Change date range or check CompanyId in entries.</div>
+                    </div>
+                }
+                else if (_r.IncomeStatementAccounts == 0)
+                {
+                    <div class="alert alert-warning mt-3 cfi-alert">
+                        <b>Net Income is 0 because IncomeStatement accounts are not configured.</b>
+                        <div class="small mt-1">
+                            In ChartOfAccounts, ensure <code>FinancialStatement = "IncomeStatement"</code> for income/expense accounts.
+                        </div>
+                    </div>
+                }
+            }
+        </div>
+    </div>
+
+    @if (_r == null && !_loading)
+    {
+        <div class="card cfi-card">
+            <div class="card-body p-4 text-muted">
+                Generate the report to see premium cash flow breakdown.
+            </div>
+        </div>
+    }
+
+    @if (_loading)
+    {
+        <div class="row g-3">
+            @for (int i = 0; i < 5; i++)
+            {
+                <div class="col-12 col-md-6 col-lg">
+                    <div class="card cfi-kpi">
+                        <div class="card-body">
+                            <div class="cfi-sk sk1 mb-2"></div>
+                            <div class="cfi-sk sk2"></div>
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+
+    @if (_r != null && !_loading)
+    {
+        <!-- KPI cards -->
+        <div class="row g-3 mb-3">
+            <div class="col-12 col-md-6 col-lg">
+                <div class="card cfi-kpi">
+                    <div class="card-body p-3 p-md-4">
+                        <div class="cfi-kpi-label">Net Income</div>
+                        <div class="cfi-kpi-val">@Fmt(_r.NetIncome)</div>
+                        <div class="cfi-kpi-sub text-muted">Profit/Loss for the period</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-12 col-md-6 col-lg">
+                <div class="card cfi-kpi">
+                    <div class="card-body p-3 p-md-4">
+                        <div class="cfi-kpi-label">Operating Cash Flow</div>
+                        <div class="cfi-kpi-val @PosNeg(_r.OperatingCashFlow)">@Fmt(_r.OperatingCashFlow)</div>
+                        <div class="cfi-kpi-sub text-muted">Core business cash</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-12 col-md-6 col-lg">
+                <div class="card cfi-kpi">
+                    <div class="card-body p-3 p-md-4">
+                        <div class="cfi-kpi-label">Investing Cash Flow</div>
+                        <div class="cfi-kpi-val @PosNeg(_r.InvestingCashFlow)">@Fmt(_r.InvestingCashFlow)</div>
+                        <div class="cfi-kpi-sub text-muted">Assets & investments</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-12 col-md-6 col-lg">
+                <div class="card cfi-kpi">
+                    <div class="card-body p-3 p-md-4">
+                        <div class="cfi-kpi-label">Financing Cash Flow</div>
+                        <div class="cfi-kpi-val @PosNeg(_r.FinancingCashFlow)">@Fmt(_r.FinancingCashFlow)</div>
+                        <div class="cfi-kpi-sub text-muted">Loans / capital</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-12 col-md-6 col-lg">
+                <div class="card cfi-kpi cfi-kpi-total">
+                    <div class="card-body p-3 p-md-4">
+                        <div class="cfi-kpi-label">Net Cash Flow</div>
+                        <div class="cfi-kpi-val @PosNeg(_r.NetCashFlow)">@Fmt(_r.NetCashFlow)</div>
+                        <div class="cfi-kpi-sub text-muted">Operating + Investing + Financing</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sections -->
+        <div class="row g-3">
+            <div class="col-12 col-lg-6">
+                <div class="card cfi-card h-100">
+                    <div class="card-body p-3 p-md-4">
+                        <div class="cfi-sec-head">
+                            <div>
+                                <div class="cfi-sec-title">Operating Activities</div>
+                                <div class="text-muted small">Indirect method: NI + non-cash + working capital</div>
+                            </div>
+                            <div class="cfi-sec-total @PosNeg(_r.OperatingCashFlow)">
+                                @Fmt(_r.OperatingCashFlow)
+                            </div>
+                        </div>
+
+                        <div class="cfi-lines mt-3">
+                            <div class="cfi-line strong">
+                                <div>Net Income</div>
+                                <div class="text-end">@Fmt(_r.NetIncome)</div>
+                            </div>
+
+                            @if (_r.NonCashAdjustments.Count > 0)
+                            {
+                                <div class="cfi-subhead">Non-cash adjustments</div>
+                                @foreach (var x in _r.NonCashAdjustments)
+                                {
+                                    <div class="cfi-line">
+                                        <div class="text-muted">@x.Name</div>
+                                        <div class="text-end">@Fmt(x.Amount)</div>
+                                    </div>
+                                }
+                            }
+
+                            @if (_r.WorkingCapitalChanges.Count > 0)
+                            {
+                                <div class="cfi-subhead">Working capital changes</div>
+                                @foreach (var x in _r.WorkingCapitalChanges)
+                                {
+                                    <div class="cfi-line">
+                                        <div class="text-muted">@x.Name</div>
+                                        <div class="text-end">@Fmt(x.Amount)</div>
+                                    </div>
+                                }
+                            }
+
+                            <div class="cfi-line total">
+                                <div>Operating Cash Flow</div>
+                                <div class="text-end fw-bold @PosNeg(_r.OperatingCashFlow)">@Fmt(_r.OperatingCashFlow)</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-12 col-lg-6">
+                <div class="card cfi-card h-100">
+                    <div class="card-body p-3 p-md-4">
+                        <div class="cfi-sec-head">
+                            <div>
+                                <div class="cfi-sec-title">Investing Activities</div>
+                                <div class="text-muted small">Cash movements tagged as Investing</div>
+                            </div>
+                            <div class="cfi-sec-total @PosNeg(_r.InvestingCashFlow)">
+                                @Fmt(_r.InvestingCashFlow)
+                            </div>
+                        </div>
+
+                        <div class="cfi-lines mt-3">
+                            @if (_r.InvestingActivities.Count == 0)
+                            {
+                                <div class="text-muted">No investing cash movements found.</div>
+                            }
+                            else
+                            {
+                                @foreach (var x in _r.InvestingActivities)
+                                {
+                                    <div class="cfi-line">
+                                        <div class="text-muted">@x.Name</div>
+                                        <div class="text-end">@Fmt(x.Amount)</div>
+                                    </div>
+                                }
+                            }
+
+                            <div class="cfi-line total">
+                                <div>Investing Cash Flow</div>
+                                <div class="text-end fw-bold @PosNeg(_r.InvestingCashFlow)">@Fmt(_r.InvestingCashFlow)</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-12">
+                <div class="card cfi-card">
+                    <div class="card-body p-3 p-md-4">
+                        <div class="cfi-sec-head">
+                            <div>
+                                <div class="cfi-sec-title">Financing Activities</div>
+                                <div class="text-muted small">Cash movements tagged as Financing</div>
+                            </div>
+                            <div class="cfi-sec-total @PosNeg(_r.FinancingCashFlow)">
+                                @Fmt(_r.FinancingCashFlow)
+                            </div>
+                        </div>
+
+                        <div class="cfi-lines mt-3">
+                            @if (_r.FinancingActivities.Count == 0)
+                            {
+                                <div class="text-muted">No financing cash movements found.</div>
+                            }
+                            else
+                            {
+                                @foreach (var x in _r.FinancingActivities)
+                                {
+                                    <div class="cfi-line">
+                                        <div class="text-muted">@x.Name</div>
+                                        <div class="text-end">@Fmt(x.Amount)</div>
+                                    </div>
+                                }
+                            }
+
+                            <div class="cfi-line total">
+                                <div>Financing Cash Flow</div>
+                                <div class="text-end fw-bold @PosNeg(_r.FinancingCashFlow)">@Fmt(_r.FinancingCashFlow)</div>
+                            </div>
+                        </div>
+
+                        <div class="cfi-bottom mt-3">
+                            <div class="cfi-net">
+                                <div class="text-muted small">Net Cash Flow</div>
+                                <div class="fw-black @PosNeg(_r.NetCashFlow)">@Fmt(_r.NetCashFlow)</div>
+                            </div>
+                            <div class="text-muted small">
+                                Tip: Maintain COA tags and keep voucher postings consistent.
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+<!-- ✅ styles unchanged -->
+<style>
+    .cfi {
+        --r: 18px;
+    }
+
+    .cfi-title {
+        font-weight: 950;
+        letter-spacing: .2px;
+    }
+
+    .cfi-hero {
+        width: 46px;
+        height: 46px;
+        border-radius: 16px;
+        display: grid;
+        place-items: center;
+        background: rgba(13,110,253,.10);
+        color: var(--bs-primary);
+        border: 1px solid rgba(13,110,253,.18);
+        box-shadow: 0 12px 28px rgba(0,0,0,.08);
+    }
+
+    .cfi-badge {
+        background: rgba(13,110,253,.10);
+        color: rgba(13,110,253,1);
+        border: 1px solid rgba(13,110,253,.22);
+        font-weight: 800;
+        padding: 7px 12px;
+        border-radius: 999px;
+    }
+
+    .cfi-pill {
+        padding: 10px 14px;
+        border-radius: 999px;
+        background: rgba(0,0,0,.03);
+        border: 1px solid rgba(0,0,0,.06);
+        font-weight: 600;
+    }
+
+    .cfi-btn {
+        border-radius: 14px;
+        padding: 10px 16px;
+        font-weight: 700;
+    }
+
+    .cfi-card {
+        border-radius: var(--r);
+        border: 1px solid rgba(0,0,0,.06);
+        box-shadow: 0 14px 34px rgba(0,0,0,.06);
+        overflow: hidden;
+        background: #fff;
+    }
+
+    .cfi-input {
+        border-radius: 14px;
+        border-color: rgba(0,0,0,.10);
+        padding: 11px 12px;
+    }
+
+    .cfi-alert {
+        border-radius: var(--r);
+        border: 1px solid rgba(220,53,69,.25);
+    }
+
+    .cfi-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 12px;
+        border-radius: 999px;
+        border: 1px solid rgba(0,0,0,.08);
+        background: rgba(0,0,0,.02);
+        font-weight: 650;
+    }
+
+    .cfi-kpi {
+        border-radius: var(--r);
+        border: 1px solid rgba(0,0,0,.06);
+        box-shadow: 0 12px 30px rgba(0,0,0,.06);
+        overflow: hidden;
+    }
+
+    .cfi-kpi-total {
+        background: linear-gradient(135deg, rgba(255,193,7,.18), rgba(255,193,7,.04));
+    }
+
+    .cfi-kpi-label {
+        text-transform: uppercase;
+        letter-spacing: .10em;
+        font-size: .75rem;
+        color: rgba(0,0,0,.55);
+        font-weight: 800;
+    }
+
+    .cfi-kpi-val {
+        font-size: 34px;
+        font-weight: 950;
+        letter-spacing: .2px;
+        margin-top: 6px;
+        line-height: 1.05;
+    }
+
+    .cfi-kpi-sub {
+        font-size: .85rem;
+        margin-top: 4px;
+    }
+
+    .pos {
+        color: #198754;
+    }
+
+    .neg {
+        color: #dc3545;
+    }
+
+    .cfi-sec-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+    }
+
+    .cfi-sec-title {
+        font-weight: 950;
+        font-size: 1.15rem;
+        letter-spacing: .2px;
+    }
+
+    .cfi-sec-total {
+        font-weight: 950;
+        font-size: 1.1rem;
+        padding: 10px 12px;
+        border-radius: 14px;
+        background: rgba(0,0,0,.03);
+        border: 1px solid rgba(0,0,0,.06);
+        min-width: 170px;
+        text-align: right;
+    }
+
+    .cfi-lines {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    .cfi-subhead {
+        margin-top: 8px;
+        padding-top: 10px;
+        border-top: 1px dashed rgba(0,0,0,.10);
+        font-weight: 850;
+        color: rgba(0,0,0,.70);
+        text-transform: uppercase;
+        letter-spacing: .08em;
+        font-size: .72rem;
+    }
+
+    .cfi-line {
+        display: flex;
+        justify-content: space-between;
+        gap: 14px;
+        padding: 10px 0;
+        border-bottom: 1px dashed rgba(0,0,0,.10);
+    }
+
+        .cfi-line.strong {
+            border-bottom: 1px solid rgba(0,0,0,.10);
+        }
+
+        .cfi-line.total {
+            border-bottom: none;
+            border-top: 2px solid rgba(0,0,0,.14);
+            padding-top: 14px;
+        }
+
+    .cfi-bottom {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        padding-top: 14px;
+        border-top: 1px solid rgba(0,0,0,.08);
+    }
+
+    .fw-black {
+        font-weight: 950;
+        font-size: 1.35rem;
+    }
+
+    .cfi-sk {
+        border-radius: 12px;
+        background: linear-gradient(90deg, rgba(0,0,0,.05), rgba(0,0,0,.10), rgba(0,0,0,.05));
+        background-size: 220% 100%;
+        animation: sk 1.2s infinite;
+    }
+
+    .sk1 {
+        height: 14px;
+        width: 60%;
+    }
+
+    .sk2 {
+        height: 26px;
+        width: 80%;
+    }
+
+    @@keyframes sk {
+        0% {
+            background-position: 220% 0;
+        }
+
+        100% {
+            background-position: -220% 0;
+        }
+    }
+</style>
+
+@code {
+    private int _companyId;
+
+    private DateTime _from = DateTime.Today.AddDays(-30);
+    private DateTime _to = DateTime.Today;
+
+    private bool _loading;
+    private string? _error;
+
+    private CashFlowReport? _r;
+
+    private readonly CultureInfo _aed = CultureInfo.GetCultureInfo("en-AE");
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            await EnsureCompanyAsync();
+            await Load(); // ✅ load by default (optional)
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private async Task EnsureCompanyAsync()
+    {
+        await CurrentCompany.RefreshAsync();
+        _companyId = CurrentCompany.CompanyId;
+
+        if (_companyId <= 0)
+            throw new Exception("CompanyId not found from login/session.");
+    }
+
+    private async Task Reload() => await Load();
+
+    private void Preset30()
+    {
+        _from = DateTime.Today.AddDays(-30);
+        _to = DateTime.Today;
+    }
+
+    private void PresetYtd()
+    {
+        _from = new DateTime(DateTime.Today.Year, 1, 1);
+        _to = DateTime.Today;
+    }
+
+    private async Task Load()
+    {
+        _loading = true;
+        _error = null;
+
+        try
+        {
+            await EnsureCompanyAsync(); // ✅ ALWAYS refresh company
+
+            if (_from > _to)
+                throw new Exception("From date cannot be greater than To date.");
+
+            var fromDate = _from.Date;
+            var toDateExclusive = _to.Date.AddDays(1);
+
+            _r = await CashFlowSvc.GetIndirectCashFlowAsync(_companyId, fromDate, toDateExclusive);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            _r = null;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private string Fmt(decimal v)
+        => string.Format(_aed, "{0:C2}", v);
+
+    private string PosNeg(decimal v) => v >= 0 ? "pos" : "neg";
+}

@@ -1,0 +1,430 @@
+﻿@page "/vat-return"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+
+@using UaeEInvoice.Services.Reports
+@using UaeEInvoice.Services.Auth
+@inject VatReportService Vat
+@inject VatReturnExportService Exporter
+@inject ICurrentCompany CurrentCompany
+@inject IJSRuntime JS
+
+<style>
+    :root {
+        --bd: rgba(255,255,255,.12);
+        --tx: rgba(255,255,255,.92);
+        --mut: rgba(255,255,255,.62);
+        --sh: 0 18px 70px rgba(0,0,0,.45);
+    }
+
+    .wrap {
+        background: radial-gradient(1100px 650px at 12% -10%, rgba(34,197,94,.20), transparent 60%), radial-gradient(900px 520px at 90% 0%, rgba(59,130,246,.18), transparent 60%), linear-gradient(180deg, #0b1220, #070b16 70%, #040711);
+        min-height: calc(100vh - 70px);
+        border-radius: 22px;
+        padding: 18px;
+        color: var(--tx);
+    }
+
+    .hero {
+        border-radius: 22px;
+        padding: 16px;
+        border: 1px solid var(--bd);
+        box-shadow: var(--sh);
+        background: linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,.03));
+        backdrop-filter: blur(10px);
+    }
+
+    .cardx {
+        border-radius: 20px;
+        border: 1px solid rgba(255,255,255,.10);
+        background: rgba(255,255,255,.06);
+        box-shadow: 0 14px 35px rgba(0,0,0,.22);
+        overflow: hidden;
+    }
+
+    .head {
+        padding: 12px 14px;
+        border-bottom: 1px solid rgba(255,255,255,.08);
+        font-weight: 900;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
+    }
+
+    .body {
+        padding: 14px;
+    }
+
+    .mut {
+        color: var(--mut);
+    }
+
+    .inp {
+        border-radius: 12px !important;
+        background: rgba(255,255,255,.92) !important;
+        border: 1px solid rgba(15,23,42,.12) !important;
+    }
+
+    .tile {
+        border-radius: 18px;
+        border: 1px solid rgba(255,255,255,.12);
+        background: rgba(255,255,255,.08);
+        padding: 14px;
+    }
+
+        .tile .lbl {
+            color: var(--mut);
+            font-size: .85rem;
+        }
+
+        .tile .val {
+            font-size: 1.8rem;
+            font-weight: 900;
+        }
+
+    .tbl {
+        border-radius: 14px;
+        overflow: hidden;
+        background: #fff;
+        color: #0f172a;
+        border: 1px solid rgba(15,23,42,.10);
+    }
+
+        .tbl thead th {
+            background: #f1f5f9 !important;
+            font-size: .80rem;
+            text-transform: uppercase;
+            letter-spacing: .3px;
+            white-space: nowrap;
+        }
+
+    .btn {
+        border-radius: 12px;
+        font-weight: 900;
+    }
+</style>
+
+<div class="container-xxl py-4">
+    <div class="wrap">
+
+        <!-- Header -->
+        <div class="hero mb-3">
+            <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+                <div>
+                    <h2 style="font-weight:900;" class="mb-1">VAT Return Summary (UAE FTA)</h2>
+                    <div class="mut">CompanyId: <b>@_companyId</b></div>
+                </div>
+
+                <div class="d-flex gap-2 flex-wrap">
+                    <button class="btn btn-light" @onclick="Load" disabled="@_loading">@(_loading ? "Loading..." : "Refresh")</button>
+                    <button class="btn btn-outline-light" @onclick="ExportPdf" disabled="@(_loading || _vm == null)">Export PDF</button>
+                    <button class="btn btn-primary" @onclick="ExportExcel" disabled="@(_loading || _vm == null)">Export Excel</button>
+                </div>
+            </div>
+
+            <div class="row g-2 align-items-end mt-3">
+                <div class="col-12 col-md-3">
+                    <label class="form-label mut">From</label>
+                    <input type="date" class="form-control inp" @bind="_from" />
+                </div>
+                <div class="col-12 col-md-3">
+                    <label class="form-label mut">To</label>
+                    <input type="date" class="form-control inp" @bind="_to" />
+                </div>
+                <div class="col-12 col-md-2 d-grid">
+                    <button class="btn btn-primary" @onclick="Load" disabled="@_loading">Apply</button>
+                </div>
+            </div>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(_err))
+        {
+            <div class="alert alert-danger py-2">@_err</div>
+        }
+
+        @if (_vm == null)
+        {
+            <div class="cardx"><div class="body text-center mut py-5">No data.</div></div>
+        }
+        else
+        {
+            <!-- Summary Tiles -->
+            <div class="row g-3 mb-3">
+                <div class="col-12 col-md-4">
+                    <div class="tile">
+                        <div class="lbl">Output VAT (Sales VAT)</div>
+                        <div class="val">@_vm.Sales.Vat.ToString("0.00")</div>
+                        <div class="mut small">Taxable: @_vm.Sales.Taxable.ToString("0.00") • Gross: @_vm.Sales.Gross.ToString("0.00")</div>
+                    </div>
+                </div>
+                <div class="col-12 col-md-4">
+                    <div class="tile">
+                        <div class="lbl">Input VAT (Purchase VAT)</div>
+                        <div class="val">@_vm.Purchases.Vat.ToString("0.00")</div>
+                        <div class="mut small">Taxable: @_vm.Purchases.Taxable.ToString("0.00") • Gross: @_vm.Purchases.Gross.ToString("0.00")</div>
+                    </div>
+                </div>
+                <div class="col-12 col-md-4">
+                    <div class="tile">
+                        <div class="lbl">Net VAT Payable / (Refund)</div>
+                        <div class="val">@_vm.NetVatPayable.ToString("0.00")</div>
+                        <div class="mut small">Output - Input</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Rate Breakup: Sales + Purchases -->
+            <div class="row g-3 mb-3">
+                <!-- Sales Rate Breakup -->
+                <div class="col-12 col-lg-6">
+                    <div class="cardx">
+                        <div class="head">
+                            <div>Sales Rate Breakup</div>
+                            <div class="mut small">Grouped by VAT rate</div>
+                        </div>
+                        <div class="body">
+                            <div class="tbl">
+                                <table class="table table-hover align-middle mb-0">
+                                    <thead>
+                                        <tr>
+                                            <th style="width:120px;">Rate</th>
+                                            <th class="text-end">Taxable</th>
+                                            <th class="text-end">VAT</th>
+                                            <th class="text-end">Gross</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @if (_vm.Sales.ByRate == null || _vm.Sales.ByRate.Count == 0)
+                                        {
+                                            <tr><td colspan="4" class="text-center text-muted py-4">No sales breakup</td></tr>
+                                        }
+                                        else
+                                        {
+                                            @foreach (var r in _vm.Sales.ByRate.OrderByDescending(x => x.VatRate))
+                                            {
+                                                <tr>
+                                                    <td class="fw-semibold">@FormatRate(r.VatRate)</td>
+                                                    <td class="text-end">@r.Taxable.ToString("0.00")</td>
+                                                    <td class="text-end">@r.Vat.ToString("0.00")</td>
+                                                    <td class="text-end fw-semibold">@r.Gross.ToString("0.00")</td>
+                                                </tr>
+                                            }
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Purchase Rate Breakup -->
+                <div class="col-12 col-lg-6">
+                    <div class="cardx">
+                        <div class="head">
+                            <div>Purchase Rate Breakup</div>
+                            <div class="mut small">Grouped by VAT rate</div>
+                        </div>
+                        <div class="body">
+                            <div class="tbl">
+                                <table class="table table-hover align-middle mb-0">
+                                    <thead>
+                                        <tr>
+                                            <th style="width:120px;">Rate</th>
+                                            <th class="text-end">Taxable</th>
+                                            <th class="text-end">VAT</th>
+                                            <th class="text-end">Gross</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @if (_vm.Purchases.ByRate == null || _vm.Purchases.ByRate.Count == 0)
+                                        {
+                                            <tr><td colspan="4" class="text-center text-muted py-4">No purchase breakup</td></tr>
+                                        }
+                                        else
+                                        {
+                                            @foreach (var r in _vm.Purchases.ByRate.OrderByDescending(x => x.VatRate))
+                                            {
+                                                <tr>
+                                                    <td class="fw-semibold">@FormatRate(r.VatRate)</td>
+                                                    <td class="text-end">@r.Taxable.ToString("0.00")</td>
+                                                    <td class="text-end">@r.Vat.ToString("0.00")</td>
+                                                    <td class="text-end fw-semibold">@r.Gross.ToString("0.00")</td>
+                                                </tr>
+                                            }
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <div class="mut small mt-2">
+                                If purchase breakup is empty: ensure <b>DbSet&lt;PurchaseInvoiceLine&gt; PurchaseInvoiceLines</b> exists and lines are saved.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Docs Tables -->
+            <div class="row g-3">
+                <!-- Sales Docs -->
+                <div class="col-12 col-lg-6">
+                    <div class="cardx">
+                        <div class="head">
+                            <div>Sales (Output VAT)</div>
+                            <div class="mut small">Invoices: <b>@_vm.Sales.Docs.Count</b></div>
+                        </div>
+                        <div class="body">
+                            <div class="tbl">
+                                <table class="table table-hover align-middle mb-0">
+                                    <thead>
+                                        <tr>
+                                            <th style="width:110px;">Date</th>
+                                            <th style="width:150px;">Invoice</th>
+                                            <th>Customer</th>
+                                            <th class="text-end" style="width:110px;">VAT</th>
+                                            <th class="text-end" style="width:120px;">Gross</th>
+                                            <th style="width:90px;">Open</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var d in _vm.Sales.Docs.OrderByDescending(x => x.DocDate))
+                                        {
+                                            <tr>
+                                                <td>@d.DocDate.ToString("dd-MMM-yyyy")</td>
+                                                <td class="fw-semibold">@d.DocNo</td>
+                                                <td>@d.PartyName</td>
+                                                <td class="text-end">@d.Vat.ToString("0.00")</td>
+                                                <td class="text-end fw-semibold">@d.Gross.ToString("0.00")</td>
+                                                <td><a class="btn btn-sm btn-primary" href="@($"/invoice-view/{d.DocId}")">Open</a></td>
+                                            </tr>
+                                        }
+                                        @if (!_vm.Sales.Docs.Any())
+                                        {
+                                            <tr><td colspan="6" class="text-center text-muted py-4">No sales invoices</td></tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Purchase Docs -->
+                <div class="col-12 col-lg-6">
+                    <div class="cardx">
+                        <div class="head">
+                            <div>Purchases (Input VAT)</div>
+                            <div class="mut small">Bills: <b>@_vm.Purchases.Docs.Count</b></div>
+                        </div>
+                        <div class="body">
+                            <div class="tbl">
+                                <table class="table table-hover align-middle mb-0">
+                                    <thead>
+                                        <tr>
+                                            <th style="width:110px;">Date</th>
+                                            <th style="width:150px;">Purchase</th>
+                                            <th>Vendor</th>
+                                            <th class="text-end" style="width:110px;">VAT</th>
+                                            <th class="text-end" style="width:120px;">Gross</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var d in _vm.Purchases.Docs.OrderByDescending(x => x.DocDate))
+                                        {
+                                            <tr>
+                                                <td>@d.DocDate.ToString("dd-MMM-yyyy")</td>
+                                                <td class="fw-semibold">@d.DocNo</td>
+                                                <td>@d.PartyName</td>
+                                                <td class="text-end">@d.Vat.ToString("0.00")</td>
+                                                <td class="text-end fw-semibold">@d.Gross.ToString("0.00")</td>
+                                            </tr>
+                                        }
+                                        @if (!_vm.Purchases.Docs.Any())
+                                        {
+                                            <tr><td colspan="5" class="text-center text-muted py-4">No purchase invoices</td></tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    int _companyId;
+    bool _loading;
+    string? _err;
+
+    DateTime _from = new(DateTime.Today.Year, DateTime.Today.Month, 1);
+    DateTime _to = DateTime.Today;
+
+    VatReportService.VatReturnDto? _vm;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CurrentCompany.RefreshAsync();
+        _companyId = CurrentCompany.CompanyId;
+        await Load();
+    }
+
+    async Task Load()
+    {
+        _err = null;
+        _loading = true;
+
+        try
+        {
+            await CurrentCompany.RefreshAsync();
+            _companyId = CurrentCompany.CompanyId;
+            if (_companyId <= 0) throw new Exception("Company not resolved.");
+
+            _vm = await Vat.GetVatReturnAsync(_companyId, _from, _to);
+        }
+        catch (Exception ex)
+        {
+            _vm = null;
+            _err = ex.InnerException?.Message ?? ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    string FormatRate(decimal rate)
+    {
+        // rate might be 0.05 or 5 depending on old data. normalize for display.
+        var normalized = rate > 1m ? rate / 100m : rate;
+        return $"{normalized * 100m:0.##}%";
+    }
+
+    async Task ExportPdf()
+    {
+        if (_vm == null) return;
+
+        var bytes = Exporter.BuildPdf(_vm, $"Company {_companyId}");
+        var base64 = Convert.ToBase64String(bytes);
+
+        await JS.InvokeVoidAsync("downloadFileFromBytes",
+            $"VAT-Return-{_vm.FromDate:yyyyMMdd}-{_vm.ToDate:yyyyMMdd}.pdf",
+            "application/pdf",
+            base64);
+    }
+
+    async Task ExportExcel()
+    {
+        if (_vm == null) return;
+
+        var bytes = Exporter.BuildExcelCsv(_vm, $"Company {_companyId}");
+        var base64 = Convert.ToBase64String(bytes);
+
+        await JS.InvokeVoidAsync("downloadFileFromBytes",
+            $"VAT-Return-{_vm.FromDate:yyyyMMdd}-{_vm.ToDate:yyyyMMdd}.csv",
+            "text/csv",
+            base64);
+    }
+}

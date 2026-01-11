@@ -1,0 +1,180 @@
+﻿@page "/expenses"
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.Identity
+@using UaeEInvoice.Data
+
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject AuthenticationStateProvider AuthStateProvider
+@inject UserManager<ApplicationUser> UserManager
+@inject NavigationManager Nav
+
+<h1 class="mb-1">Expenses</h1>
+<p class="text-muted mb-4">Expense vouchers posted to the ledger.</p>
+
+@if (!string.IsNullOrWhiteSpace(_error))
+{
+    <div class="alert alert-danger">@_error</div>
+}
+
+<div class="card p-3 shadow-sm rounded-4 mb-3">
+    <div class="row g-3 align-items-end">
+        <div class="col-md-3">
+            <label class="form-label">From</label>
+            <input type="date" class="form-control"
+                   @bind-value="From"
+                   @bind-value:format="yyyy-MM-dd" />
+        </div>
+        <div class="col-md-3">
+            <label class="form-label">To</label>
+            <input type="date" class="form-control"
+                   @bind-value="To"
+                   @bind-value:format="yyyy-MM-dd" />
+        </div>
+        <div class="col-md-6 d-flex gap-2 justify-content-end">
+            <button class="btn btn-primary px-4" @onclick="LoadAsync" disabled="@_loading">Refresh</button>
+            <button class="btn btn-outline-secondary px-4" @onclick="ClearAsync" disabled="@_loading">Clear</button>
+            <button class="btn btn-success px-4" @onclick="@(()=>Nav.NavigateTo("/expense-create"))">
+                + New Expense
+            </button>
+        </div>
+    </div>
+</div>
+
+<div class="card shadow-sm rounded-4 overflow-hidden">
+    <div class="table-responsive">
+        <table class="table mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th style="width:140px;">Date</th>
+                    <th style="width:200px;">Voucher</th>
+                    <th class="text-end" style="width:160px;">Amount</th>
+                    <th style="width:140px;">Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (_loading)
+                {
+                    <tr><td colspan="4" class="text-center text-muted py-4">Loading...</td></tr>
+                }
+                else if (Rows.Count == 0)
+                {
+                    <tr><td colspan="4" class="text-center text-muted py-4">No expenses found.</td></tr>
+                }
+                else
+                {
+                    @foreach (var r in Rows)
+                    {
+                        <tr>
+                            <td>@r.Date.ToString("dd-MM-yyyy")</td>
+                            <td class="fw-semibold">@r.VoucherNo</td>
+                            <td class="text-end">@r.Amount.ToString("0.00")</td>
+                            <td>
+                                <a class="btn btn-sm btn-outline-primary"
+                                   href="@($"/voucher/{r.VoucherNo}")">
+                                    View
+                                </a>
+                            </td>
+                        </tr>
+                    }
+
+                    <tr class="fw-bold">
+                        <td colspan="2" class="text-end">Total</td>
+                        <td class="text-end">@Rows.Sum(x => x.Amount).ToString("0.00")</td>
+                        <td></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+@code {
+    private bool _loading;
+    private string? _error;
+
+    private DateTime From = DateTime.Today.AddDays(-29);
+    private DateTime To = DateTime.Today;
+
+    private List<ExpenseRow> Rows = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task<int> GetLoggedInCompanyIdAsync()
+    {
+        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = auth.User;
+
+        if (user?.Identity?.IsAuthenticated != true)
+            return 0;
+
+        var appUser = await UserManager.GetUserAsync(user);
+        return appUser?.CompanyId ?? 0;
+    }
+
+    private async Task LoadAsync()
+    {
+        _error = null;
+        _loading = true;
+
+        try
+        {
+            var companyId = await GetLoggedInCompanyIdAsync();
+            if (companyId <= 0) throw new Exception("Company not detected.");
+
+            var fromDate = From.Date;
+            var toExclusive = To.Date.AddDays(1);
+
+            await using var db = await DbFactory.CreateDbContextAsync();
+
+            // Expense voucher lines are saved with RefNo like "EXP-YYYYMM-00001"
+            // We show one row per voucher by grouping RefNo.
+            var data = await db.LedgerEntries
+                .AsNoTracking()
+                .Where(x => x.CompanyId == companyId
+                            && x.TxnDate >= fromDate
+                            && x.TxnDate < toExclusive
+                            && x.RefNo != null
+                            && x.RefNo.StartsWith("EXP-"))
+                .GroupBy(x => x.RefNo!)
+                .Select(g => new ExpenseRow
+                    {
+                        VoucherNo = g.Key,
+                        Date = g.Max(x => x.TxnDate),
+                        // total debit amount in that voucher (expense line is debit)
+                        Amount = g.Sum(x => x.Debit)
+                    })
+                .OrderByDescending(x => x.Date)
+                .ThenByDescending(x => x.VoucherNo)
+                .ToListAsync();
+
+            Rows = data;
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            Rows = new();
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task ClearAsync()
+    {
+        From = DateTime.Today.AddDays(-29);
+        To = DateTime.Today;
+        await LoadAsync();
+    }
+
+    private sealed class ExpenseRow
+    {
+        public string VoucherNo { get; set; } = "";
+        public DateTime Date { get; set; }
+        public decimal Amount { get; set; }
+    }
+}

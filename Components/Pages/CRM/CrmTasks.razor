@@ -1,0 +1,462 @@
+﻿@page "/crm/tasks"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+
+@using UaeEInvoice.Services.Auth
+@using UaeEInvoice.Services.CRM
+@inject CustomerTasksService Tasks
+@inject ICurrentCompany CurrentCompany
+@inject NavigationManager Nav
+
+<style>
+    :root {
+        --bd: rgba(255,255,255,.12);
+        --tx: rgba(255,255,255,.92);
+        --mut: rgba(255,255,255,.62);
+        --sh: 0 18px 70px rgba(0,0,0,.45);
+    }
+
+    .wrap {
+        background: radial-gradient(1100px 650px at 12% -10%, rgba(34,197,94,.20), transparent 60%), radial-gradient(900px 520px at 90% 0%, rgba(59,130,246,.18), transparent 60%), linear-gradient(180deg, #0b1220, #070b16 70%, #040711);
+        min-height: calc(100vh - 70px);
+        border-radius: 22px;
+        padding: 18px;
+        color: var(--tx);
+    }
+
+    .hero {
+        border-radius: 22px;
+        padding: 16px;
+        border: 1px solid var(--bd);
+        box-shadow: var(--sh);
+        background: linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,.03));
+        backdrop-filter: blur(10px);
+    }
+
+    .cardx {
+        border-radius: 20px;
+        border: 1px solid rgba(255,255,255,.10);
+        background: rgba(255,255,255,.06);
+        box-shadow: 0 14px 35px rgba(0,0,0,.22);
+        overflow: hidden;
+    }
+
+    .head {
+        padding: 12px 14px;
+        border-bottom: 1px solid rgba(255,255,255,.08);
+        font-weight: 900;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
+    }
+
+    .body {
+        padding: 14px;
+    }
+
+    .mut {
+        color: var(--mut);
+    }
+
+    .inp {
+        border-radius: 12px !important;
+        background: rgba(255,255,255,.92) !important;
+        border: 1px solid rgba(15,23,42,.12) !important;
+    }
+
+    .tile {
+        border-radius: 18px;
+        border: 1px solid rgba(255,255,255,.12);
+        background: rgba(255,255,255,.08);
+        padding: 14px;
+    }
+
+        .tile .lbl {
+            color: var(--mut);
+            font-size: .85rem;
+        }
+
+        .tile .val {
+            font-size: 1.8rem;
+            font-weight: 900;
+        }
+
+    .tbl {
+        border-radius: 14px;
+        overflow: hidden;
+        background: #fff;
+        color: #0f172a;
+        border: 1px solid rgba(15,23,42,.10);
+    }
+
+        .tbl thead th {
+            background: #f1f5f9 !important;
+            font-size: .80rem;
+            text-transform: uppercase;
+            letter-spacing: .3px;
+            white-space: nowrap;
+        }
+
+    .badgePill {
+        border-radius: 999px;
+        padding: .25rem .6rem;
+        font-weight: 900;
+        font-size: .78rem;
+        display: inline-flex;
+        align-items: center;
+        gap: .35rem;
+    }
+
+    .bOver {
+        background: #fee2e2;
+        color: #7f1d1d;
+    }
+
+    .bToday {
+        background: #dbeafe;
+        color: #1e3a8a;
+    }
+
+    .bUp {
+        background: #dcfce7;
+        color: #14532d;
+    }
+</style>
+
+<div class="container-xxl py-4">
+    <div class="wrap">
+
+        <div class="hero mb-3">
+            <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+                <div>
+                    <h2 style="font-weight:900;" class="mb-1">Tasks Dashboard</h2>
+                    <div class="mut">Collections / follow-ups • Today / Overdue / Upcoming</div>
+                    <div class="mut mt-1">CompanyId: <b>@_companyId</b> • Today: <b>@_today.ToString("dd-MMM-yyyy")</b></div>
+                </div>
+
+                <div class="d-flex gap-2">
+                    <button class="btn btn-light" type="button" @onclick="Load" disabled="@_loading">
+                        @(_loading ? "Loading..." : "Refresh")
+                    </button>
+                </div>
+            </div>
+
+            <!-- ✅ QUICK ADD TASK -->
+            <div class="cardx mt-3">
+                <div class="head">
+                    <div>Quick Add Task</div>
+                    <div class="mut small">Create follow-up from here</div>
+                </div>
+                <div class="body">
+                    @if (!string.IsNullOrWhiteSpace(_addErr))
+                    {
+                        <div class="alert alert-danger py-2">@_addErr</div>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(_addMsg))
+                    {
+                        <div class="alert alert-success py-2">@_addMsg</div>
+                    }
+
+                    <div class="row g-2 align-items-end">
+                        <div class="col-12 col-md-4">
+                            <label class="form-label mut">Customer</label>
+                            <select class="form-select inp" @bind="_addCustomerId">
+                                <option value="0">-- Select Customer --</option>
+                                @foreach (var c in _customers)
+                                {
+                                    <option value="@c.Id">@c.Name (@c.Type) - @c.City</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="col-12 col-md-3">
+                            <label class="form-label mut">Follow-up Date</label>
+                            <input type="date" class="form-control inp" @bind="_addDate" />
+                        </div>
+                        <div class="col-12 col-md-5">
+                            <label class="form-label mut">Note</label>
+                            <input class="form-control inp" @bind="_addNote" placeholder="Call / WhatsApp / Meeting..." />
+                        </div>
+
+                        <div class="col-12 d-flex gap-2 justify-content-end mt-1">
+                            <button class="btn btn-outline-light" type="button" @onclick="ClearAdd" disabled="@_saving">Clear</button>
+                            <button class="btn btn-primary" type="button" @onclick="SaveTask" disabled="@_saving">
+                                @(_saving ? "Saving..." : "Save Task")
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Filters -->
+            <div class="row g-2 align-items-end mt-3">
+                <div class="col-12 col-md-6">
+                    <label class="form-label mut">Search (Customer / TRN / City)</label>
+                    <input class="form-control inp" @bind="_search" @bind:event="oninput" placeholder="type to filter..." />
+                </div>
+                <div class="col-12 col-md-3">
+                    <label class="form-label mut">Bucket</label>
+                    <select class="form-select inp" @bind="_bucket">
+                        <option value="">All</option>
+                        <option value="Overdue">Overdue</option>
+                        <option value="DueToday">Due Today</option>
+                        <option value="Upcoming">Upcoming</option>
+                    </select>
+                </div>
+                <div class="col-12 col-md-3 d-grid">
+                    <button class="btn btn-primary" type="button" @onclick="ApplyFilter">Apply</button>
+                </div>
+            </div>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(_err))
+        {
+            <div class="alert alert-danger py-2">@_err</div>
+        }
+
+        @if (_vm == null)
+        {
+            <div class="cardx"><div class="body text-center mut py-5">No data.</div></div>
+        }
+        else
+        {
+            <div class="row g-3 mb-3">
+                <div class="col-12 col-md-4">
+                    <div class="tile">
+                        <div class="lbl">Due Today</div>
+                        <div class="val">@_vm.DueTodayCount</div>
+                    </div>
+                </div>
+                <div class="col-12 col-md-4">
+                    <div class="tile">
+                        <div class="lbl">Overdue</div>
+                        <div class="val">@_vm.OverdueCount</div>
+                    </div>
+                </div>
+                <div class="col-12 col-md-4">
+                    <div class="tile">
+                        <div class="lbl">Upcoming</div>
+                        <div class="val">@_vm.UpcomingCount</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="cardx">
+                <div class="head">
+                    <div>Task List</div>
+                    <div class="mut small">Rows: <b>@Filtered().Count()</b></div>
+                </div>
+
+                <div class="body">
+                    <div class="tbl">
+                        <table class="table table-hover align-middle mb-0">
+                            <thead>
+                                <tr>
+                                    <th>Customer</th>
+                                    <th>Type</th>
+                                    <th>City</th>
+                                    <th>TRN</th>
+                                    <th style="width:140px;">Follow-up</th>
+                                    <th>Note</th>
+                                    <th class="text-end" style="width:130px;">Billed</th>
+                                    <th style="width:120px;">Last Inv</th>
+                                    <th style="width:120px;">Last Note</th>
+                                    <th style="width:120px;">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @if (!Filtered().Any())
+                                {
+                                    <tr><td colspan="10" class="text-center text-muted py-4">No tasks match filter.</td></tr>
+                                }
+                                else
+                                {
+                                    @foreach (var r in Filtered())
+                                    {
+                                        <tr>
+                                            <td class="fw-semibold">@r.Name</td>
+                                            <td>@r.CustomerType</td>
+                                            <td>@r.City</td>
+                                            <td>@(string.IsNullOrWhiteSpace(r.TRN) ? "—" : r.TRN)</td>
+
+                                            <td>
+                                                <div class="d-flex flex-column">
+                                                    <div class="fw-semibold">@r.NextFollowUpDate?.ToString("dd-MMM-yyyy")</div>
+                                                    <div>
+                                                        @if (r.Bucket == CustomerTasksService.TaskBucket.Overdue)
+                                                        {
+                                                            <span class="badgePill bOver">Overdue</span>
+                                                        }
+                                                        else if (r.Bucket == CustomerTasksService.TaskBucket.DueToday)
+                                                        {
+                                                            <span class="badgePill bToday">Today</span>
+                                                        }
+                                                        else
+                                                        {
+                                                            <span class="badgePill bUp">Upcoming</span>
+                                                        }
+                                                    </div>
+                                                </div>
+                                            </td>
+
+                                            <td>@(string.IsNullOrWhiteSpace(r.NextFollowUpNote) ? "—" : r.NextFollowUpNote)</td>
+                                            <td class="text-end">@r.BilledTotal.ToString("0.00")</td>
+                                            <td>@(r.LastInvoiceDate?.ToString("dd-MMM-yyyy") ?? "—")</td>
+                                            <td>@(r.LastNoteDate?.ToString("dd-MMM-yyyy") ?? "—")</td>
+
+                                            <td class="text-end">
+                                                <a class="btn btn-sm btn-primary" href="@($"/crm/customer/{r.CustomerId}")">Open</a>
+                                            </td>
+                                        </tr>
+                                    }
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="mut small mt-2">
+                        Note: “Billed” currently uses invoice totals. Exact outstanding will come when we subtract receipts/payments in next step.
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    int _companyId;
+    bool _loading;
+    string? _err;
+
+    DateTime _today = DateTime.Today;
+
+    CustomerTasksService.TasksVm? _vm;
+
+    // quick add
+    bool _saving;
+    string? _addErr;
+    string? _addMsg;
+    int _addCustomerId;
+    DateTime _addDate = DateTime.Today;
+    string _addNote = "";
+
+    // lookup customers
+    List<(int Id, string Name, string Type, string City, string? TRN)> _customers = new();
+
+    // filters
+    string _search = "";
+    string _bucket = "";
+    bool _applyClicked;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CurrentCompany.RefreshAsync();
+        _companyId = CurrentCompany.CompanyId;
+        await LoadCustomers();
+        await Load();
+    }
+
+    async Task LoadCustomers()
+    {
+        _customers = await Tasks.GetCustomersLookupAsync(_companyId);
+    }
+
+    async Task Load()
+    {
+        _err = null;
+        _loading = true;
+
+        try
+        {
+            await CurrentCompany.RefreshAsync();
+            _companyId = CurrentCompany.CompanyId;
+            if (_companyId <= 0) throw new Exception("Company not resolved.");
+
+            _today = DateTime.Today;
+            _vm = await Tasks.GetAsync(_companyId, _today);
+        }
+        catch (Exception ex)
+        {
+            _vm = null;
+            _err = ex.InnerException?.Message ?? ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    void ApplyFilter() => _applyClicked = true;
+
+    IEnumerable<CustomerTasksService.TaskRowDto> Filtered()
+    {
+        if (_vm == null) return Enumerable.Empty<CustomerTasksService.TaskRowDto>();
+
+        var q = _vm.Rows.AsEnumerable();
+
+        if (!string.IsNullOrWhiteSpace(_bucket))
+        {
+            q = _bucket switch
+            {
+                "Overdue" => q.Where(x => x.Bucket == CustomerTasksService.TaskBucket.Overdue),
+                "DueToday" => q.Where(x => x.Bucket == CustomerTasksService.TaskBucket.DueToday),
+                "Upcoming" => q.Where(x => x.Bucket == CustomerTasksService.TaskBucket.Upcoming),
+                _ => q
+            };
+        }
+
+        if (!string.IsNullOrWhiteSpace(_search))
+        {
+            var s = _search.Trim();
+            q = q.Where(x =>
+                (x.Name ?? "").Contains(s, StringComparison.OrdinalIgnoreCase) ||
+                (x.City ?? "").Contains(s, StringComparison.OrdinalIgnoreCase) ||
+                (x.TRN ?? "").Contains(s, StringComparison.OrdinalIgnoreCase)
+            );
+        }
+
+        return q;
+    }
+
+    void ClearAdd()
+    {
+        _addErr = _addMsg = null;
+        _addCustomerId = 0;
+        _addDate = DateTime.Today;
+        _addNote = "";
+    }
+
+    async Task SaveTask()
+    {
+        _addErr = _addMsg = null;
+
+        if (_addCustomerId <= 0)
+        {
+            _addErr = "Select a customer.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_addNote))
+        {
+            _addErr = "Enter note.";
+            return;
+        }
+
+        _saving = true;
+
+        try
+        {
+            await Tasks.SaveCustomerFollowUpAsync(_companyId, _addCustomerId, _addDate, _addNote);
+            _addMsg = "Task saved.";
+            await Load();
+            ClearAdd();
+        }
+        catch (Exception ex)
+        {
+            _addErr = ex.InnerException?.Message ?? ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+}

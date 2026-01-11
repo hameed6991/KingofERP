@@ -1,0 +1,409 @@
+﻿@page "/employees"
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Authorization
+@using UaeEInvoice.Data
+@using UaeEInvoice.Services.Auth
+
+@attribute [Authorize(Roles = "Admin")]
+
+@inject AppDbContext Db
+@inject NavigationManager Nav
+@inject ICurrentCompany CurrentCompany
+
+<style>
+    .soft-card {
+        border: 1px solid rgba(0,0,0,.06);
+        border-radius: 22px;
+        box-shadow: 0 10px 30px rgba(0,0,0,.06);
+        background: #fff;
+    }
+
+    .hero {
+        border-radius: 22px;
+        border: 1px solid rgba(0,0,0,.06);
+        background: radial-gradient(1200px 400px at 10% 0%, rgba(13,110,253,.18), rgba(255,255,255,0)), linear-gradient(135deg, rgba(13,110,253,.08), rgba(255,255,255,0));
+        padding: 18px;
+    }
+
+    .title {
+        font-weight: 900;
+        letter-spacing: .2px;
+        margin: 0;
+    }
+
+    .muted {
+        color: rgba(0,0,0,.55);
+    }
+
+    .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: .45rem;
+        padding: .30rem .70rem;
+        border-radius: 999px;
+        border: 1px solid rgba(0,0,0,.08);
+        background: rgba(255,255,255,.9);
+        font-size: .85rem;
+        white-space: nowrap;
+        backdrop-filter: blur(8px);
+    }
+
+    .kpi {
+        border-radius: 18px;
+        border: 1px solid rgba(0,0,0,.06);
+        background: linear-gradient(180deg, rgba(13,110,253,.05), rgba(0,0,0,0));
+        padding: 12px 14px;
+    }
+
+        .kpi .k {
+            font-size: .80rem;
+            color: rgba(0,0,0,.55);
+        }
+
+        .kpi .v {
+            font-size: 1.2rem;
+            font-weight: 900;
+            line-height: 1.2;
+        }
+
+    .toolbar {
+        position: sticky;
+        top: 14px;
+        z-index: 10;
+    }
+
+    .table thead th {
+        font-size: .72rem;
+        letter-spacing: .08em;
+        color: rgba(0,0,0,.55);
+        text-transform: uppercase;
+        border-top: 0;
+    }
+
+    .row-click:hover {
+        background: rgba(13,110,253,.04);
+    }
+
+    .pill {
+        display: inline-flex;
+        align-items: center;
+        padding: .25rem .6rem;
+        border-radius: 999px;
+        font-size: .78rem;
+        font-weight: 700;
+        border: 1px solid rgba(0,0,0,.08);
+        background: #fff;
+    }
+
+        .pill.active {
+            color: #0a7a3b;
+            border-color: rgba(25,135,84,.25);
+            background: rgba(25,135,84,.08);
+        }
+
+        .pill.inactive {
+            color: rgba(0,0,0,.55);
+            border-color: rgba(108,117,125,.25);
+            background: rgba(108,117,125,.08);
+        }
+
+    .empty {
+        border: 1px dashed rgba(0,0,0,.15);
+        border-radius: 18px;
+        padding: 22px;
+        background: rgba(0,0,0,.01);
+    }
+</style>
+
+<div class="container-xxl py-4">
+
+    <!-- HERO -->
+    <div class="hero mb-3">
+        <div class="d-flex align-items-start justify-content-between flex-wrap gap-2">
+            <div>
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <h2 class="title">Employees</h2>
+                    <span class="chip">👤 HR Master</span>
+                    <span class="chip">🏢 CompanyId: @_companyId</span>
+                </div>
+                <div class="muted">Create, search and manage your employee master. Click a row to edit.</div>
+            </div>
+
+            <div class="d-flex gap-2">
+                <button class="btn btn-primary" type="button" @onclick="GoCreate" disabled="@(_companyId==0)">
+                    + New Employee
+                </button>
+                <button class="btn btn-outline-secondary" type="button" @onclick="Reload" disabled="@_loading">
+                    @(_loading ? "Loading..." : "Reload")
+                </button>
+            </div>
+        </div>
+
+        <!-- KPI ROW -->
+        <div class="row g-2 mt-2">
+            <div class="col-12 col-md-4">
+                <div class="kpi">
+                    <div class="k">Total Employees (Loaded)</div>
+                    <div class="v">@_rows.Count</div>
+                </div>
+            </div>
+            <div class="col-12 col-md-4">
+                <div class="kpi">
+                    <div class="k">Active</div>
+                    <div class="v">@_activeCount</div>
+                </div>
+            </div>
+            <div class="col-12 col-md-4">
+                <div class="kpi">
+                    <div class="k">Inactive</div>
+                    <div class="v">@_inactiveCount</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_error))
+    {
+        <div class="alert alert-danger soft-card p-3">
+            <strong>Error:</strong> @_error
+        </div>
+    }
+
+    <!-- FILTER TOOLBAR (STICKY) -->
+    <div class="toolbar mb-3">
+        <div class="soft-card p-3">
+            <div class="row g-2 align-items-end">
+                <div class="col-12 col-lg-6">
+                    <label class="form-label mb-1">Search</label>
+                    <input class="form-control"
+                           placeholder="Type Emp Code / Name..."
+                           value="@_q"
+                           @oninput="OnSearchInput" />
+                  @*   <div class="form-text">Instant filter (no crash). Press Reload for DB refresh.</div> *@
+                </div>
+
+                <div class="col-12 col-lg-3">
+                    <label class="form-label mb-1">Status</label>
+                    <select class="form-select" @bind="_status">
+                        <option value="all">All</option>
+                        <option value="active">Active</option>
+                        <option value="inactive">Inactive</option>
+                    </select>
+                </div>
+
+                <div class="col-12 col-lg-3 d-flex gap-2">
+                    <button class="btn btn-outline-primary flex-grow-1" type="button" @onclick="ApplyFilters" disabled="@_loading">
+                        Apply
+                    </button>
+                    <button class="btn btn-outline-secondary" type="button" @onclick="ClearFilters" disabled="@_loading">
+                        Clear
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- TABLE -->
+    <div class="soft-card p-2 p-md-3">
+        <div class="d-flex justify-content-between align-items-center px-2 px-md-2 pb-2">
+            <div>
+                <div class="fw-bold">Results</div>
+                <div class="muted small">
+                    Showing <b>@_view.Count</b> record(s)
+                    @if (!string.IsNullOrWhiteSpace(_q))
+                    {
+                        <span> • Filter: “@_q”</span>
+                    }
+                </div>
+            </div>
+
+            <div class="muted small">
+                @if (_loading)
+                {
+                    <span>Loading…</span>
+                }
+                else
+                {
+                    <span>Updated: @_lastLoadedText</span>
+                }
+            </div>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table align-middle table-hover mb-0">
+                <thead>
+                    <tr>
+                 @*        <th style="width:90px;">ID</th> *@
+                        <th style="min-width:170px;">Emp Code</th>
+                        <th style="min-width:240px;">Name</th>
+                        <th style="width:140px;">Join Date</th>
+                        <th style="width:140px;">Method</th>
+                        <th class="text-end" style="width:150px;">Basic</th>
+                        <th class="text-end" style="width:150px;">Allowance</th>
+                        <th style="width:120px;">Status</th>
+                        <th class="text-end" style="width:120px;">Actions</th>
+                    </tr>
+                </thead>
+
+                <tbody>
+                    @foreach (var e in _view)
+                    {
+                        <tr class="row-click" style="cursor:pointer" @onclick="() => Edit(e.EmployeeId)">
+                          @*   <td class="text-muted">@e.EmployeeId</td> *@
+                            <td class="fw-semibold">@e.EmpCode</td>
+                            <td>@e.EmpName</td>
+                            <td>@e.JoinDate.ToString("dd-MM-yyyy")</td>
+                            <td>@(string.IsNullOrWhiteSpace(e.PaymentMethod) ? "—" : e.PaymentMethod)</td>
+                            <td class="text-end">@e.BasicSalary.ToString("0.00")</td>
+                            <td class="text-end">@e.Allowance.ToString("0.00")</td>
+                            <td>
+                                @if (e.IsActive)
+                                {
+                                    <span class="pill active">Active</span>
+                                }
+                                else
+                                {
+                                    <span class="pill inactive">Inactive</span>
+                                }
+                            </td>
+                            <td class="text-end" @onclick:stopPropagation="true">
+                                <button class="btn btn-sm btn-outline-primary" type="button" @onclick="() => Edit(e.EmployeeId)">
+                                    Edit
+                                </button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+
+            @if (_view.Count == 0 && !_loading)
+            {
+                <div class="p-3">
+                    <div class="empty text-center">
+                        <div class="fw-bold mb-1">No employees found</div>
+                        <div class="muted mb-3">Try changing filters or create a new employee.</div>
+                        <button class="btn btn-primary" type="button" @onclick="GoCreate">+ New Employee</button>
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+
+</div>
+
+@code {
+    private bool _loading;
+    private string? _error;
+
+    private int _companyId;
+    private string _q = "";
+    private string _status = "all";
+
+    private List<Employee> _rows = new();   // from DB
+    private List<Employee> _view = new();   // filtered view (instant)
+    private int _activeCount;
+    private int _inactiveCount;
+
+    private string _lastLoadedText = "—";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CurrentCompany.RefreshAsync();
+
+        if (!CurrentCompany.IsAuthenticated)
+        {
+            _error = "Not authenticated. Logout and login again.";
+            _companyId = 0;
+            return;
+        }
+
+        _companyId = CurrentCompany.CompanyId;
+
+        if (_companyId <= 0)
+        {
+            _error = "CompanyId claim not found. Logout and login again.";
+            return;
+        }
+
+        await Load();
+    }
+
+    private void GoCreate() => Nav.NavigateTo("/employee-create");
+    private void Edit(int id) => Nav.NavigateTo($"/employee-edit/{id}");
+
+    private async Task Reload() => await Load();
+    private async Task ApplyFilters()
+    {
+        // DB reload not needed; apply filters instantly.
+        ApplyView();
+        await Task.CompletedTask;
+    }
+
+    private async Task ClearFilters()
+    {
+        _q = "";
+        _status = "all";
+        ApplyView();
+        await Task.CompletedTask;
+    }
+
+    // ✅ Safe oninput (no ChangeEventArgs->string crash)
+    private void OnSearchInput(ChangeEventArgs e)
+    {
+        _q = e.Value?.ToString() ?? "";
+        ApplyView();
+    }
+
+    private void ApplyView()
+    {
+        var qry = _rows.AsEnumerable();
+
+        if (!string.IsNullOrWhiteSpace(_q))
+        {
+            var s = _q.Trim();
+            qry = qry.Where(x =>
+                (!string.IsNullOrWhiteSpace(x.EmpCode) && x.EmpCode.Contains(s, StringComparison.OrdinalIgnoreCase)) ||
+                (!string.IsNullOrWhiteSpace(x.EmpName) && x.EmpName.Contains(s, StringComparison.OrdinalIgnoreCase)));
+        }
+
+        if (_status == "active") qry = qry.Where(x => x.IsActive);
+        if (_status == "inactive") qry = qry.Where(x => !x.IsActive);
+
+        _view = qry
+            .OrderByDescending(x => x.EmployeeId)
+            .Take(300)
+            .ToList();
+
+        _activeCount = _rows.Count(x => x.IsActive);
+        _inactiveCount = _rows.Count - _activeCount;
+
+        StateHasChanged();
+    }
+
+    private async Task Load()
+    {
+        _loading = true;
+        _error = null;
+
+        try
+        {
+            var qry = Db.Employees.AsNoTracking()
+                .Where(x => x.CompanyId == _companyId)
+                .OrderByDescending(x => x.EmployeeId)
+                .Take(300);
+
+            _rows = await qry.ToListAsync();
+            _lastLoadedText = DateTime.Now.ToString("dd-MMM-yyyy hh:mm tt");
+
+            ApplyView();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+}

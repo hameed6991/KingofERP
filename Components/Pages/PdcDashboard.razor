@@ -1,0 +1,498 @@
+﻿@page "/cheques/pdc-dashboard"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@implements IDisposable
+
+@using Microsoft.EntityFrameworkCore
+@using UaeEInvoice.Data
+@using UaeEInvoice.Services.Auth
+
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+
+@inject AppDbContext Db
+@inject ICurrentCompany CurrentCompany
+
+<style>
+    .hero {
+        border-radius: 22px;
+        border: 1px solid rgba(15,23,42,.10);
+        background: radial-gradient(900px 450px at 10% 10%, rgba(13,110,253,.16), transparent 60%), radial-gradient(900px 450px at 85% 10%, rgba(111,66,193,.14), transparent 60%), linear-gradient(180deg, rgba(255,255,255,.92), rgba(255,255,255,.82));
+        box-shadow: 0 18px 45px rgba(2,6,23,.08);
+        padding: 18px;
+    }
+
+    .cardx {
+        border-radius: 22px;
+        border: 1px solid rgba(15,23,42,.10);
+        background: rgba(255,255,255,.90);
+        box-shadow: 0 14px 38px rgba(2,6,23,.07);
+    }
+
+    .kpi {
+        border-radius: 20px;
+        border: 1px solid rgba(15,23,42,.10);
+        background: rgba(255,255,255,.86);
+        padding: 14px;
+        box-shadow: 0 10px 26px rgba(2,6,23,.06);
+        height: 100%;
+        position: relative;
+        overflow: hidden;
+    }
+
+        .kpi::after {
+            content: "";
+            position: absolute;
+            inset: -80px -80px auto auto;
+            width: 220px;
+            height: 220px;
+            background: radial-gradient(circle, rgba(13,110,253,.16), transparent 60%);
+            transform: rotate(15deg);
+        }
+
+        .kpi .label {
+            font-size: .85rem;
+            color: rgba(15,23,42,.55);
+            font-weight: 900;
+            letter-spacing: .2px;
+            text-transform: uppercase;
+        }
+
+        .kpi .count {
+            font-size: 1.7rem;
+            font-weight: 900;
+            line-height: 1.1;
+            margin-top: 6px;
+        }
+
+        .kpi .amount {
+            color: rgba(15,23,42,.65);
+            font-weight: 800;
+            margin-top: 6px;
+        }
+
+        .kpi .hint {
+            color: rgba(15,23,42,.48);
+            font-size: .85rem;
+            margin-top: 10px;
+        }
+
+    .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: .45rem;
+        padding: .35rem .75rem;
+        border-radius: 999px;
+        border: 1px solid rgba(15,23,42,.10);
+        background: rgba(255,255,255,.85);
+        font-size: .85rem;
+        white-space: nowrap;
+    }
+
+    .tablex thead th {
+        position: sticky;
+        top: 0;
+        background: rgba(248,250,252,.95);
+        backdrop-filter: blur(6px);
+        z-index: 1;
+        color: rgba(15,23,42,.65);
+        font-weight: 900;
+        letter-spacing: .3px;
+        font-size: .82rem;
+        text-transform: uppercase;
+        border-bottom: 1px solid rgba(15,23,42,.08);
+        white-space: nowrap;
+    }
+
+    .tablex tbody td {
+        border-top: 1px solid rgba(15,23,42,.06);
+        vertical-align: middle;
+    }
+
+    .badge-soft {
+        border-radius: 999px;
+        padding: .35rem .6rem;
+        border: 1px solid rgba(15,23,42,.10);
+        background: rgba(15,23,42,.04);
+        font-weight: 900;
+        font-size: .82rem;
+        white-space: nowrap;
+    }
+
+    .muted {
+        color: rgba(15,23,42,.55);
+    }
+
+    .mini {
+        font-size: .85rem;
+    }
+
+    .skeleton {
+        animation: sk 1.2s ease-in-out infinite;
+        background: linear-gradient(90deg, rgba(15,23,42,.06), rgba(15,23,42,.10), rgba(15,23,42,.06));
+        background-size: 200% 100%;
+        border-radius: 12px;
+        height: 12px;
+    }
+
+    @@keyframes sk {
+        0% {
+            background-position: 0% 0;
+        }
+
+        100% {
+            background-position: -200% 0;
+        }
+    }
+</style>
+
+<div class="container-xxl py-4">
+
+    <!-- HERO -->
+    <div class="hero mb-3">
+        <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+            <div>
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <h2 class="m-0" style="font-weight:900;">PDC Dashboard</h2>
+                    <span class="chip">🇦🇪 UAE PDC Control Center</span>
+                    <span class="chip">⚡ Auto refresh: @_autoRefreshSeconds s</span>
+                    <span class="chip">🕒 Last: @_lastRefreshed.ToString("dd-MMM-yyyy HH:mm:ss")</span>
+                </div>
+                <div class="text-muted mt-1">Upcoming, cleared today, overdue and bounced — with real-time tracking.</div>
+            </div>
+
+            <div class="d-flex gap-2 align-items-center">
+                <button class="btn btn-outline-secondary" @onclick="ManualRefresh" disabled="@(_loading || _acting)">
+                    <i class="bi bi-arrow-clockwise me-1"></i>
+                    @(_loading ? "Refreshing..." : "Refresh")
+                </button>
+            </div>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_err))
+    {
+        <div class="alert alert-danger cardx p-3 mb-3">@_err</div>
+    }
+
+    <!-- KPI CARDS -->
+    <div class="row g-3">
+        <div class="col-12 col-md-3">
+            <div class="kpi">
+                <div class="label">PDC due in 7 days</div>
+                @if (_loading)
+                {
+                    <div class="skeleton mt-2" style="width:70%; height:22px;"></div>
+                    <div class="skeleton mt-2" style="width:45%;"></div>
+                }
+                else
+                {
+                    <div class="count">@_due7Count</div>
+                    <div class="amount">@_due7Amount.ToString("0.00")</div>
+                }
+            </div>
+        </div>
+
+        <div class="col-12 col-md-3">
+            <div class="kpi">
+                <div class="label">PDC due in 15 days</div>
+                @if (_loading)
+                {
+                    <div class="skeleton mt-2" style="width:70%; height:22px;"></div>
+                    <div class="skeleton mt-2" style="width:45%;"></div>
+                }
+                else
+                {
+                    <div class="count">@_due15Count</div>
+                    <div class="amount">@_due15Amount.ToString("0.00")</div>
+                }
+            </div>
+        </div>
+
+        <div class="col-12 col-md-3">
+            <div class="kpi">
+                <div class="label">PDC due in 30 days</div>
+                @if (_loading)
+                {
+                    <div class="skeleton mt-2" style="width:70%; height:22px;"></div>
+                    <div class="skeleton mt-2" style="width:45%;"></div>
+                }
+                else
+                {
+                    <div class="count">@_due30Count</div>
+                    <div class="amount">@_due30Amount.ToString("0.00")</div>
+                }
+            </div>
+        </div>
+
+        <div class="col-12 col-md-3">
+            <div class="kpi">
+                <div class="label">PDC cleared today</div>
+                @if (_loading)
+                {
+                    <div class="skeleton mt-2" style="width:70%; height:22px;"></div>
+                    <div class="skeleton mt-2" style="width:45%;"></div>
+                }
+                else
+                {
+                    <div class="count">@_clearedTodayCount</div>
+                    <div class="amount">@_clearedTodayAmount.ToString("0.00")</div>
+                }
+            </div>
+        </div>
+
+        <div class="col-12 col-md-6">
+            <div class="kpi">
+                <div class="label">Overdue PDCs (not cleared)</div>
+                @if (_loading)
+                {
+                    <div class="skeleton mt-2" style="width:70%; height:22px;"></div>
+                    <div class="skeleton mt-2" style="width:45%;"></div>
+                    <div class="skeleton mt-3" style="width:85%;"></div>
+                }
+                else
+                {
+                    <div class="count">@_overdueCount</div>
+                    <div class="amount">@_overdueAmount.ToString("0.00")</div>
+                    <div class="hint">ChequeDate earlier than today, status not Cleared/Voided.</div>
+                }
+            </div>
+        </div>
+
+        <div class="col-12 col-md-6">
+            <div class="kpi">
+                <div class="label">Bounced this month</div>
+                @if (_loading)
+                {
+                    <div class="skeleton mt-2" style="width:70%; height:22px;"></div>
+                    <div class="skeleton mt-2" style="width:45%;"></div>
+                }
+                else
+                {
+                    <div class="count">@_bouncedMonthCount</div>
+                    <div class="amount">@_bouncedMonthAmount.ToString("0.00")</div>
+                }
+            </div>
+        </div>
+    </div>
+
+    <!-- TABLE -->
+    <div class="cardx p-3 mt-3">
+        <div class="d-flex justify-content-between align-items-end flex-wrap gap-2 mb-2">
+            <div>
+                <div class="fw-bold" style="font-size:1.1rem;">Top Upcoming PDCs</div>
+                <div class="muted mini">Next 30 days • sorted by date then amount</div>
+            </div>
+            <span class="chip">Rows: @_upcomingTop.Count</span>
+        </div>
+
+        <div class="table-responsive" style="max-height: 420px;">
+            <table class="table table-sm align-middle tablex">
+                <thead>
+                    <tr>
+                        <th>Cheque Date</th>
+                        <th>Direction</th>
+                        <th>Status</th>
+                        <th>Cheque No</th>
+                        <th>Payee</th>
+                        <th class="text-end">Amount</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var x in _upcomingTop)
+                    {
+                        <tr>
+                            <td class="nowrap">@x.ChequeDate.ToString("yyyy-MM-dd")</td>
+                            <td><span class="badge-soft">@x.Direction</span></td>
+                            <td><span class="badge @StatusBadge(x.Status)">@x.Status</span></td>
+                            <td class="fw-semibold nowrap">@x.ChequeNo</td>
+                            <td>@x.PayeeName</td>
+                            <td class="text-end fw-bold">@x.Amount.ToString("0.00")</td>
+                        </tr>
+                    }
+
+                    @if (!_loading && _upcomingTop.Count == 0)
+                    {
+                        <tr><td colspan="6" class="text-muted">No upcoming PDCs.</td></tr>
+                    }
+
+                    @if (_loading)
+                    {
+                        for (int i = 0; i < 6; i++)
+                        {
+                            <tr>
+                                <td colspan="6">
+                                    <div class="skeleton" style="height:14px;"></div>
+                                </td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+@code {
+    private int _companyId;
+    private string? _err;
+
+    private bool _loading;
+    private bool _acting;
+
+    private DateTime _lastRefreshed = DateTime.Now;
+
+    private int _due7Count, _due15Count, _due30Count, _clearedTodayCount, _overdueCount, _bouncedMonthCount;
+    private decimal _due7Amount, _due15Amount, _due30Amount, _clearedTodayAmount, _overdueAmount, _bouncedMonthAmount;
+
+    private List<ChequeTransaction> _upcomingTop = new();
+
+    private System.Threading.Timer? _timer;
+    private int _autoRefreshSeconds = 5;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CurrentCompany.RefreshAsync();
+        _companyId = CurrentCompany.CompanyId;
+
+        await Load();
+
+        _timer = new System.Threading.Timer(async _ =>
+        {
+            try
+            {
+                if (_acting) return;
+
+                await InvokeAsync(async () =>
+                {
+                    await LoadSilent();
+                    StateHasChanged();
+                });
+            }
+            catch { }
+        }, null, TimeSpan.FromSeconds(_autoRefreshSeconds), TimeSpan.FromSeconds(_autoRefreshSeconds));
+    }
+
+    public void Dispose()
+    {
+        _timer?.Dispose();
+        _timer = null;
+    }
+
+    private async Task ManualRefresh()
+    {
+        await Load();
+    }
+
+    private async Task LoadSilent()
+    {
+        try
+        {
+            await LoadCore(silent: true);
+        }
+        catch { }
+    }
+
+    private async Task Load()
+    {
+        _loading = true;
+        _err = null;
+
+        try
+        {
+            await LoadCore(silent: false);
+        }
+        catch (Exception ex)
+        {
+            _err = ex.InnerException?.Message ?? ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task LoadCore(bool silent)
+    {
+        await CurrentCompany.RefreshAsync();
+        _companyId = CurrentCompany.CompanyId;
+
+        var today = DateTime.Today;
+        var d7 = today.AddDays(7);
+        var d15 = today.AddDays(15);
+        var d30 = today.AddDays(30);
+
+        // ✅ Single query pull (PDC only) then compute KPIs in memory
+        var baseList = await Db.Set<ChequeTransaction>()
+            .AsNoTracking()
+            .Where(x => x.CompanyId == _companyId
+                && x.Type == ChequeType.PDC
+                && x.Status != ChequeStatus.Voided)
+            .OrderByDescending(x => x.ChequeDate)
+            .Take(5000)
+            .ToListAsync();
+
+        var notCleared = baseList.Where(x => x.Status != ChequeStatus.Cleared).ToList();
+        var dueQ = notCleared.Where(x => x.ChequeDate.Date >= today).ToList();
+
+        var due7 = dueQ.Where(x => x.ChequeDate.Date <= d7).ToList();
+        _due7Count = due7.Count;
+        _due7Amount = due7.Sum(x => x.Amount);
+
+        var due15 = dueQ.Where(x => x.ChequeDate.Date <= d15).ToList();
+        _due15Count = due15.Count;
+        _due15Amount = due15.Sum(x => x.Amount);
+
+        var due30 = dueQ.Where(x => x.ChequeDate.Date <= d30).ToList();
+        _due30Count = due30.Count;
+        _due30Amount = due30.Sum(x => x.Amount);
+
+        var clearedToday = baseList
+            .Where(x => x.Status == ChequeStatus.Cleared
+                && x.ClearDate.HasValue
+                && x.ClearDate.Value.Date == today)
+            .ToList();
+
+        _clearedTodayCount = clearedToday.Count;
+        _clearedTodayAmount = clearedToday.Sum(x => x.Amount);
+
+        var overdue = notCleared.Where(x => x.ChequeDate.Date < today).ToList();
+        _overdueCount = overdue.Count;
+        _overdueAmount = overdue.Sum(x => x.Amount);
+
+        var monthStart = new DateTime(today.Year, today.Month, 1);
+        var monthEnd = monthStart.AddMonths(1);
+
+        var bounced = baseList
+            .Where(x => x.Status == ChequeStatus.Bounced
+                && x.IssueDate >= monthStart
+                && x.IssueDate < monthEnd)
+            .ToList();
+
+        _bouncedMonthCount = bounced.Count;
+        _bouncedMonthAmount = bounced.Sum(x => x.Amount);
+
+        _upcomingTop = dueQ
+            .Where(x => x.ChequeDate.Date <= d30)
+            .OrderBy(x => x.ChequeDate)
+            .ThenByDescending(x => x.Amount)
+            .Take(15)
+            .ToList();
+
+        _lastRefreshed = DateTime.Now;
+    }
+
+    private static string StatusBadge(ChequeStatus s)
+    {
+        switch (s)
+        {
+            case ChequeStatus.Draft: return "bg-light text-dark border";
+            case ChequeStatus.Printed: return "bg-info text-dark";
+            case ChequeStatus.HandedOver: return "bg-secondary";
+            case ChequeStatus.Deposited: return "bg-secondary";
+            case ChequeStatus.Presented: return "bg-primary";
+            case ChequeStatus.Cleared: return "bg-success";
+            case ChequeStatus.Bounced: return "bg-warning text-dark";
+            case ChequeStatus.Voided: return "bg-danger";
+            default: return "bg-dark";
+        }
+    }
+}

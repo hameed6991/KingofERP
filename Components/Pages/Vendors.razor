@@ -1,0 +1,556 @@
+﻿@page "/vendors"
+@using System.Text.RegularExpressions
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Authorization
+@using UaeEInvoice.Data
+@using UaeEInvoice.Services.Auth
+
+@attribute [Authorize]
+
+@inject AppDbContext Db
+@inject NavigationManager Nav
+@inject ICurrentCompany CurrentCompany
+
+<style>
+    .hero {
+        border-radius: 22px;
+        border: 1px solid rgba(0,0,0,.06);
+        background: linear-gradient(135deg, rgba(13,110,253,.12), rgba(255,255,255,0));
+        padding: 18px;
+    }
+
+    .soft-card {
+        border: 1px solid rgba(0,0,0,.06);
+        border-radius: 22px;
+    }
+
+    .soft-shadow {
+        box-shadow: 0 10px 30px rgba(0,0,0,.06);
+    }
+
+    .title {
+        font-weight: 900;
+        letter-spacing: .2px;
+        margin: 0;
+    }
+
+    .muted {
+        color: rgba(0,0,0,.55);
+    }
+
+    .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: .45rem;
+        padding: .30rem .75rem;
+        border-radius: 999px;
+        border: 1px solid rgba(0,0,0,.08);
+        background: #fff;
+        font-size: .85rem;
+        white-space: nowrap;
+    }
+
+    .table thead th {
+        font-size: .78rem;
+        letter-spacing: .08em;
+        color: rgba(0,0,0,.55);
+    }
+
+    .kbd {
+        font-size: .75rem;
+        border: 1px solid rgba(0,0,0,.15);
+        border-bottom-width: 2px;
+        border-radius: 6px;
+        padding: .1rem .35rem;
+        background: #fff;
+    }
+</style>
+
+<div class="container-xxl py-4">
+
+    <div class="hero mb-3">
+        <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+            <div>
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <h2 class="title">Vendors</h2>
+                    <span class="chip">🧾 Purchase Master</span>
+                </div>
+                <div class="muted">Create and manage vendor master.</div>
+
+                <div class="d-flex flex-wrap gap-2 mt-2">
+                    <span class="chip">🏢 CompanyId: @_companyId</span>
+                    <span class="chip">📦 Total: @_rows.Count</span>
+                    <span class="chip">🔎 Showing: @Filtered.Count</span>
+                </div>
+            </div>
+
+            <div class="d-flex gap-2">
+                <button class="btn btn-primary" type="button" @onclick="OpenNew" disabled="@_loading">+ Add Vendor</button>
+                <button class="btn btn-outline-secondary" type="button" @onclick="Reload" disabled="@_loading">
+                    @(_loading ? "Loading..." : "Reload")
+                </button>
+            </div>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_error))
+    {
+        <div class="alert alert-danger soft-card soft-shadow p-3">
+            <strong>Error:</strong> @_error
+        </div>
+    }
+    @if (!string.IsNullOrWhiteSpace(_toast))
+    {
+        <div class="alert alert-success soft-card soft-shadow p-3">
+            <strong>Done!</strong> @_toast
+        </div>
+    }
+
+    <div class="soft-card soft-shadow p-3 p-md-4 mb-3">
+        <div class="d-flex align-items-end justify-content-between flex-wrap gap-2">
+            <div style="min-width:280px; max-width:520px; flex:1;">
+                <label class="form-label mb-1">Search</label>
+
+                <!-- ✅ NO oninput. Default is onchange (enter / focus out) -->
+                <input class="form-control"
+                       placeholder="Vendor name / TRN / Phone..."
+                       @bind="_q"
+                       @bind:event="onchange" />
+
+           @*      <div class="muted small mt-1">
+                    Tip: type and press <span class="kbd">Enter</span>
+                </div> *@
+            </div>
+
+            <div class="text-end">
+                <span class="muted small">Showing: <b>@Filtered.Count</b></span>
+            </div>
+        </div>
+    </div>
+
+    <div class="soft-card soft-shadow p-3 p-md-4">
+        <div class="table-responsive">
+            <table class="table align-middle">
+                <thead>
+                    <tr>
+                        <th style="min-width:260px;">VENDOR</th>
+                        <th style="min-width:140px;">TRN</th>
+                        <th style="min-width:180px;">PHONE</th>
+                        <th style="min-width:220px;">EMAIL</th>
+                        <th style="min-width:260px;">ADDRESS</th>
+                        <th class="text-end" style="width:220px;">ACTIONS</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var v in Filtered)
+                    {
+                        <tr>
+                            <td class="fw-semibold">@v.VendorName</td>
+                            <td>@(string.IsNullOrWhiteSpace(v.TRN) ? "-" : v.TRN)</td>
+                            <td>@(string.IsNullOrWhiteSpace(v.Phone) ? "-" : v.Phone)</td>
+                            <td>@(string.IsNullOrWhiteSpace(v.Email) ? "-" : v.Email)</td>
+                            <td>@(string.IsNullOrWhiteSpace(v.Address) ? "-" : v.Address)</td>
+                            <td class="text-end">
+                                <button class="btn btn-sm btn-outline-primary me-2" type="button"
+                                        @onclick="async () => await OpenEdit(v.VendorId)">
+                                    Edit
+                                </button>
+                                <button class="btn btn-sm btn-outline-danger" type="button"
+                                        @onclick="() => AskDelete(v.VendorId)">
+                                    Delete
+                                </button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+
+            @if (Filtered.Count == 0 && !_loading)
+            {
+                <div class="text-center text-muted py-5">
+                    No vendors found.
+                </div>
+            }
+        </div>
+    </div>
+
+    @if (_showForm)
+    {
+        <!-- ✅ Ultra Premium Modal -->
+        <div class="modal fade show d-block" tabindex="-1">
+            <div class="modal-dialog modal-lg modal-dialog-centered">
+                <div class="modal-content border-0 shadow">
+
+                    <div class="modal-header bg-primary text-white">
+                        <h5 class="modal-title">@(_editId == 0 ? "Add Vendor" : $"Edit Vendor #{_editId}")</h5>
+                        <button type="button" class="btn btn-sm btn-light" @onclick="CloseForm" disabled="@_loading">Close</button>
+                    </div>
+
+                    <div class="modal-body">
+                        @if (!string.IsNullOrWhiteSpace(_formError))
+                        {
+                            <div class="alert alert-danger soft-card soft-shadow p-3">@_formError</div>
+                        }
+
+                        <div class="row g-3">
+                            <div class="col-12 col-md-6">
+                                <label class="form-label">Vendor Name <span class="text-danger">*</span></label>
+                                <input class="form-control" @bind="_vm.VendorName" @bind:event="onchange" />
+                            </div>
+
+                            <div class="col-12 col-md-6">
+                                <label class="form-label">TRN</label>
+                                <input class="form-control" @bind="_vm.TRN" @bind:event="onchange" maxlength="15" />
+                                <div class="muted small mt-1">Digits only (optional), max 15</div>
+                            </div>
+
+                            <div class="col-12 col-md-6">
+                                <label class="form-label">Phone</label>
+                                <input class="form-control" @bind="_vm.Phone" @bind:event="onchange" />
+                            </div>
+
+                            <div class="col-12 col-md-6">
+                                <label class="form-label">Email</label>
+                                <input class="form-control" @bind="_vm.Email" @bind:event="onchange" />
+                            </div>
+
+                            <div class="col-12">
+                                <label class="form-label">Address</label>
+                                <textarea class="form-control" rows="2" @bind="_vm.Address" @bind:event="onchange"></textarea>
+                            </div>
+                        </div>
+
+                        <div class="d-flex justify-content-end gap-2 mt-4">
+                            <button class="btn btn-outline-secondary" type="button" @onclick="CloseForm" disabled="@_loading">Cancel</button>
+                            <button class="btn btn-primary" type="button" @onclick="Save" disabled="@_loading">
+                                @(_loading ? "Saving..." : "Save")
+                            </button>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+        <div class="modal-backdrop fade show"></div>
+    }
+
+    @if (_deleteId > 0)
+    {
+        <!-- ✅ Delete Confirm Modal -->
+        <div class="modal fade show d-block" tabindex="-1">
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content border-0 shadow">
+                    <div class="modal-header bg-danger text-white">
+                        <h5 class="modal-title">Confirm Delete</h5>
+                        <button type="button" class="btn btn-sm btn-light" @onclick="CancelDelete" disabled="@_loading">Close</button>
+                    </div>
+                    <div class="modal-body">
+                        Are you sure you want to delete vendor <b>#@_deleteId</b>?
+                        <div class="muted small mt-2">This cannot be undone.</div>
+
+                        <div class="d-flex justify-content-end gap-2 mt-4">
+                            <button class="btn btn-outline-secondary" type="button" @onclick="CancelDelete" disabled="@_loading">Cancel</button>
+                            <button class="btn btn-danger" type="button" @onclick="ConfirmDelete" disabled="@_loading">
+                                @(_loading ? "Deleting..." : "Yes, Delete")
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="modal-backdrop fade show"></div>
+    }
+</div>
+
+@code {
+    private bool _loading;
+    private string? _error;
+    private string? _toast;
+
+    private int _companyId;
+
+    private List<Vendor> _rows = new();
+    private string _q = "";
+
+    private bool _showForm;
+    private int _editId;
+    private VendorVm _vm = new();
+
+    private string? _formError;
+
+    private int _deleteId;
+
+    private List<Vendor> Filtered
+        => string.IsNullOrWhiteSpace(_q)
+            ? _rows
+            : _rows.Where(x =>
+                    (x.VendorName ?? "").Contains(_q, StringComparison.OrdinalIgnoreCase) ||
+                    (x.TRN ?? "").Contains(_q, StringComparison.OrdinalIgnoreCase) ||
+                    (x.Phone ?? "").Contains(_q, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _loading = true;
+        _error = null;
+
+        try
+        {
+            await CurrentCompany.RefreshAsync();
+
+            if (!CurrentCompany.IsAuthenticated)
+            {
+                _error = "Not authenticated. Logout and login again.";
+                return;
+            }
+
+            _companyId = CurrentCompany.CompanyId;
+            if (_companyId <= 0)
+            {
+                _error = "CompanyId claim not found. Logout and login again.";
+                return;
+            }
+
+            await Load();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.InnerException?.Message ?? ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task Reload()
+    {
+        _toast = null;
+        _error = null;
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        _loading = true;
+        _error = null;
+
+        try
+        {
+            _rows = await Db.Vendors.AsNoTracking()
+                .Where(x => x.CompanyId == _companyId)
+                .OrderByDescending(x => x.VendorId)
+                .ToListAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.InnerException?.Message ?? ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void OpenNew()
+    {
+        _toast = null;
+        _error = null;
+        _formError = null;
+
+        _editId = 0;
+        _vm = new VendorVm();
+        _showForm = true;
+    }
+
+    private async Task OpenEdit(int id)
+    {
+        _toast = null;
+        _error = null;
+        _formError = null;
+
+        _loading = true;
+
+        try
+        {
+            var v = await Db.Vendors.AsNoTracking()
+                .FirstOrDefaultAsync(x => x.CompanyId == _companyId && x.VendorId == id);
+
+            if (v == null) throw new Exception("Vendor not found.");
+
+            _editId = id;
+            _vm = VendorVm.FromEntity(v);
+            _showForm = true;
+        }
+        catch (Exception ex)
+        {
+            _error = ex.InnerException?.Message ?? ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void CloseForm()
+    {
+        _showForm = false;
+        _editId = 0;
+        _vm = new VendorVm();
+        _formError = null;
+    }
+
+    private void AskDelete(int id)
+    {
+        _toast = null;
+        _error = null;
+        _deleteId = id;
+    }
+
+    private void CancelDelete() => _deleteId = 0;
+
+    private async Task Save()
+    {
+        _toast = null;
+        _error = null;
+        _formError = null;
+
+        // ✅ validations
+        _vm.VendorName = (_vm.VendorName ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(_vm.VendorName))
+        {
+            _formError = "Vendor Name is required.";
+            return;
+        }
+
+        // TRN: digits only, max 15
+        _vm.TRN = CleanDigits(_vm.TRN, 15);
+
+        // Email basic
+        if (!string.IsNullOrWhiteSpace(_vm.Email) && !IsValidEmail(_vm.Email))
+        {
+            _formError = "Invalid email format.";
+            return;
+        }
+
+        _loading = true;
+
+        try
+        {
+            if (_editId == 0)
+            {
+                var v = _vm.ToEntity(_companyId);
+                v.CreatedAt = DateTime.Now;
+
+                Db.Vendors.Add(v);
+                await Db.SaveChangesAsync();
+                _toast = "Vendor added successfully.";
+            }
+            else
+            {
+                var v = await Db.Vendors.FirstOrDefaultAsync(x => x.CompanyId == _companyId && x.VendorId == _editId);
+                if (v == null) throw new Exception("Vendor not found.");
+
+                _vm.ApplyToEntity(v);
+                await Db.SaveChangesAsync();
+
+                _toast = "Vendor updated successfully.";
+            }
+
+            CloseForm();
+            await Load();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.InnerException?.Message ?? ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task ConfirmDelete()
+    {
+        if (_deleteId <= 0) return;
+
+        _loading = true;
+        _error = null;
+        _toast = null;
+
+        try
+        {
+            var v = await Db.Vendors.FirstOrDefaultAsync(x => x.CompanyId == _companyId && x.VendorId == _deleteId);
+            if (v == null) throw new Exception("Vendor not found.");
+
+            Db.Vendors.Remove(v);
+            await Db.SaveChangesAsync();
+
+            _toast = "Vendor deleted.";
+            _deleteId = 0;
+
+            await Load();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.InnerException?.Message ?? ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private static string? CleanDigits(string? input, int maxLen)
+    {
+        if (string.IsNullOrWhiteSpace(input)) return null;
+        var digits = new string(input.Where(char.IsDigit).ToArray());
+        if (digits.Length > maxLen) digits = digits[..maxLen];
+        return string.IsNullOrWhiteSpace(digits) ? null : digits;
+    }
+
+    private static bool IsValidEmail(string email)
+    {
+        email = email.Trim();
+        if (email.Length < 5) return false;
+        // simple safe regex (no heavy)
+        return Regex.IsMatch(email, @"^[^@\s]+@[^@\s]+\.[^@\s]+$");
+    }
+
+    private sealed class VendorVm
+    {
+        public string? VendorName { get; set; }
+        public string? TRN { get; set; }
+        public string? Phone { get; set; }
+        public string? Email { get; set; }
+        public string? Address { get; set; }
+
+        public static VendorVm FromEntity(Vendor v) => new()
+            {
+                VendorName = v.VendorName,
+                TRN = v.TRN,
+                Phone = v.Phone,
+                Email = v.Email,
+                Address = v.Address
+            };
+
+        public Vendor ToEntity(int companyId) => new()
+            {
+                CompanyId = companyId,
+                VendorName = (VendorName ?? "").Trim(),
+                TRN = string.IsNullOrWhiteSpace(TRN) ? null : TRN.Trim(),
+                Phone = string.IsNullOrWhiteSpace(Phone) ? null : Phone.Trim(),
+                Email = string.IsNullOrWhiteSpace(Email) ? null : Email.Trim(),
+                Address = string.IsNullOrWhiteSpace(Address) ? null : Address.Trim()
+            };
+
+        public void ApplyToEntity(Vendor v)
+        {
+            v.VendorName = (VendorName ?? "").Trim();
+            v.TRN = string.IsNullOrWhiteSpace(TRN) ? null : TRN.Trim();
+            v.Phone = string.IsNullOrWhiteSpace(Phone) ? null : Phone.Trim();
+            v.Email = string.IsNullOrWhiteSpace(Email) ? null : Email.Trim();
+            v.Address = string.IsNullOrWhiteSpace(Address) ? null : Address.Trim();
+        }
+    }
+}

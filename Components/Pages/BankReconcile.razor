@@ -1,0 +1,877 @@
+﻿@page "/bank-reconcile"
+@using Microsoft.EntityFrameworkCore
+@using UaeEInvoice.Data
+@using UaeEInvoice.Services
+@using UaeEInvoice.Services.Auth
+@inject AppDbContext Db
+@inject ICurrentCompany CurrentCompany
+@inject BankReconciliationService Reco
+@inject NavigationManager Nav
+
+<style>
+    /* ===== Ultra Premium Theme (Glass + Gradient) ===== */
+    :root {
+        --u-bg0: #070A12;
+        --u-bg1: #0B1220;
+        --u-card: rgba(255,255,255,.06);
+        --u-card2: rgba(255,255,255,.08);
+        --u-border: rgba(255,255,255,.10);
+        --u-border2: rgba(255,255,255,.14);
+        --u-text: rgba(255,255,255,.92);
+        --u-muted: rgba(255,255,255,.66);
+        --u-soft: rgba(255,255,255,.45);
+        --u-shadow: 0 28px 90px rgba(0,0,0,.55);
+        --u-shadow2: 0 14px 40px rgba(0,0,0,.25);
+        --u-radius: 22px;
+        --u-radius2: 16px;
+        --u-grad: radial-gradient(1200px 700px at 8% -10%, rgba(34,197,94,.18), transparent 60%), radial-gradient(900px 520px at 92% 0%, rgba(59,130,246,.18), transparent 55%), radial-gradient(900px 520px at 50% 120%, rgba(168,85,247,.12), transparent 65%), linear-gradient(180deg, #0B1220, #070A12 70%, #050713);
+    }
+
+    .u-wrap {
+        background: var(--u-grad);
+        border-radius: 26px;
+        padding: 18px;
+        min-height: calc(100vh - 90px);
+        position: relative;
+        overflow: hidden;
+    }
+
+        .u-wrap:before {
+            content: "";
+            position: absolute;
+            inset: -2px;
+            background: radial-gradient(900px 420px at 30% 10%, rgba(255,255,255,.08), transparent 55%);
+            pointer-events: none;
+            filter: blur(0px);
+            opacity: .55;
+        }
+
+    .u-hero {
+        position: relative;
+        z-index: 1;
+        padding: 18px 18px;
+        border-radius: 26px;
+        border: 1px solid var(--u-border);
+        background: radial-gradient(900px 520px at 12% -10%, rgba(34,197,94,.22), transparent 60%), radial-gradient(900px 520px at 92% 0%, rgba(59,130,246,.20), transparent 58%), linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,.03));
+        box-shadow: var(--u-shadow2);
+        backdrop-filter: blur(12px);
+    }
+
+    .u-title {
+        font-weight: 900;
+        letter-spacing: .2px;
+        margin: 8px 0 2px 0;
+        color: var(--u-text);
+        font-size: clamp(24px, 2.2vw, 34px);
+        line-height: 1.12;
+        text-shadow: 0 8px 30px rgba(0,0,0,.35);
+    }
+
+    .u-sub {
+        color: var(--u-muted);
+        margin: 0;
+    }
+
+    .u-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 7px 12px;
+        border-radius: 999px;
+        border: 1px solid rgba(255,255,255,.14);
+        background: rgba(255,255,255,.06);
+        color: rgba(255,255,255,.88);
+        font-weight: 800;
+        font-size: .82rem;
+        letter-spacing: .2px;
+        box-shadow: 0 10px 30px rgba(0,0,0,.25);
+        backdrop-filter: blur(10px);
+    }
+
+    .u-btn {
+        border-radius: 14px !important;
+        font-weight: 900 !important;
+        padding: 10px 14px !important;
+        border: 1px solid rgba(255,255,255,.14) !important;
+        box-shadow: 0 12px 34px rgba(0,0,0,.22);
+        transition: transform .12s ease, box-shadow .12s ease, opacity .12s ease;
+        backdrop-filter: blur(10px);
+        user-select: none;
+    }
+
+        .u-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 18px 46px rgba(0,0,0,.28);
+        }
+
+        .u-btn:active {
+            transform: translateY(0px) scale(.99);
+        }
+
+        .u-btn:disabled {
+            opacity: .55;
+            cursor: not-allowed;
+        }
+
+    .u-btn-primary {
+        background: linear-gradient(180deg, rgba(255,255,255,.95), rgba(255,255,255,.86)) !important;
+        color: #0b1220 !important;
+        border-color: rgba(255,255,255,.35) !important;
+    }
+
+    .u-btn-ghost {
+        background: rgba(255,255,255,.06) !important;
+        color: rgba(255,255,255,.92) !important;
+    }
+
+    .u-card {
+        position: relative;
+        z-index: 1;
+        border-radius: var(--u-radius);
+        border: 1px solid var(--u-border);
+        background: rgba(255,255,255,.06);
+        box-shadow: var(--u-shadow2);
+        backdrop-filter: blur(12px);
+        overflow: hidden;
+    }
+
+    .u-card-head {
+        padding: 14px 14px;
+        border-bottom: 1px solid rgba(255,255,255,.08);
+        background: linear-gradient(180deg, rgba(255,255,255,.09), rgba(255,255,255,.03));
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
+        color: rgba(255,255,255,.90);
+        font-weight: 900;
+        letter-spacing: .2px;
+    }
+
+    .u-card-body {
+        padding: 14px;
+        color: var(--u-text);
+    }
+
+    .u-label {
+        color: rgba(255,255,255,.72);
+        font-weight: 800;
+        font-size: .85rem;
+    }
+
+    .u-input, .u-select {
+        border-radius: 14px !important;
+        background: rgba(255,255,255,.92) !important;
+        border: 1px solid rgba(15,23,42,.14) !important;
+        box-shadow: inset 0 1px 0 rgba(255,255,255,.55);
+        font-weight: 700;
+    }
+
+    .u-table-wrap {
+        border-radius: 18px;
+        overflow: hidden;
+        border: 1px solid rgba(15,23,42,.10);
+        background: rgba(255,255,255,.95);
+        box-shadow: 0 18px 46px rgba(0,0,0,.18);
+    }
+
+    .u-table thead th {
+        background: linear-gradient(180deg, #f8fafc, #eef2f7) !important;
+        border-bottom: 1px solid rgba(15,23,42,.10) !important;
+        font-size: .78rem;
+        text-transform: uppercase;
+        letter-spacing: .35px;
+        color: rgba(15,23,42,.65);
+        position: sticky;
+        top: 0;
+        z-index: 1;
+    }
+
+    .u-row {
+        transition: background .12s ease, transform .12s ease;
+    }
+
+        .u-row:hover {
+            background: rgba(59,130,246,.06) !important;
+        }
+
+    .u-row-active {
+        background: rgba(59,130,246,.14) !important;
+    }
+
+    .u-badge {
+        border-radius: 999px;
+        padding: 6px 10px;
+        font-weight: 900;
+        font-size: .78rem;
+        border: 1px solid rgba(15,23,42,.10);
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    .b-un {
+        background: #eef2ff;
+        color: #3730a3;
+    }
+
+    .b-sug {
+        background: #e0f2fe;
+        color: #075985;
+    }
+
+    .b-rec {
+        background: #dcfce7;
+        color: #166534;
+    }
+
+    .b-ign {
+        background: #fee2e2;
+        color: #991b1b;
+    }
+
+    .u-kpi {
+        display: grid;
+        gap: 6px;
+        justify-items: end;
+        text-align: right;
+    }
+
+        .u-kpi .amt {
+            font-size: 2.2rem;
+            font-weight: 1000;
+            letter-spacing: .2px;
+            line-height: 1;
+            color: rgba(255,255,255,.92);
+        }
+
+        .u-kpi .cap {
+            color: rgba(255,255,255,.60);
+            font-weight: 800;
+            font-size: .85rem;
+        }
+
+    /* Modal */
+    .u-backdrop {
+        position: fixed;
+        inset: 0;
+        background: rgba(2,6,23,.62);
+        backdrop-filter: blur(8px);
+        z-index: 1040;
+    }
+
+    .u-modal {
+        position: fixed;
+        inset: 0;
+        z-index: 1050;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 18px;
+    }
+
+    .u-modal-card {
+        width: min(980px, 98vw);
+        max-height: 90vh;
+        overflow: auto;
+        border-radius: 26px;
+        border: 1px solid rgba(255,255,255,.12);
+        box-shadow: var(--u-shadow);
+        background: radial-gradient(1200px 650px at 10% -10%, rgba(34,197,94,.20), transparent 60%), radial-gradient(900px 520px at 90% 0%, rgba(59,130,246,.18), transparent 60%), linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,.03));
+        color: rgba(255,255,255,.92);
+        backdrop-filter: blur(12px);
+    }
+
+    .u-modal-head {
+        padding: 16px 16px;
+        border-bottom: 1px solid rgba(255,255,255,.10);
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: flex-start;
+    }
+
+    .u-modal-body {
+        padding: 16px;
+    }
+
+    .u-alert {
+        border-radius: 14px;
+        border: 1px solid rgba(255,255,255,.12);
+        backdrop-filter: blur(10px);
+        box-shadow: 0 12px 40px rgba(0,0,0,.18);
+    }
+</style>
+
+<div class="container-xxl py-4">
+    <div class="u-wrap">
+
+        <!-- HERO -->
+        <div class="u-hero mb-3">
+            <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+                <div>
+                    <div class="d-flex gap-2 flex-wrap">
+                        <span class="u-pill">🏦 Smart Bank Reconciliation</span>
+                        <span class="u-pill">No Excel Matching</span>
+                        <span class="u-pill">Auto Match + Auto Post</span>
+                    </div>
+
+                    <div class="u-title">Bank Reconcile</div>
+                    <p class="u-sub">Import statement → auto suggest matches → approve or auto-post vouchers → trial balance updates instantly.</p>
+                </div>
+
+                <div class="d-flex gap-2 flex-wrap">
+                    <button class="u-btn u-btn-primary" type="button" @onclick="OpenImport">+ Import CSV</button>
+                    <button class="u-btn u-btn-ghost" type="button" @onclick="GoBankMapping">🏦 Bank Mapping</button>
+                    <button class="u-btn u-btn-ghost" type="button" @onclick="Load">Refresh</button>
+                </div>
+            </div>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(err))
+        {
+            <div class="alert alert-danger py-2 u-alert">@err</div>
+        }
+        @if (!string.IsNullOrWhiteSpace(msg))
+        {
+            <div class="alert alert-success py-2 u-alert">@msg</div>
+        }
+
+        <div class="row g-3">
+
+            <!-- LEFT: Lines -->
+            <div class="col-12 col-lg-7">
+                <div class="u-card">
+                    <div class="u-card-head">
+                        <div>Statement Lines</div>
+                        <div class="small" style="color: var(--u-soft); font-weight: 800;">Select a row → actions right panel</div>
+                    </div>
+
+                    <div class="u-card-body">
+
+                        <div class="row g-2 align-items-end">
+                            <div class="col-12 col-md-5">
+                                <label class="form-label u-label">Bank Account</label>
+                                <select class="form-select u-select" value="@selectedBankAccountId" @onchange="OnBankChanged">
+                                    @foreach (var b in bankAccounts)
+                                    {
+                                        <option value="@b.BankAccountId">@b.BankName (@b.AccountNo)</option>
+                                    }
+                                </select>
+                            </div>
+
+                            <div class="col-12 col-md-4">
+                                <label class="form-label u-label">Status</label>
+                                <select class="form-select u-select" @bind="statusFilter">
+                                    <option value="">All</option>
+                                    <option value="Unmatched">Unmatched</option>
+                                    <option value="Suggested">Suggested</option>
+                                    <option value="Reconciled">Reconciled</option>
+                                    <option value="Ignored">Ignored</option>
+                                </select>
+                            </div>
+
+                            <div class="col-12 col-md-3">
+                                <button class="u-btn u-btn-primary w-100" type="button" @onclick="RunAutoSuggest" disabled="@working">
+                                    @(working ? "Working..." : "Auto Suggest")
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="u-table-wrap mt-3">
+                            <table class="table table-hover align-middle mb-0">
+                                <thead>
+                                    <tr>
+                                        <th style="width:130px;">Date</th>
+                                        <th>Narration</th>
+                                        <th class="text-end" style="width:110px;">Debit</th>
+                                        <th class="text-end" style="width:110px;">Credit</th>
+                                        <th style="width:120px;">Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var l in FilteredLines())
+                                    {
+                                        var active = selectedLine != null && selectedLine.BankStatementLineId == l.BankStatementLineId;
+                                        <tr class="u-row @(active ? "u-row-active" : "")" style="cursor:pointer"
+                                            @onclick="() => SelectLine(l.BankStatementLineId)">
+                                            <td class="fw-bold">
+                                                @l.TxnDate.ToString("dd-MMM-yyyy")
+                                            </td>
+                                            <td>
+                                                <div class="fw-bold">@l.Narration</div>
+                                                @if (!string.IsNullOrWhiteSpace(l.ExtractedRef))
+                                                {
+                                                    <div class="text-muted small">Ref: <b>@l.ExtractedRef</b></div>
+                                                }
+                                            </td>
+                                            <td class="text-end fw-bold">@((l.Direction == BankTxnDirection.Debit ? l.Amount : 0m).ToString("0.00"))</td>
+                                            <td class="text-end fw-bold">@((l.Direction == BankTxnDirection.Credit ? l.Amount : 0m).ToString("0.00"))</td>
+                                            <td>
+                                                <span class="u-badge @BadgeCls(l.Status)">@l.Status</span>
+                                            </td>
+                                        </tr>
+                                    }
+
+                                    @if (!FilteredLines().Any())
+                                    {
+                                        <tr>
+                                            <td colspan="5" class="text-center text-muted py-4">
+                                                No lines. Import CSV first.
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+
+            <!-- RIGHT: Actions -->
+            <div class="col-12 col-lg-5">
+                <div class="u-card">
+                    <div class="u-card-head">
+                        <div>Match & Actions</div>
+                        <div class="small" style="color: var(--u-soft); font-weight: 800;">Approve / Auto Post</div>
+                    </div>
+
+                    <div class="u-card-body">
+
+                        @if (selectedLine == null)
+                        {
+                            <div style="color: var(--u-muted); font-weight: 700;">Select a bank line to see suggestion & actions.</div>
+                        }
+                        else
+                        {
+                            <div class="d-flex justify-content-between align-items-start gap-2">
+                                <div>
+                                    <div class="fw-bold fs-5" style="color: var(--u-text);">@selectedLine.TxnDate.ToString("dd-MMM-yyyy")</div>
+                                    <div class="small" style="color: var(--u-muted);">@selectedLine.Narration</div>
+                                    <div class="mt-2">
+                                        <span class="u-badge @BadgeCls(selectedLine.Status)">@selectedLine.Status</span>
+                                    </div>
+                                </div>
+
+                                <div class="u-kpi">
+                                    <div class="cap">Amount</div>
+                                    <div class="amt">@selectedLine.Amount.ToString("0.00")</div>
+                                    <div class="cap">@selectedLine.Direction</div>
+                                </div>
+                            </div>
+
+                            <hr style="border-color: rgba(255,255,255,.12);" />
+
+                            @if (selectedLine.Status == BankLineStatus.Suggested)
+                            {
+                                <div class="alert alert-info py-2 u-alert mb-2">
+                                    <div class="fw-bold">Suggestion</div>
+                                    <div class="small">
+                                        Voucher: <b>@selectedLine.MatchedVoucherType-@selectedLine.MatchedVoucherNo</b>
+                                        | Confidence: <b>@((selectedLine.Confidence ?? 0m).ToString("0.00"))</b>
+                                    </div>
+                                    <div class="small">@selectedLine.MatchNotes</div>
+                                </div>
+
+                                <div class="d-flex gap-2 flex-wrap">
+                                    <button class="u-btn u-btn-primary" type="button" @onclick="Approve" disabled="@working">Approve Match</button>
+                                    <button class="u-btn u-btn-ghost" type="button" @onclick="Ignore" disabled="@working">Ignore</button>
+                                </div>
+                            }
+                            else if (selectedLine.Status == BankLineStatus.Unmatched)
+                            {
+                                <div class="mb-2" style="color: var(--u-muted); font-weight: 700;">
+                                    No match found. You can auto-post a voucher and reconcile instantly.
+                                </div>
+
+                                <div class="row g-2">
+                                    <div class="col-12">
+                                        <label class="form-label u-label">Contra Account (Expense / AR / AP etc)</label>
+                                        <select class="form-select u-select" @bind="contraAccountNo">
+                                            @foreach (var a in contraAccounts)
+                                            {
+                                                <option value="@a.AccountNo">@a.AccountNo - @a.AccountName</option>
+                                            }
+                                        </select>
+                                    </div>
+
+                                    <div class="col-12 col-md-6">
+                                        <label class="form-label u-label">Voucher Type</label>
+                                        <select class="form-select u-select" @bind="newVoucherType">
+                                            <option value="REC">REC (Receipt)</option>
+                                            <option value="BPAY">BPAY (Bank Payment)</option>
+                                            <option value="JV">JV (Journal)</option>
+                                        </select>
+                                    </div>
+
+                                    <div class="col-12 col-md-6">
+                                        <label class="form-label u-label">Voucher No</label>
+                                        <input class="form-control u-input" @bind="newVoucherNo" placeholder="e.g. REC-202512301200" />
+                                    </div>
+
+                                    <div class="col-12">
+                                        <label class="form-label u-label">Narration</label>
+                                        <input class="form-control u-input" @bind="newNarration" placeholder="Auto posted from bank line" />
+                                    </div>
+                                </div>
+
+                                <div class="d-flex gap-2 flex-wrap mt-3">
+                                    <button class="u-btn u-btn-primary" type="button" @onclick="AutoPost" disabled="@working">
+                                        @(working ? "Posting..." : "Auto Post + Reconcile")
+                                    </button>
+                                    <button class="u-btn u-btn-ghost" type="button" @onclick="Ignore" disabled="@working">Ignore</button>
+                                </div>
+                            }
+                            else
+                            {
+                                <div style="color: var(--u-muted); font-weight: 800;">
+                                    This line is <b>@selectedLine.Status</b>.
+                                </div>
+
+                                @if (!string.IsNullOrWhiteSpace(selectedLine.MatchedVoucherType))
+                                {
+                                    <div class="mt-2" style="color: var(--u-text); font-weight: 900;">
+                                        Voucher: <b>@selectedLine.MatchedVoucherType-@selectedLine.MatchedVoucherNo</b>
+                                    </div>
+                                }
+
+                                @if (!string.IsNullOrWhiteSpace(selectedLine.MatchNotes))
+                                {
+                                    <div class="small mt-1" style="color: var(--u-muted);">@selectedLine.MatchNotes</div>
+                                }
+                            }
+                        }
+
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- IMPORT MODAL -->
+        @if (showImport)
+        {
+            <div class="u-backdrop" @onclick="CloseImport"></div>
+
+            <div class="u-modal">
+                <div class="u-modal-card">
+                    <div class="u-modal-head">
+                        <div>
+                            <div class="d-flex gap-2 flex-wrap">
+                                <span class="u-pill">📄 Import Statement CSV</span>
+                                <span class="u-pill" style="opacity:.85;">Date, Narration, Debit, Credit</span>
+                            </div>
+                            <div class="small mt-2" style="color: var(--u-muted); font-weight: 700;">
+                                Upload CSV → system auto suggests matches.
+                            </div>
+                        </div>
+
+                        <button class="u-btn u-btn-ghost" type="button" @onclick="CloseImport" disabled="@workingImport">Close</button>
+                    </div>
+
+                    <div class="u-modal-body">
+
+                        @if (!string.IsNullOrWhiteSpace(importErr))
+                        {
+                            <div class="alert alert-danger py-2 u-alert">@importErr</div>
+                        }
+
+                        <div class="row g-2 align-items-end">
+                            <div class="col-12 col-md-5">
+                                <label class="form-label u-label">Bank Account</label>
+                                <select class="form-select u-select" value="@selectedBankAccountId" @onchange="OnBankChanged">
+                                    @foreach (var b in bankAccounts)
+                                    {
+                                        <option value="@b.BankAccountId">@b.BankName (@b.AccountNo)</option>
+                                    }
+                                </select>
+                            </div>
+
+                            <div class="col-12 col-md-7">
+                                <label class="form-label u-label">CSV File</label>
+                                <InputFile OnChange="OnFileSelected" class="form-control u-input" />
+                                @if (!string.IsNullOrWhiteSpace(csvFileName))
+                                {
+                                    <div class="small mt-1" style="color: rgba(34,197,94,.95); font-weight: 900;">
+                                        ✅ Selected: <span style="color: rgba(255,255,255,.92);">@csvFileName</span>
+                                    </div>
+                                }
+                            </div>
+
+                            <!-- ALWAYS CLICKABLE: file not chosen -> shows alert -->
+                            <div class="col-12">
+                                <button class="u-btn u-btn-primary" type="button" @onclick="ImportNow" disabled="@workingImport">
+                                    @(workingImport ? "Importing..." : "Import & Auto Suggest")
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="small mt-3" style="color: var(--u-muted); font-weight: 700;">
+                            CSV columns required: <b style="color: rgba(255,255,255,.92);">Date</b>, <b style="color: rgba(255,255,255,.92);">Narration</b>, <b style="color: rgba(255,255,255,.92);">Debit</b>, <b style="color: rgba(255,255,255,.92);">Credit</b> (Balance optional).
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+
+    </div>
+</div>
+
+@code {
+    string? err, msg;
+
+    List<BankAccount> bankAccounts = new();
+    int selectedBankAccountId;
+
+    List<BankStatementLine> lines = new();
+    BankStatementLine? selectedLine;
+
+    string statusFilter = "";
+    bool working = false;
+
+    // Auto post fields
+    List<ChartOfAccount> contraAccounts = new();
+    int contraAccountNo = 1100;
+    string newVoucherType = "REC";
+    string newVoucherNo = "";
+    string newNarration = "";
+
+    // Import modal
+    bool showImport = false;
+    string? importErr;
+    bool workingImport = false;
+
+    // file
+    string? csvText;
+    string? csvFileName;
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    void GoBankMapping() => Nav.NavigateTo("/bank-accounts");
+
+    async Task Load()
+    {
+        err = msg = null;
+        selectedLine = null;
+
+        var companyId = CurrentCompany.CompanyId;
+
+        bankAccounts = await Db.BankAccounts.AsNoTracking()
+            .Where(x => x.CompanyId == companyId && x.IsActive)
+            .OrderBy(x => x.BankName)
+            .ToListAsync();
+
+        if (bankAccounts.Count == 0)
+        {
+            err = "Create BankAccount mapping first (BankAccounts). Map GlAccountNo to COA Bank GL.";
+            lines = new();
+            return;
+        }
+
+        if (selectedBankAccountId == 0 || !bankAccounts.Any(x => x.BankAccountId == selectedBankAccountId))
+            selectedBankAccountId = bankAccounts[0].BankAccountId;
+
+        contraAccounts = await Db.ChartOfAccounts.AsNoTracking()
+            .Where(x => x.CompanyId == companyId && x.IsActive)
+            .OrderBy(x => x.AccountNo)
+            .ToListAsync();
+
+        if (!contraAccounts.Any(x => x.AccountNo == contraAccountNo))
+            contraAccountNo = contraAccounts.FirstOrDefault()?.AccountNo ?? 1100;
+
+        await LoadLines();
+    }
+
+    async Task LoadLines()
+    {
+        var companyId = CurrentCompany.CompanyId;
+
+        lines = await Db.BankStatementLines.AsNoTracking()
+            .Where(x => x.CompanyId == companyId && x.BankAccountId == selectedBankAccountId)
+            .OrderByDescending(x => x.TxnDate)
+            .ThenByDescending(x => x.BankStatementLineId)
+            .Take(200)
+            .ToListAsync();
+    }
+
+    IEnumerable<BankStatementLine> FilteredLines()
+    {
+        var q = lines.AsEnumerable();
+        if (!string.IsNullOrWhiteSpace(statusFilter))
+            q = q.Where(x => x.Status.ToString().Equals(statusFilter, StringComparison.OrdinalIgnoreCase));
+        return q;
+    }
+
+    async Task OnBankChanged(ChangeEventArgs e)
+    {
+        if (e?.Value == null) return;
+
+        if (int.TryParse(e.Value.ToString(), out var id))
+        {
+            selectedBankAccountId = id;
+            selectedLine = null;
+            await LoadLines();
+        }
+    }
+
+    async Task SelectLine(int id)
+    {
+        var companyId = CurrentCompany.CompanyId;
+        selectedLine = await Db.BankStatementLines.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.CompanyId == companyId && x.BankStatementLineId == id);
+
+        newNarration = $"Auto posted from bank: {selectedLine?.Narration}";
+        if (string.IsNullOrWhiteSpace(newVoucherNo))
+            newVoucherNo = $"{newVoucherType}-{DateTime.Now:yyyyMMddHHmm}";
+    }
+
+    async Task RunAutoSuggest()
+    {
+        err = msg = null;
+        working = true;
+        try
+        {
+            await Reco.AutoSuggestMatchesAsync(CurrentCompany.CompanyId, selectedBankAccountId);
+            msg = "Auto suggestions updated.";
+            await LoadLines();
+        }
+        catch (Exception ex) { err = ex.Message; }
+        finally { working = false; }
+    }
+
+    async Task Approve()
+    {
+        if (selectedLine == null) return;
+
+        err = msg = null;
+        working = true;
+        try
+        {
+            await Reco.ApproveMatchAsync(CurrentCompany.CompanyId, selectedLine.BankStatementLineId);
+            msg = "Match approved. Line reconciled.";
+            await LoadLines();
+            await SelectLine(selectedLine.BankStatementLineId);
+        }
+        catch (Exception ex) { err = ex.Message; }
+        finally { working = false; }
+    }
+
+    async Task Ignore()
+    {
+        if (selectedLine == null) return;
+
+        err = msg = null;
+        working = true;
+        try
+        {
+            await Reco.IgnoreAsync(CurrentCompany.CompanyId, selectedLine.BankStatementLineId, "Ignored by user.");
+            msg = "Line ignored.";
+            await LoadLines();
+            await SelectLine(selectedLine.BankStatementLineId);
+        }
+        catch (Exception ex) { err = ex.Message; }
+        finally { working = false; }
+    }
+
+    async Task AutoPost()
+    {
+        if (selectedLine == null) return;
+
+        err = msg = null;
+        if (contraAccountNo <= 0) { err = "Select contra account."; return; }
+        if (string.IsNullOrWhiteSpace(newVoucherType)) { err = "Voucher type required."; return; }
+        if (string.IsNullOrWhiteSpace(newVoucherNo)) newVoucherNo = $"{newVoucherType}-{DateTime.Now:yyyyMMddHHmm}";
+        if (string.IsNullOrWhiteSpace(newNarration)) newNarration = $"Auto posted from bank: {selectedLine.Narration}";
+
+        working = true;
+        try
+        {
+            await Reco.AutoPostAsync(
+                companyId: CurrentCompany.CompanyId,
+                bankAccountId: selectedBankAccountId,
+                bankLineId: selectedLine.BankStatementLineId,
+                contraAccountNo: contraAccountNo,
+                voucherType: newVoucherType.Trim().ToUpperInvariant(),
+                voucherNo: newVoucherNo.Trim(),
+                narration: newNarration.Trim(),
+                refId: null
+            );
+
+            msg = $"Auto-posted & reconciled: {newVoucherType}-{newVoucherNo}";
+            await LoadLines();
+            await SelectLine(selectedLine.BankStatementLineId);
+        }
+        catch (Exception ex) { err = ex.Message; }
+        finally { working = false; }
+    }
+
+    void OpenImport()
+    {
+        showImport = true;
+        importErr = null;
+        csvText = null;
+        csvFileName = null;
+    }
+
+    void CloseImport()
+    {
+        if (workingImport) return;
+        showImport = false;
+        importErr = null;
+    }
+
+    async Task OnFileSelected(InputFileChangeEventArgs e)
+    {
+        importErr = null;
+        var file = e.File;
+        csvFileName = file.Name;
+
+        using var sr = new StreamReader(file.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024));
+        csvText = await sr.ReadToEndAsync();
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    async Task ImportNow()
+    {
+        importErr = null;
+
+        if (selectedBankAccountId <= 0)
+        {
+            importErr = "⚠️ Select bank account.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(csvText))
+        {
+            importErr = "⚠️ Please choose CSV file first.";
+            return;
+        }
+
+        workingImport = true;
+        try
+        {
+            var importId = await Reco.ImportCsvAsync(
+                companyId: CurrentCompany.CompanyId,
+                bankAccountId: selectedBankAccountId,
+                fileName: csvFileName ?? "statement.csv",
+                csvText: csvText
+            );
+
+            msg = $"✅ Imported successfully. ImportId: {importId}";
+            showImport = false;
+            await LoadLines();
+        }
+        catch (Exception ex) { importErr = ex.Message; }
+        finally { workingImport = false; }
+    }
+
+    string BadgeCls(BankLineStatus s) => s switch
+    {
+        BankLineStatus.Unmatched => "b-un",
+        BankLineStatus.Suggested => "b-sug",
+        BankLineStatus.Reconciled => "b-rec",
+        BankLineStatus.Ignored => "b-ign",
+        _ => "b-un"
+    };
+}

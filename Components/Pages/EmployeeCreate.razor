@@ -1,0 +1,457 @@
+﻿@page "/employee-create"
+@using System.Globalization
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Authorization
+@using UaeEInvoice.Data
+@using UaeEInvoice.Services.Auth
+
+@attribute [Authorize(Roles = "Admin")]
+
+@inject AppDbContext Db
+@inject NavigationManager Nav
+@inject ICurrentCompany CurrentCompany
+
+<style>
+    .soft-card {
+        border: 1px solid rgba(0,0,0,.06);
+        border-radius: 22px;
+        box-shadow: 0 10px 30px rgba(0,0,0,.06);
+        background: #fff;
+    }
+
+    .hero {
+        border-radius: 22px;
+        border: 1px solid rgba(0,0,0,.06);
+        background: linear-gradient(135deg, rgba(13,110,253,.10), rgba(255,255,255,0));
+        padding: 18px;
+    }
+
+    .title {
+        font-weight: 900;
+        letter-spacing: .2px;
+        margin: 0;
+    }
+
+    .muted {
+        color: rgba(0,0,0,.55);
+    }
+
+    .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: .45rem;
+        padding: .30rem .70rem;
+        border-radius: 999px;
+        border: 1px solid rgba(0,0,0,.08);
+        background: #fff;
+        font-size: .85rem;
+        white-space: nowrap;
+    }
+
+    .preview {
+        border-radius: 22px;
+        border: 1px solid rgba(0,0,0,.06);
+        background: linear-gradient(180deg, rgba(13,110,253,.06), rgba(0,0,0,0));
+        padding: 14px;
+    }
+
+    .kv {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 8px 0;
+        border-bottom: 1px solid rgba(0,0,0,.06);
+    }
+
+        .kv:last-child {
+            border-bottom: 0;
+        }
+
+    .sticky {
+        position: sticky;
+        top: 18px;
+    }
+</style>
+
+<div class="container-xxl py-4">
+
+    <div class="hero mb-3">
+        <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+            <div>
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <h2 class="title">Create Employee</h2>
+                    <span class="chip">👤 HR Master</span>
+                </div>
+                <div class="muted">Safe typing (no circuit crash) + Net Pay live preview.</div>
+
+                <div class="d-flex flex-wrap gap-2 mt-2">
+                    <span class="chip">🏢 CompanyId: @_companyId</span>
+                    <span class="chip">🆔 Code: @_e.EmpCode</span>
+                    <span class="chip">💰 Net: @NetPay.ToString("0.00")</span>
+                </div>
+            </div>
+
+            <button class="btn btn-outline-secondary" type="button" @onclick="Back" disabled="@_saving">Back</button>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_error))
+    {
+        <div class="alert alert-danger soft-card p-3">
+            <strong>Error:</strong> @_error
+        </div>
+    }
+
+    <div class="row g-3">
+        <div class="col-12 col-lg-8">
+            <div class="soft-card p-3 p-md-4">
+                <EditForm Model="_e" OnValidSubmit="Save">
+                    <DataAnnotationsValidator />
+                    <ValidationSummary />
+
+                    <h5 class="fw-bold mb-1">Employee Info</h5>
+                    <div class="muted">Basic details</div>
+                    <hr />
+
+                    <div class="row g-3">
+                        <div class="col-12 col-md-4">
+                            <label class="form-label">Emp Code</label>
+                            <InputText class="form-control" @bind-Value="_e.EmpCode" readonly />
+                            <div class="form-text">Auto-generated from Company ShortName.</div>
+                        </div>
+
+                        <div class="col-12 col-md-8">
+                            <label class="form-label">Employee Name <span class="text-danger">*</span></label>
+                            <!-- ✅ direct oninput handler (ChangeEventArgs) -->
+                            <input class="form-control"
+                                   value="@(_e.EmpName ?? "")"
+                                   @oninput="OnEmpNameInput"
+                                   placeholder="e.g., Mohamed Ali" />
+                            <div class="form-text">Use full name as per ID / passport.</div>
+                        </div>
+
+                        <div class="col-12 col-md-4">
+                            <label class="form-label">Join Date</label>
+                            <InputDate class="form-control" @bind-Value="_e.JoinDate" />
+                        </div>
+
+                        <div class="col-12 col-md-8 d-flex align-items-center">
+                            <div class="form-check mt-4">
+                                <InputCheckbox class="form-check-input" @bind-Value="_e.IsActive" />
+                                <label class="form-check-label fw-semibold">Active</label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <hr />
+
+                    <h5 class="fw-bold mb-1">Compensation</h5>
+                    <div class="muted">Monthly salary components</div>
+                    <hr />
+
+                    <div class="row g-3">
+                        <div class="col-12 col-md-4">
+                            <label class="form-label">Basic Salary</label>
+                            <!-- ✅ oninput → parse decimal safely -->
+                            <input type="number" step="0.01"
+                                   class="form-control"
+                                   value="@_basicText"
+                                   @oninput="OnBasicSalaryInput" />
+                            <div class="form-text">Monthly base pay.</div>
+                        </div>
+
+                        <div class="col-12 col-md-4">
+                            <label class="form-label">Allowance</label>
+                            <input type="number" step="0.01"
+                                   class="form-control"
+                                   value="@_allowText"
+                                   @oninput="OnAllowanceInput" />
+                            <div class="form-text">Housing / transport / other.</div>
+                        </div>
+
+                        <div class="col-12 col-md-4">
+                            <label class="form-label">Net Pay (Preview)</label>
+                            <input class="form-control" value="@NetPay.ToString("0.00")" readonly />
+                            <div class="form-text">Basic + Allowance (preview only).</div>
+                        </div>
+                    </div>
+
+                    <hr />
+
+                    <h5 class="fw-bold mb-1">Payment Details</h5>
+                    <div class="muted">How salary is paid</div>
+                    <hr />
+
+                    <div class="row g-3">
+                        <div class="col-12 col-md-4">
+                            <label class="form-label">Payment Method</label>
+                            <!-- ✅ bind to proxy property for auto-clear -->
+                            <InputSelect class="form-select" @bind-Value="PaymentMethod">
+                                <option value="Bank">Bank</option>
+                                <option value="Cash">Cash</option>
+                            </InputSelect>
+                            <div class="form-text">Cash selected → Bank fields disabled.</div>
+                        </div>
+
+                        <div class="col-12 col-md-4">
+                            <label class="form-label">Bank Name</label>
+                            <input class="form-control"
+                                   value="@(_e.BankName ?? "")"
+                                   @oninput="OnBankNameInput"
+                                   disabled="@IsCash"
+                                   placeholder="e.g., Emirates NBD" />
+                        </div>
+
+                        <div class="col-12 col-md-4">
+                            <label class="form-label">IBAN</label>
+                            <input class="form-control"
+                                   value="@(_e.IBAN ?? "")"
+                                   @oninput="OnIbanInput"
+                                   disabled="@IsCash"
+                                   placeholder="AE12 3456 7890 1234 5678 901" />
+                        </div>
+
+                        <div class="col-12">
+                            <label class="form-label">Notes</label>
+                            <InputTextArea class="form-control" @bind-Value="_e.Notes" rows="3" />
+                        </div>
+                    </div>
+
+                    <hr />
+
+                    <div class="d-flex gap-2 justify-content-end">
+                        <button class="btn btn-outline-secondary" type="button" @onclick="Reset" disabled="@_saving">Reset</button>
+                        <button class="btn btn-primary" type="submit" disabled="@_saving">
+                            @(_saving ? "Saving..." : "Save Employee")
+                        </button>
+                    </div>
+                </EditForm>
+            </div>
+        </div>
+
+        <div class="col-12 col-lg-4">
+            <div class="sticky">
+                <div class="soft-card p-3">
+                    <h5 class="fw-bold mb-1">Preview</h5>
+                    <div class="muted small">Live preview</div>
+
+                    <div class="preview mt-3">
+                        <div class="kv"><div class="muted">Employee</div><div class="fw-bold">@(_e.EmpName ?? "—")</div></div>
+                        <div class="kv"><div class="muted">Emp Code</div><div class="fw-bold">@_e.EmpCode</div></div>
+                        <div class="kv"><div class="muted">Join Date</div><div class="fw-bold">@_e.JoinDate.ToString("dd-MMM-yyyy")</div></div>
+                        <div class="kv"><div class="muted">Status</div><div class="fw-bold">@(_e.IsActive ? "Active" : "Inactive")</div></div>
+                        <div class="kv"><div class="muted">Basic</div><div class="fw-bold">@_e.BasicSalary.ToString("0.00")</div></div>
+                        <div class="kv"><div class="muted">Allowance</div><div class="fw-bold">@_e.Allowance.ToString("0.00")</div></div>
+                        <div class="kv"><div class="muted">Net Pay</div><div class="fw-bold">@NetPay.ToString("0.00")</div></div>
+                        <div class="kv"><div class="muted">Payment</div><div class="fw-bold">@(_e.PaymentMethod ?? "—")</div></div>
+                    </div>
+
+                    <div class="d-grid mt-3">
+                        <button class="btn btn-outline-secondary" @onclick="Back" disabled="@_saving">Back</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+@code {
+    private bool _saving;
+    private string? _error;
+
+    private int _companyId;
+    private string _companyShort = "CMP";
+    private Employee _e = new();
+
+    // ✅ text buffers for safe oninput number typing
+    private string _basicText = "0";
+    private string _allowText = "0";
+
+    private bool IsCash => string.Equals(_e.PaymentMethod, "Cash", StringComparison.OrdinalIgnoreCase);
+    private decimal NetPay => _e.BasicSalary + _e.Allowance;
+
+    // ✅ Proxy so payment method change auto-clears bank fields (no extra event handler)
+    private string PaymentMethod
+    {
+        get => string.IsNullOrWhiteSpace(_e.PaymentMethod) ? "Bank" : _e.PaymentMethod!;
+        set
+        {
+            _e.PaymentMethod = value;
+            if (string.Equals(value, "Cash", StringComparison.OrdinalIgnoreCase))
+            {
+                _e.BankName = "";
+                _e.IBAN = "";
+            }
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CurrentCompany.RefreshAsync();
+
+        if (!CurrentCompany.IsAuthenticated)
+        {
+            _error = "Not authenticated. Logout and login again.";
+            return;
+        }
+
+        _companyId = CurrentCompany.CompanyId;
+        if (_companyId <= 0)
+        {
+            _error = "CompanyId claim not found. Logout and login again.";
+            return;
+        }
+
+        _companyShort = await Db.Companies.AsNoTracking()
+            .Where(x => x.CompanyId == _companyId)
+            .Select(x => x.ShortName)
+            .FirstOrDefaultAsync() ?? "CMP";
+
+        _companyShort = CleanPrefix(_companyShort);
+
+        await Reset();
+    }
+
+    private void Back() => Nav.NavigateTo("/employees");
+
+    private async Task Reset()
+    {
+        _error = null;
+
+        _e = new Employee
+            {
+                CompanyId = _companyId,
+                EmpCode = await GenerateEmpCodeAsync(_companyId, _companyShort),
+                EmpName = "",
+                JoinDate = DateTime.Today,
+                BasicSalary = 0m,
+                Allowance = 0m,
+                PaymentMethod = "Bank",
+                BankName = "",
+                IBAN = "",
+                Notes = "",
+                IsActive = true
+            };
+
+        _basicText = _e.BasicSalary.ToString("0.##", CultureInfo.InvariantCulture);
+        _allowText = _e.Allowance.ToString("0.##", CultureInfo.InvariantCulture);
+    }
+
+    // ✅ THESE HANDLERS FIX THE CRASH (always ChangeEventArgs, never string parameter)
+    private void OnEmpNameInput(ChangeEventArgs e)
+    {
+        _e.EmpName = e.Value?.ToString() ?? "";
+    }
+
+    private void OnBankNameInput(ChangeEventArgs e)
+    {
+        _e.BankName = e.Value?.ToString() ?? "";
+    }
+
+    private void OnIbanInput(ChangeEventArgs e)
+    {
+        _e.IBAN = e.Value?.ToString() ?? "";
+    }
+
+    private void OnBasicSalaryInput(ChangeEventArgs e)
+    {
+        _basicText = e.Value?.ToString() ?? "0";
+        _e.BasicSalary = ParseDec(_basicText);
+    }
+
+    private void OnAllowanceInput(ChangeEventArgs e)
+    {
+        _allowText = e.Value?.ToString() ?? "0";
+        _e.Allowance = ParseDec(_allowText);
+    }
+
+    private static decimal ParseDec(string? s)
+    {
+        if (string.IsNullOrWhiteSpace(s)) return 0m;
+
+        // allow both "1234.56" and "1234,56"
+        s = s.Trim().Replace(",", ".");
+        return decimal.TryParse(s, NumberStyles.Any, CultureInfo.InvariantCulture, out var v) ? v : 0m;
+    }
+
+    private async Task Save()
+    {
+        _saving = true;
+        _error = null;
+
+        try
+        {
+            _e.EmpName = (_e.EmpName ?? "").Trim();
+            _e.BankName = (_e.BankName ?? "").Trim();
+            _e.IBAN = (_e.IBAN ?? "").Trim();
+            _e.Notes = (_e.Notes ?? "").Trim();
+
+            if (string.IsNullOrWhiteSpace(_e.EmpName))
+                throw new Exception("Employee name is required.");
+
+            _e.CompanyId = _companyId;
+
+            if (IsCash)
+            {
+                _e.BankName = "";
+                _e.IBAN = "";
+            }
+
+            // keep empcode unique
+            var code = (_e.EmpCode ?? "").Trim();
+            if (string.IsNullOrWhiteSpace(code))
+                code = await GenerateEmpCodeAsync(_companyId, _companyShort);
+
+            var exists = await Db.Employees.AsNoTracking()
+                .AnyAsync(x => x.CompanyId == _companyId && x.EmpCode == code);
+
+            if (exists)
+                code = await GenerateEmpCodeAsync(_companyId, _companyShort);
+
+            _e.EmpCode = code;
+
+            Db.Employees.Add(_e);
+            await Db.SaveChangesAsync();
+
+            Nav.NavigateTo("/employees", forceLoad: true);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.InnerException?.Message ?? ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task<string> GenerateEmpCodeAsync(int companyId, string shortName)
+    {
+        var prefix = $"{shortName}-EMP-";
+
+        var last = await Db.Employees.AsNoTracking()
+            .Where(x => x.CompanyId == companyId && x.EmpCode.StartsWith(prefix))
+            .OrderByDescending(x => x.EmployeeId)
+            .Select(x => x.EmpCode)
+            .FirstOrDefaultAsync();
+
+        var nextNo = 1;
+        if (!string.IsNullOrWhiteSpace(last))
+        {
+            var suffix = last.Substring(prefix.Length);
+            if (int.TryParse(suffix, out var n)) nextNo = n + 1;
+        }
+
+        return $"{prefix}{nextNo:000000}";
+    }
+
+    private static string CleanPrefix(string? s)
+    {
+        if (string.IsNullOrWhiteSpace(s)) return "CMP";
+        s = s.Trim().ToUpperInvariant();
+        var cleaned = new string(s.Where(char.IsLetterOrDigit).ToArray());
+        if (string.IsNullOrWhiteSpace(cleaned)) cleaned = "CMP";
+        return cleaned.Length > 5 ? cleaned[..5] : cleaned;
+    }
+}

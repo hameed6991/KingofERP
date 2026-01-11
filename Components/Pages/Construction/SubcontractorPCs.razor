@@ -1,0 +1,321 @@
+﻿@page "/construction/pcs"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+
+@using Microsoft.EntityFrameworkCore
+@using UaeEInvoice.Data
+@using UaeEInvoice.Services.Auth
+@inject AppDbContext Db
+@inject ICurrentCompany CurrentCompany
+@inject NavigationManager Nav
+
+<PageTitle>Subcontractor PCs</PageTitle>
+
+<style>
+    .hero {
+        border-radius: 18px;
+        padding: 18px 18px;
+        background: radial-gradient(900px 400px at 12% 15%, rgba(13,110,253,.16), transparent 60%), radial-gradient(900px 400px at 80% 20%, rgba(32,201,151,.14), transparent 60%), linear-gradient(180deg, #0b1220 0%, #0a0f1a 100%);
+        border: 1px solid rgba(255,255,255,.08);
+        box-shadow: 0 18px 40px rgba(0,0,0,.35);
+        color: #e9eefc;
+    }
+
+        .hero .mut {
+            color: rgba(233,238,252,.75);
+        }
+
+    .pill {
+        display: inline-flex;
+        gap: 8px;
+        align-items: center;
+        padding: 6px 10px;
+        border-radius: 999px;
+        border: 1px solid rgba(255,255,255,.12);
+        background: rgba(255,255,255,.06);
+        font-size: 12px;
+        color: rgba(233,238,252,.85);
+    }
+
+    .cardx {
+        border-radius: 16px;
+        border: 1px solid rgba(15, 23, 42, .10);
+        background: #fff;
+        box-shadow: 0 10px 25px rgba(2,6,23,.07);
+    }
+
+        .cardx .head {
+            padding: 14px 16px;
+            border-bottom: 1px solid rgba(2,6,23,.06);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+        }
+
+        .cardx .body {
+            padding: 14px 16px;
+        }
+
+    .tt {
+        font-weight: 800;
+        letter-spacing: .2px;
+        margin: 0;
+    }
+
+    .sub {
+        color: rgba(2,6,23,.62);
+        font-size: 13px;
+    }
+
+    .badge-soft {
+        border-radius: 999px;
+        padding: 6px 10px;
+        font-weight: 700;
+        font-size: 12px;
+        border: 1px solid rgba(2,6,23,.08);
+        background: rgba(2,6,23,.03);
+        color: rgba(2,6,23,.75);
+    }
+
+    .b-draft {
+        background: rgba(13,110,253,.10);
+        border-color: rgba(13,110,253,.25);
+        color: rgba(13,110,253,1);
+    }
+
+    .b-appr {
+        background: rgba(255,193,7,.16);
+        border-color: rgba(255,193,7,.35);
+        color: rgba(148, 100, 0, 1);
+    }
+
+    .b-post {
+        background: rgba(32,201,151,.12);
+        border-color: rgba(32,201,151,.28);
+        color: rgba(17, 94, 89, 1);
+    }
+</style>
+
+<div class="container-xxl py-4">
+
+    <div class="hero mb-3">
+        <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
+            <div>
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <h2 class="mb-1" style="font-weight:800;">Subcontractor PCs</h2>
+                    <span class="pill"><span class="bi bi-receipt"></span> Company #@CurrentCompany.CompanyId</span>
+                </div>
+                <div class="mut">Monthly valuation / Payment Certificate → Approval → Post to Ledger (AP + Retention + VAT).</div>
+            </div>
+
+            <div class="d-flex gap-2">
+                <button class="btn btn-outline-light" @onclick="Load" disabled="@_loading">
+                    <span class="bi bi-arrow-repeat me-1"></span> Refresh
+                </button>
+                <button class="btn btn-primary" @onclick="NewPC" disabled="@_loading">
+                    <span class="bi bi-plus-lg me-1"></span> New PC
+                </button>
+            </div>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_err))
+    {
+        <div class="alert alert-danger">@_err</div>
+    }
+
+    <div class="row g-3 mb-3">
+        <div class="col-12 col-lg-8">
+            <div class="cardx">
+                <div class="head">
+                    <div>
+                        <div class="tt">Search & Filters</div>
+                        <div class="sub">Real-time filtering.</div>
+                    </div>
+                    <div class="d-flex gap-2 flex-wrap">
+                        <select class="form-select" style="min-width:170px" @bind="_status" disabled="@_loading">
+                            <option value="">All status</option>
+                            <option value="Draft">Draft</option>
+                            <option value="Approved">Approved</option>
+                            <option value="Posted">Posted</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="body">
+                    <input class="form-control form-control-lg" placeholder="Search by PC No / Project / Subcontractor…" @bind="_q" @bind:event="oninput" />
+                </div>
+            </div>
+        </div>
+        <div class="col-12 col-lg-4">
+            <div class="cardx">
+                <div class="head">
+                    <div>
+                        <div class="tt">This Month Snapshot</div>
+                        <div class="sub">@DateTime.Today.ToString("MMM yyyy")</div>
+                    </div>
+                </div>
+                <div class="body">
+                    <div class="d-flex justify-content-between">
+                        <div class="text-muted">Total Net Payable</div>
+                        <div class="fw-bold">@_thisMonthTotal.ToString("N2")</div>
+                    </div>
+                    <div class="d-flex justify-content-between mt-2">
+                        <div class="text-muted">Due (next 30d)</div>
+                        <div class="fw-bold">@_due30.ToString("N2")</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="cardx">
+        <div class="head">
+            <div>
+                <div class="tt">PC Register</div>
+                <div class="sub">Click open to edit / approve / post.</div>
+            </div>
+            <div class="text-muted small">@(_loading ? "Loading…" : $"{Filtered.Count} shown")</div>
+        </div>
+
+        <div class="body p-0">
+            <div class="table-responsive">
+                <table class="table mb-0 align-middle">
+                    <thead>
+                        <tr>
+                            <th style="width:140px;">PC No</th>
+                            <th style="width:140px;">Period</th>
+                            <th>Project</th>
+                            <th>Subcontractor</th>
+                            <th style="width:140px;">Status</th>
+                            <th style="width:140px;" class="text-end">Net</th>
+                            <th style="width:140px;">Due</th>
+                            <th style="width:120px;" class="text-end">Open</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @if (_loading)
+                        {
+                            <tr><td colspan="8" class="p-4 text-center text-muted">Loading PCs…</td></tr>
+                        }
+                        else if (Filtered.Count == 0)
+                        {
+                            <tr><td colspan="8" class="p-4 text-center text-muted">No PCs found.</td></tr>
+                        }
+                        else
+                        {
+                            @foreach (var x in Filtered)
+                            {
+                                <tr>
+                                    <td class="fw-semibold">@x.PCNo</td>
+                                    <td>@x.PeriodMonth.ToString("MMM yyyy")</td>
+                                    <td>@x.Project?.ProjectName</td>
+                                    <td>@x.Subcontractor?.Name</td>
+                                    <td><span class="badge-soft @Badge(x.Status)">@x.Status</span></td>
+                                    <td class="text-end">@x.NetPayable.ToString("N2")</td>
+                                    <td>@x.DueDate.ToString("dd-MMM-yyyy")</td>
+                                    <td class="text-end">
+                                        <button class="btn btn-sm btn-outline-primary" @onclick="() => Open(x.SubcontractorPCId)">
+                                            <span class="bi bi-box-arrow-up-right"></span>
+                                        </button>
+                                    </td>
+                                </tr>
+                            }
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+@code {
+    private bool _loading = true;
+    private string _err = "";
+
+    private string _q = "";
+    private string _status = "";
+
+    private List<SubcontractorPC> _items = new();
+
+    private decimal _thisMonthTotal = 0m;
+    private decimal _due30 = 0m;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await Load();
+            StateHasChanged();
+        }
+    }
+
+    private async Task Load()
+    {
+        _err = "";
+        _loading = true;
+
+        try
+        {
+            await CurrentCompany.RefreshAsync();
+            var cid = CurrentCompany.CompanyId;
+            if (cid <= 0) { _items = new(); return; }
+
+            _items = await Db.SubcontractorPCs
+                .Include(x => x.Project)
+                .Include(x => x.Subcontractor)
+                .Where(x => x.CompanyId == cid)
+                .OrderByDescending(x => x.PeriodMonth)
+                .ThenByDescending(x => x.CreatedOn)
+                .ToListAsync();
+
+            // snapshot
+            var monthStart = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
+            _thisMonthTotal = _items.Where(x => x.PeriodMonth == monthStart).Sum(x => x.NetPayable);
+
+            var limit = DateTime.Today.AddDays(30);
+            _due30 = _items.Where(x => x.DueDate <= limit && x.Status != "Posted").Sum(x => x.NetPayable);
+        }
+        catch (Exception ex)
+        {
+            _err = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private List<SubcontractorPC> Filtered
+    {
+        get
+        {
+            IEnumerable<SubcontractorPC> q = _items;
+
+            if (!string.IsNullOrWhiteSpace(_status))
+                q = q.Where(x => x.Status == _status);
+
+            if (!string.IsNullOrWhiteSpace(_q))
+            {
+                var s = _q.Trim().ToLower();
+                q = q.Where(x =>
+                    (x.PCNo ?? "").ToLower().Contains(s) ||
+                    (x.Project!.ProjectName ?? "").ToLower().Contains(s) ||
+                    (x.Subcontractor!.Name ?? "").ToLower().Contains(s));
+            }
+
+            return q.ToList();
+        }
+    }
+
+    private void NewPC() => Nav.NavigateTo("/construction/pc/0");
+    private void Open(int id) => Nav.NavigateTo($"/construction/pc/{id}");
+
+    private static string Badge(string status) => status switch
+    {
+        "Draft" => "b-draft",
+        "Approved" => "b-appr",
+        "Posted" => "b-post",
+        _ => ""
+    };
+}

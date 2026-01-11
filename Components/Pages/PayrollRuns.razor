@@ -1,0 +1,125 @@
+﻿@page "/payroll-runs"
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Authorization
+@using UaeEInvoice.Data
+@inject AppDbContext Db
+@inject NavigationManager Nav
+@attribute [Authorize(Roles = "Admin,Payroll")]
+
+<div class="container-xxl py-4">
+
+    <div class="d-flex align-items-start justify-content-between flex-wrap gap-2 mb-3">
+        <div>
+            <h2 class="page-title mb-1">Payroll Runs</h2>
+            <div class="text-muted">Generate & manage monthly payroll.</div>
+        </div>
+
+        <div class="d-flex gap-2">
+            <button class="btn btn-primary" type="button" @onclick="GoCreate">+ New Payroll</button>
+            <button class="btn btn-outline-secondary" type="button" @onclick="Reload" disabled="@_loading">
+                @(_loading ? "Loading..." : "Reload")
+            </button>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_error))
+    {
+            <div class="alert alert-danger soft-card">@_error</div>
+    }
+
+    <div class="card soft-card">
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table align-middle table-hover">
+                    <thead>
+                        <tr class="text-uppercase small text-muted">
+                            <th style="width:110px;">ID</th>
+                            <th style="min-width:200px;">Run No</th>
+                            <th style="width:160px;">Period</th>
+                            <th style="width:140px;">Status</th>
+                            <th style="width:160px;">Created</th>
+                            <th class="text-end" style="width:140px;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var r in _rows)
+                        {
+                                <tr style="cursor:pointer" @onclick="() => View(r.PayrollRunId)">
+                                    <td class="text-muted">@r.PayrollRunId</td>
+                                    <td class="fw-semibold">@r.RunNo</td>
+                                    <td>@r.PeriodMonth.ToString("MMM yyyy")</td>
+                                    <td>
+                                        <span class="badge @StatusBadge(r.Status)">@r.Status</span>
+                                    </td>
+                                    <td>@r.CreatedOn.ToString("dd-MM-yyyy")</td>
+                                    <td class="text-end" @onclick:stopPropagation="true">
+                                        <button class="btn btn-sm btn-outline-primary" type="button" @onclick="() => View(r.PayrollRunId)">
+                                            View
+                                        </button>
+                                    </td>
+                                </tr>
+                        }
+                    </tbody>
+                </table>
+
+                @if (_rows.Count == 0 && !_loading)
+                {
+                        <div class="text-center text-muted py-4">No payroll runs.</div>
+                }
+            </div>
+        </div>
+    </div>
+
+</div>
+
+@code {
+    private bool _loading;
+    private string? _error;
+    private int _companyId;
+    private List<PayrollRun> _rows = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _companyId = await Db.Companies
+            .OrderBy(x => x.CompanyId)
+            .Select(x => x.CompanyId)
+            .FirstOrDefaultAsync();
+
+        await Load();
+    }
+
+    private void GoCreate() => Nav.NavigateTo("/payroll-run/create");
+    private void View(int id) => Nav.NavigateTo($"/payroll-run-view/{id}");
+    private async Task Reload() => await Load();
+
+    private async Task Load()
+    {
+        _loading = true;
+        _error = null;
+
+        try
+        {
+            _rows = await Db.PayrollRuns.AsNoTracking()
+                .Where(x => x.CompanyId == _companyId)
+                .OrderByDescending(x => x.PayrollRunId)
+                .Take(200)
+                .ToListAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private static string StatusBadge(string s)
+    {
+        s = (s ?? "").Trim().ToLowerInvariant();
+        if (s == "paid") return "bg-success";
+        if (s == "approved") return "bg-primary";
+        return "bg-secondary";
+    }
+}

@@ -1,0 +1,288 @@
+﻿@page "/login"
+@attribute [AllowAnonymous]
+@layout EmptyLayout
+
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+
+<PageTitle>Login</PageTitle>
+
+<style>
+    /* ---------- Premium background ---------- */
+    .lg-bg {
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        padding: 28px 16px;
+        background: radial-gradient(900px 450px at 15% 10%, rgba(13,110,253,.18), transparent 60%), radial-gradient(900px 450px at 85% 15%, rgba(111,66,193,.18), transparent 60%), radial-gradient(700px 420px at 55% 90%, rgba(32,201,151,.12), transparent 60%), linear-gradient(180deg, #0b1220 0%, #0a0f1a 100%);
+        position: relative;
+        overflow: hidden;
+    }
+
+    .lg-grid {
+        position: absolute;
+        inset: 0;
+        opacity: .25;
+        background-image: linear-gradient(rgba(255,255,255,.06) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.06) 1px, transparent 1px);
+        background-size: 48px 48px;
+        mask-image: radial-gradient(circle at 50% 30%, black 0%, transparent 60%);
+        pointer-events: none;
+    }
+
+    /* ---------- Card ---------- */
+    .lg-card {
+        width: 100%;
+        max-width: 520px;
+        border-radius: 22px;
+        border: 1px solid rgba(255,255,255,.12);
+        background: rgba(255,255,255,.08);
+        backdrop-filter: blur(16px);
+        box-shadow: 0 22px 70px rgba(0,0,0,.45);
+        overflow: hidden;
+    }
+
+    .lg-head {
+        padding: 22px 22px 18px 22px;
+        border-bottom: 1px solid rgba(255,255,255,.10);
+        background: radial-gradient(900px 300px at 10% 0%, rgba(13,110,253,.35), transparent 55%), radial-gradient(900px 300px at 90% 0%, rgba(111,66,193,.35), transparent 55%), rgba(255,255,255,.06);
+    }
+
+    .lg-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 10px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: .3px;
+        color: rgba(255,255,255,.92);
+        border: 1px solid rgba(255,255,255,.14);
+        background: rgba(255,255,255,.08);
+    }
+
+    .lg-title {
+        margin: 10px 0 2px 0;
+        color: #fff;
+        font-weight: 900;
+        letter-spacing: -.5px;
+    }
+
+    .lg-sub {
+        color: rgba(255,255,255,.70);
+        margin: 0;
+        font-size: 13px;
+    }
+
+    .lg-body {
+        padding: 22px;
+    }
+
+    /* ---------- Inputs ---------- */
+    .lg-label {
+        color: rgba(255,255,255,.75);
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: .35px;
+        text-transform: uppercase;
+        margin-bottom: 6px;
+    }
+
+    .lg-input, .lg-input:focus {
+        color: #fff;
+        background: rgba(255,255,255,.10);
+        border: 1px solid rgba(255,255,255,.14);
+        border-radius: 14px;
+        padding: 12px 14px;
+        box-shadow: none;
+    }
+
+        .lg-input::placeholder {
+            color: rgba(255,255,255,.55);
+        }
+
+    .lg-group .btn {
+        border-radius: 14px;
+        border: 1px solid rgba(255,255,255,.16);
+        background: rgba(255,255,255,.10);
+        color: rgba(255,255,255,.90);
+    }
+
+        .lg-group .btn:hover {
+            background: rgba(255,255,255,.14);
+        }
+
+    /* ---------- Button ---------- */
+    .lg-btn {
+        border-radius: 14px;
+        padding: 12px 14px;
+        font-weight: 900;
+        letter-spacing: .2px;
+        border: 0;
+        background: linear-gradient(135deg, #0d6efd, #6f42c1);
+        box-shadow: 0 16px 40px rgba(13,110,253,.25);
+    }
+
+        .lg-btn:disabled {
+            opacity: .7;
+            filter: grayscale(.1);
+            cursor: not-allowed;
+        }
+
+    /* ---------- Checkbox ---------- */
+    .lg-check .form-check-input {
+        border-radius: 6px;
+        border: 1px solid rgba(255,255,255,.25);
+        background-color: rgba(255,255,255,.10);
+    }
+
+    .lg-check .form-check-label {
+        color: rgba(255,255,255,.80);
+        font-weight: 700;
+    }
+
+    /* ---------- Footer ---------- */
+    .lg-foot {
+        padding: 16px 22px 20px 22px;
+        border-top: 1px solid rgba(255,255,255,.10);
+        color: rgba(255,255,255,.55);
+        font-size: 12px;
+        display: flex;
+        gap: 10px;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        background: rgba(255,255,255,.04);
+    }
+
+    .lg-brand {
+        color: rgba(255,255,255,.82);
+        font-weight: 900;
+        letter-spacing: .2px;
+    }
+
+    /* ---------- Alerts ---------- */
+    .lg-alert {
+        border-radius: 14px;
+        border: 1px solid rgba(255,255,255,.14);
+        background: rgba(220,53,69,.16);
+        color: rgba(255,255,255,.92);
+        padding: 10px 12px;
+    }
+</style>
+
+<div class="lg-bg">
+    <div class="lg-grid"></div>
+
+    <div class="container-xxl">
+        <div class="d-flex justify-content-center">
+            <div class="lg-card">
+
+                <div class="lg-head">
+                    <div class="lg-badge">
+                        <span style="font-size:14px;">🔐</span>
+                        UAE EINVOICE • SECURE LOGIN
+                    </div>
+
+                    <h1 class="lg-title">Welcome back</h1>
+                    <p class="lg-sub">Sign in to continue to your dashboard.</p>
+                </div>
+
+                <div class="lg-body">
+
+                    @if (error == "1")
+                    {
+                        <div class="lg-alert mb-3">
+                            <b>Invalid login.</b> Please check email and password.
+                        </div>
+                    }
+
+                    <form method="post" action="/auth/login" onsubmit="document.getElementById('lgBtn').disabled=true;">
+                        <AntiforgeryToken />
+
+                        <input type="hidden" name="ReturnUrl" value="@FinalReturnUrl" />
+
+                        <div class="mb-3">
+                            <div class="lg-label">Email</div>
+                            <input class="form-control lg-input"
+                                   name="Email"
+                                   autocomplete="username"
+                                   placeholder="admin@uae.com"
+                                   value="@prefillEmail" />
+                        </div>
+
+                        <div class="mb-2">
+                            <div class="lg-label">Password</div>
+                            <div class="input-group lg-group">
+                                <input id="pwd"
+                                       class="form-control lg-input"
+                                       name="Password"
+                                       type="password"
+                                       autocomplete="current-password"
+                                       placeholder="Enter your password" />
+                                <button class="btn" type="button" @onclick="TogglePassword" title="Show/Hide password">
+                                    @(showPwd ? "Hide" : "Show")
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="d-flex align-items-center justify-content-between mt-3 mb-3 flex-wrap gap-2">
+                            <div class="form-check lg-check m-0">
+                                <!-- ✅ NO hidden RememberMe (duplicate removed) -->
+                                <input class="form-check-input"
+                                       type="checkbox"
+                                       id="remember"
+                                       name="RememberMe"
+                                       value="true"
+                                       checked="@rememberDefault" />
+                                <label class="form-check-label" for="remember">Remember me</label>
+                            </div>
+
+                            <div class="text-white-50 small">
+                                Tip: use strong password 🔒
+                            </div>
+                        </div>
+
+                        <button id="lgBtn" type="submit" class="btn lg-btn w-100">
+                            <span class="me-2">Login</span>
+                        </button>
+                    </form>
+
+                </div>
+
+                <div class="lg-foot">
+                    <div>
+                        <span class="lg-brand">UaeEInvoice</span>
+                        <span class="ms-2">• Role-based access</span>
+                    </div>
+                    <div class="text-end">
+                        <span>© @DateTime.Now.Year</span>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    [SupplyParameterFromQuery(Name = "ReturnUrl")]
+    public string? ReturnUrl { get; set; }
+
+    [SupplyParameterFromQuery]
+    public string? error { get; set; }
+
+    private string FinalReturnUrl => string.IsNullOrWhiteSpace(ReturnUrl) ? "/" : ReturnUrl!;
+
+    // UI helpers
+    private bool showPwd = false;
+    private string prefillEmail = "";     // optional
+    private bool rememberDefault = true;  // default checked
+
+    private async Task TogglePassword()
+    {
+        showPwd = !showPwd;
+        await JS.InvokeVoidAsync("eval",
+            $"document.getElementById('pwd').type='{(showPwd ? "text" : "password")}'");
+    }
+}

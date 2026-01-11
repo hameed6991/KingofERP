@@ -1,0 +1,372 @@
+﻿@page "/account/enable-2fa"
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.Identity
+@using System.ComponentModel.DataAnnotations
+@using QRCoder
+@using UaeEInvoice.Data
+
+@attribute [Authorize]
+
+@inject UserManager<ApplicationUser> UserManager
+@inject NavigationManager Nav
+
+<PageTitle>Enable 2FA</PageTitle>
+
+<div class="p2fa-wrap">
+    <div class="p2fa-card">
+
+        <div class="p2fa-head">
+            <div>
+                <div class="mini">🔐 SECURITY • 2FA SETUP</div>
+                <div class="title">Enable Google Authenticator</div>
+                <div class="sub">Scan QR → enter 6 digit OTP → finish setup.</div>
+            </div>
+
+            <div class="d-flex gap-2">
+                <button class="btn btn-outline-light" @onclick="GoHome" disabled="@_loading">Home</button>
+                <button class="btn btn-light" @onclick="ResetKeyAsync" disabled="@_loading">Reset Key</button>
+            </div>
+        </div>
+
+        <div class="p2fa-body">
+
+            @if (!string.IsNullOrWhiteSpace(_err))
+            {
+                <div class="alert alert-danger">@_err</div>
+            }
+            @if (!string.IsNullOrWhiteSpace(_msg))
+            {
+                <div class="alert alert-success">@_msg</div>
+            }
+
+            @if (_loading)
+            {
+                <div class="alert alert-info">Loading 2FA setup...</div>
+            }
+            else
+            {
+                <div class="row g-3">
+                    <div class="col-12 col-lg-5">
+                        <div class="qr-box">
+                            @if (!string.IsNullOrWhiteSpace(_qrDataUrl))
+                            {
+                                <img src="@_qrDataUrl" alt="2FA QR"
+                                     style="max-width:220px; width:100%; height:auto;" />
+                            }
+                            else
+                            {
+                                <div class="text-muted">QR not generated</div>
+                            }
+                        </div>
+
+                        <div class="mt-3">
+                            <div class="text-muted small mb-1">Manual setup key (if QR not working)</div>
+                            <div class="secret">@_sharedKey</div>
+                        </div>
+                    </div>
+
+                    <div class="col-12 col-lg-7">
+                        <div class="card border-0 shadow-sm rounded-4 p-3 p-md-4">
+
+                            <h5 class="fw-bold mb-2">Step 1 — Scan QR</h5>
+                            <div class="text-muted small mb-3">
+                                Open Google Authenticator → “+” → Scan QR code.
+                            </div>
+
+                            <h5 class="fw-bold mb-2">Step 2 — Enter OTP</h5>
+                            <div class="text-muted small mb-3">
+                                Enter the 6-digit code shown in Authenticator.
+                            </div>
+
+                            <EditForm Model="@_form" OnValidSubmit="Confirm2FAAsync">
+                                <DataAnnotationsValidator />
+                                <ValidationSummary class="text-danger small" />
+
+                                <div class="mb-2">
+                                    <label class="form-label fw-semibold">OTP Code</label>
+                                    <InputText class="form-control form-control-lg"
+                                               @bind-Value="_form.Code"
+                                               placeholder="123456" />
+                                    <div class="form-text">Spaces/dashes allowed (auto cleaned).</div>
+                                </div>
+
+                                <button class="btn btn-primary btn-lg w-100 mt-3" disabled="@_busy">
+                                    @if (_busy)
+                                    {
+                                        <span class="spinner-border spinner-border-sm me-2"></span>
+                                        <span>Enabling...</span>
+                                    }
+                                    else
+                                    {
+                                        <span>Enable 2FA</span>
+                                    }
+                                </button>
+                            </EditForm>
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+
+    </div>
+</div>
+
+@code {
+    // ✅ MUST be inside @code (otherwise Razor thinks <AuthenticationState> is HTML tag)
+    [CascadingParameter] private Task<AuthenticationState> AuthenticationStateTask { get; set; } = default!;
+
+    private bool _loading = true;
+    private bool _busy;
+    private string? _err;
+    private string? _msg;
+
+    private string _sharedKey = "";
+    private string? _qrDataUrl;
+
+    private readonly Enable2faVm _form = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadSetupAsync();
+    }
+
+    private async Task<ApplicationUser?> GetCurrentUserAsync()
+    {
+        var auth = await AuthenticationStateTask;
+        var principal = auth.User;
+
+        if (principal?.Identity?.IsAuthenticated != true)
+            return null;
+
+        return await UserManager.GetUserAsync(principal);
+    }
+
+    private async Task LoadSetupAsync()
+    {
+        _loading = true;
+        _err = _msg = null;
+
+        try
+        {
+            var user = await GetCurrentUserAsync();
+            if (user == null)
+            {
+                Nav.NavigateTo("/login");
+                return;
+            }
+
+            var key = await UserManager.GetAuthenticatorKeyAsync(user);
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                await UserManager.ResetAuthenticatorKeyAsync(user);
+                key = await UserManager.GetAuthenticatorKeyAsync(user);
+            }
+
+            _sharedKey = FormatKey(key!);
+
+            var issuer = "UaeEInvoice";
+            var email = user.Email ?? user.UserName ?? "user";
+            var otpAuthUri = BuildOtpAuthUri(issuer, email, key!);
+
+            _qrDataUrl = BuildQrDataUrl(otpAuthUri);
+        }
+        catch (Exception ex)
+        {
+            _err = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task Confirm2FAAsync()
+    {
+        _err = _msg = null;
+        _busy = true;
+
+        try
+        {
+            var user = await GetCurrentUserAsync();
+            if (user == null)
+            {
+                Nav.NavigateTo("/login");
+                return;
+            }
+
+            var code = (_form.Code ?? "")
+                .Replace(" ", "")
+                .Replace("-", "")
+                .Trim();
+
+            if (code.Length < 6)
+            {
+                _err = "Enter a valid 6 digit OTP.";
+                return;
+            }
+
+            var ok = await UserManager.VerifyTwoFactorTokenAsync(
+                user,
+                TokenOptions.DefaultAuthenticatorProvider,
+                code);
+
+            if (!ok)
+            {
+                _err = "Invalid OTP. Please try again (check device time sync).";
+                return;
+            }
+
+            user.TwoFactorEnabled = true;
+            var upd = await UserManager.UpdateAsync(user);
+
+            if (!upd.Succeeded)
+            {
+                _err = string.Join(" | ", upd.Errors.Select(e => e.Description));
+                return;
+            }
+
+            _msg = "✅ 2FA enabled successfully!";
+        }
+        catch (Exception ex)
+        {
+            _err = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task ResetKeyAsync()
+    {
+        _err = _msg = null;
+
+        try
+        {
+            var user = await GetCurrentUserAsync();
+            if (user == null)
+            {
+                Nav.NavigateTo("/login");
+                return;
+            }
+
+            user.TwoFactorEnabled = false;
+            await UserManager.UpdateAsync(user);
+
+            await UserManager.ResetAuthenticatorKeyAsync(user);
+
+            _msg = "Authenticator key reset. Please scan the new QR.";
+            await LoadSetupAsync();
+        }
+        catch (Exception ex)
+        {
+            _err = ex.Message;
+        }
+    }
+
+    private void GoHome() => Nav.NavigateTo("/");
+
+    private static string BuildOtpAuthUri(string issuer, string email, string key)
+    {
+        var encIssuer = Uri.EscapeDataString(issuer);
+        var encEmail = Uri.EscapeDataString(email);
+        return $"otpauth://totp/{encIssuer}:{encEmail}?secret={key}&issuer={encIssuer}&digits=6";
+    }
+
+    private static string BuildQrDataUrl(string text)
+    {
+        var gen = new QRCodeGenerator();
+        var data = gen.CreateQrCode(text, QRCodeGenerator.ECCLevel.Q);
+        var png = new PngByteQRCode(data);
+        var bytes = png.GetGraphic(10);
+        return "data:image/png;base64," + Convert.ToBase64String(bytes);
+    }
+
+    private static string FormatKey(string key)
+    {
+        var chunks = Enumerable.Range(0, (key.Length + 3) / 4)
+            .Select(i => key.Skip(i * 4).Take(4))
+            .Select(a => new string(a.ToArray()));
+        return string.Join(" ", chunks).ToLowerInvariant();
+    }
+
+    public class Enable2faVm
+    {
+        [Required]
+        public string? Code { get; set; }
+    }
+}
+
+<style>
+    .p2fa-wrap {
+        min-height: calc(100vh - 120px);
+        padding: 28px 16px;
+        background: #f6f7fb;
+    }
+
+    .p2fa-card {
+        max-width: 980px;
+        margin: 0 auto;
+        border-radius: 22px;
+        overflow: hidden;
+        border: 1px solid rgba(0,0,0,.08);
+        box-shadow: 0 18px 55px rgba(0,0,0,.10);
+        background: #fff;
+    }
+
+    .p2fa-head {
+        padding: 22px 24px;
+        background: linear-gradient(135deg, #0d6efd, #6f42c1);
+        color: #fff;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+    }
+
+    .mini {
+        font-size: 12px;
+        font-weight: 800;
+        opacity: .9;
+        letter-spacing: .3px;
+    }
+
+    .title {
+        font-size: 34px;
+        font-weight: 900;
+        letter-spacing: -.6px;
+    }
+
+    .sub {
+        opacity: .85;
+        font-size: 13px;
+        margin-top: 4px;
+    }
+
+    .p2fa-body {
+        padding: 22px;
+    }
+
+    .qr-box {
+        border-radius: 18px;
+        border: 1px dashed rgba(0,0,0,.12);
+        background: #fff;
+        min-height: 240px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 16px;
+    }
+
+    .secret {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        background: rgba(13,110,253,.08);
+        border: 1px solid rgba(13,110,253,.20);
+        padding: 10px 12px;
+        border-radius: 14px;
+        font-size: 14px;
+        word-break: break-all;
+    }
+</style>

@@ -1,0 +1,1246 @@
+﻿@page "/"
+@page "/dashboard"
+@using Microsoft.EntityFrameworkCore
+@using UaeEInvoice.Data
+@using UaeEInvoice.Services
+@using UaeEInvoice.Services.Auth
+@inject AppDbContext Db
+@inject NavigationManager Nav
+@inject ICurrentCompany CurrentCompany
+@inject LedgerService Ledger
+
+@implements IAsyncDisposable
+
+<div class="dash-hero">
+    <div class="container-xxl py-4">
+
+        <!-- Top header -->
+        <div class="d-flex align-items-start justify-content-between flex-wrap gap-2 mb-3">
+            <div>
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <h2 class="page-title mb-0">ERP Dashboard</h2>
+                    <span class="badge rounded-pill text-bg-light border hero-pill">
+                        @DateTime.Today.ToString("dd MMM yyyy")
+                    </span>
+
+                    @if (_lastUpdated != default)
+                    {
+                        <span class="badge rounded-pill text-bg-light border hero-pill">
+                            Updated: @_lastUpdated.ToString("hh:mm:ss tt")
+                        </span>
+                    }
+                </div>
+
+                <div class="text-muted mt-1">
+                    Sales • Purchase • Inventory • Accounting — one place to control everything.
+                </div>
+            </div>
+
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+                <button class="btn btn-primary" type="button" @onclick="GoCreateInvoice" disabled="@_loading">
+                    + Create Sale Invoice
+                </button>
+
+                <button class="btn btn-outline-light" type="button" @onclick="GoPurchaseCreate" disabled="@_loading">
+                    + New Purchase
+                </button>
+
+                <button class="btn btn-outline-light" type="button" @onclick="Reload" disabled="@_loading">
+                    @(_loading ? "Loading..." : "Refresh")
+                </button>
+
+                <div class="d-flex align-items-center gap-2 soft-pill">
+                    <div class="form-check form-switch m-0">
+                        <input class="form-check-input" type="checkbox" role="switch" id="autoRefresh"
+                               @bind="_autoRefresh" disabled="@_loading">
+                        <label class="form-check-label small" for="autoRefresh">Auto</label>
+                    </div>
+
+                    <!-- ✅ FIX 1: Removed @onchange (because @bind already uses onchange)
+                         ✅ Use @bind:after to restart timer -->
+                    <select class="form-select form-select-sm soft-select" style="width:110px"
+                            @bind="_refreshSeconds" @bind:after="RestartAutoRefresh" disabled="@_loading">
+                        <option value="10">10s</option>
+                        <option value="30">30s</option>
+                        <option value="60">60s</option>
+                        <option value="120">2m</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(_error))
+        {
+            <div class="alert alert-danger soft-card">@_error</div>
+        }
+
+        <!-- Company strip -->
+        <div class="card soft-card mb-3 company-strip">
+            <div class="card-body d-flex justify-content-between flex-wrap gap-2 align-items-center">
+                <div>
+                    <div class="fw-semibold fs-5">@(_company?.LegalName ?? "Company not setup")</div>
+                    <div class="text-muted small">
+                        TRN: @(!string.IsNullOrWhiteSpace(_company?.TRN) ? _company!.TRN : "-")
+                        <span class="mx-2">•</span>
+                        CompanyId: <b>@_companyId</b>
+                    </div>
+                    <div class="small text-muted mt-1">
+                        @(_company == null ? "Complete Company Setup to unlock reports & automation." : "All numbers shown are for this company.")
+                    </div>
+                </div>
+
+                <div class="d-flex flex-wrap gap-2">
+                    <button class="btn btn-sm btn-outline-primary" type="button" @onclick="GoCompanySetup">Company Setup</button>
+                    <button class="btn btn-sm btn-outline-secondary" type="button" @onclick="GoCustomers">Customers</button>
+                    <button class="btn btn-sm btn-outline-secondary" type="button" @onclick="GoVendors">Vendors</button>
+                    <button class="btn btn-sm btn-outline-secondary" type="button" @onclick="GoItems">Items</button>
+                    <button class="btn btn-sm btn-outline-secondary" type="button" @onclick="GoPurchases">Purchases</button>
+                    <button class="btn btn-sm btn-outline-secondary" type="button" @onclick="GoInventory">Inventory</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- KPI Grid -->
+        <div class="row g-3 mb-3">
+            <div class="col-12 col-md-6 col-xl-3">
+                <div class="card soft-card kpi kpi-strong">
+                    <div class="card-body">
+                        <div class="kpi-title">Sales (This Month)</div>
+                        <div class="kpi-value">@_salesMonth.ToString("0.00")</div>
+                        <div class="kpi-sub">
+                            Invoices: <b>@_invoiceCountMonth</b>
+                            <span class="mx-2">•</span>
+                            Today: <b>@_salesToday.ToString("0.00")</b>
+                        </div>
+                        <div class="kpi-mini-note text-muted">VAT Output: @_vatOutputMonth.ToString("0.00")</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-12 col-md-6 col-xl-3">
+                <div class="card soft-card kpi kpi-strong">
+                    <div class="card-body">
+                        <div class="kpi-title">Purchases (This Month)</div>
+                        <div class="kpi-value">@_purchaseMonth.ToString("0.00")</div>
+                        <div class="kpi-sub">
+                            Bills: <b>@_purchaseCountMonth</b>
+                            <span class="mx-2">•</span>
+                            Today: <b>@_purchaseToday.ToString("0.00")</b>
+                        </div>
+                        <div class="kpi-mini-note text-muted">VAT Input: @_vatInputMonth.ToString("0.00")</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-12 col-md-6 col-xl-3">
+                <div class="card soft-card kpi kpi-strong">
+                    <div class="card-body">
+                        <div class="kpi-title">Accounts Receivable (AR)</div>
+                        <div class="kpi-value">@_arBalance.ToString("0.00")</div>
+                        <div class="kpi-sub">
+                            Overdue: <b>@_arOverdueCount</b>
+                            <span class="mx-2">•</span>
+                            Due in 7 days: <b>@_arDueSoonCount</b>
+                        </div>
+                        <div class="kpi-mini-note text-muted">Account: 1100</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-12 col-md-6 col-xl-3">
+                <div class="card soft-card kpi kpi-strong">
+                    <div class="card-body">
+                        <div class="kpi-title">Accounts Payable (AP)</div>
+                        <div class="kpi-value">@_apBalance.ToString("0.00")</div>
+                        <div class="kpi-sub">
+                            Overdue: <b>@_apOverdueCount</b>
+                            <span class="mx-2">•</span>
+                            Due in 7 days: <b>@_apDueSoonCount</b>
+                        </div>
+                        <div class="kpi-mini-note text-muted">Account: 2000</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Mini KPIs -->
+        <div class="row g-3 mb-3">
+            <div class="col-12 col-md-6 col-xl-3">
+                <div class="card soft-card kpi kpi-mini">
+                    <div class="card-body">
+                        <div class="kpi-title">Cash (1000)</div>
+                        <div class="kpi-value">@_cashBalance.ToString("0.00")</div>
+                        <div class="kpi-sub">Ledger driven</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-12 col-md-6 col-xl-3">
+                <div class="card soft-card kpi kpi-mini">
+                    <div class="card-body">
+                        <div class="kpi-title">Inventory Value (1200)</div>
+                        <div class="kpi-value">@_inventoryValue.ToString("0.00")</div>
+                        <div class="kpi-sub">
+                            Low stock (&lt;= 5): <b>@_lowStock.Count</b>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-12 col-md-6 col-xl-3">
+                <div class="card soft-card kpi kpi-mini">
+                    <div class="card-body">
+                        <div class="kpi-title">VAT (This Month)</div>
+                        <div class="kpi-value">@_vatNetMonth.ToString("0.00")</div>
+                        <div class="kpi-sub">
+                            Output: <b>@_vatOutputMonth.ToString("0.00")</b>
+                            <span class="mx-2">•</span>
+                            Input: <b>@_vatInputMonth.ToString("0.00")</b>
+                        </div>
+                        <div class="small text-muted mt-1">
+                            Status: <b>@(_vatNetMonth >= 0 ? "Payable" : "Receivable")</b>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-12 col-md-6 col-xl-3">
+                <div class="card soft-card kpi kpi-mini">
+                    <div class="card-body">
+                        <div class="kpi-title">Masters</div>
+                        <div class="kpi-value">@_customerCount</div>
+                        <div class="kpi-sub">
+                            Vendors <b>@_vendorCount</b>
+                            <span class="mx-2">•</span>
+                            Items <b>@_itemCount</b>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main content -->
+        <div class="row g-3">
+
+            <!-- LEFT: Recent + Cash -->
+            <div class="col-12 col-xl-7">
+                <div class="card soft-card mb-3">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+                            <div>
+                                <div class="fw-semibold fs-5">Recent Transactions</div>
+                                <div class="text-muted small">Latest invoices & purchases (top 8 each).</div>
+                            </div>
+                            <div class="d-flex gap-2 flex-wrap">
+                                <button class="btn btn-sm btn-outline-secondary" @onclick="GoInvoices">View Invoices</button>
+                                <button class="btn btn-sm btn-outline-secondary" @onclick="GoPurchases">View Purchases</button>
+                            </div>
+                        </div>
+
+                        <hr class="my-3" />
+
+                        <div class="row g-4">
+                            <!-- Recent Invoices -->
+                            <div class="col-12 col-lg-6">
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <div class="section-title mb-0">Recent Invoices</div>
+                                    <a class="small text-decoration-none" href="/invoices">Open →</a>
+                                </div>
+
+                                <div class="table-responsive">
+                                    <table class="table tx-table align-middle">
+                                        <thead>
+                                            <tr>
+                                                <th class="tx-date">DATE</th>
+                                                <th class="tx-no">NO</th>
+                                                <th class="tx-party">CUSTOMER</th>
+                                                <th class="tx-total text-end">TOTAL</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            @if (_recentInvoices.Count == 0)
+                                            {
+                                                <tr><td colspan="4" class="text-center text-muted py-4">No invoices.</td></tr>
+                                            }
+                                            else
+                                            {
+                                                @foreach (var r in _recentInvoices)
+                                                {
+                                                    <tr>
+                                                        <td class="tx-date-val">@r.Date.ToString("dd-MMM")</td>
+                                                        <td class="tx-no-val">
+                                                            <a class="tx-link" href="@($"/invoice-view/{r.Id}")">@r.No</a>
+                                                        </td>
+                                                        <td class="tx-party-val" title="@r.Party">@r.Party</td>
+                                                        <td class="tx-total-val text-end fw-semibold">@r.Total.ToString("0.00")</td>
+                                                    </tr>
+                                                }
+                                            }
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <!-- Recent Purchases -->
+                            <div class="col-12 col-lg-6 border-lg-start">
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <div class="section-title mb-0">Recent Purchases</div>
+                                    <a class="small text-decoration-none" href="/purchases">Open →</a>
+                                </div>
+
+                                <div class="table-responsive">
+                                    <table class="table tx-table align-middle">
+                                        <thead>
+                                            <tr>
+                                                <th class="tx-date">DATE</th>
+                                                <th class="tx-no">NO</th>
+                                                <th class="tx-party">VENDOR</th>
+                                                <th class="tx-total text-end">TOTAL</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            @if (_recentPurchases.Count == 0)
+                                            {
+                                                <tr><td colspan="4" class="text-center text-muted py-4">No purchases.</td></tr>
+                                            }
+                                            else
+                                            {
+                                                @foreach (var r in _recentPurchases)
+                                                {
+                                                    <tr>
+                                                        <td class="tx-date-val">@r.Date.ToString("dd-MMM")</td>
+                                                        <td class="tx-no-val">
+                                                            <a class="tx-link" href="@($"/purchase-view/{r.Id}")">@r.No</a>
+                                                        </td>
+                                                        <td class="tx-party-val" title="@r.Party">@r.Party</td>
+                                                        <td class="tx-total-val text-end fw-semibold">@r.Total.ToString("0.00")</td>
+                                                    </tr>
+                                                }
+                                            }
+                                        </tbody>
+                                    </table>
+                                </div>
+
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+
+                <!-- Cash movements -->
+                <div class="card soft-card">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <div class="fw-semibold fs-5">Cash Movements</div>
+                                <div class="text-muted small">Account 1000 — last 10 movements.</div>
+                            </div>
+                            <button class="btn btn-sm btn-outline-secondary" @onclick="GoCashflow">Cashflow →</button>
+                        </div>
+
+                        <hr class="my-3" />
+
+                        <div class="table-responsive">
+                            <table class="table tx-table align-middle">
+                                <thead>
+                                    <tr>
+                                        <th class="tx-date">DATE</th>
+                                        <th>REF</th>
+                                        <th>NARRATION</th>
+                                        <th class="text-end">IN</th>
+                                        <th class="text-end">OUT</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @if (_cashMovements.Count == 0)
+                                    {
+                                        <tr><td colspan="5" class="text-center text-muted py-4">No cash transactions found.</td></tr>
+                                    }
+                                    else
+                                    {
+                                        @foreach (var c in _cashMovements)
+                                        {
+                                            <tr>
+                                                <td class="tx-date-val">@c.Date.ToString("dd-MMM")</td>
+                                                <td class="tx-no-val"><span class="fw-semibold">@c.Ref</span></td>
+                                                <td class="tx-party-val" title="@c.Narration">@c.Narration</td>
+                                                <td class="text-end fw-semibold">@((c.InAmount > 0) ? c.InAmount.ToString("0.00") : "-")</td>
+                                                <td class="text-end fw-semibold">@((c.OutAmount > 0) ? c.OutAmount.ToString("0.00") : "-")</td>
+                                            </tr>
+                                        }
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+
+            <!-- RIGHT: Insights + Alerts -->
+            <div class="col-12 col-xl-5">
+
+                <!-- TOP 10 Customers -->
+                <div class="card soft-card mb-3">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <div class="fw-semibold fs-5">Top 10 Customers</div>
+                                <div class="text-muted small">This month — ranked by total sales.</div>
+                            </div>
+                            <button class="btn btn-sm btn-outline-secondary" @onclick="GoCustomers">Customers →</button>
+                        </div>
+
+                        <hr class="my-3" />
+
+                        @if (_topCustomers10.Count == 0)
+                        {
+                            <div class="text-muted">No sales yet this month.</div>
+                        }
+                        else
+                        {
+                            <div class="table-responsive">
+                                <table class="table tx-table align-middle">
+                                    <thead>
+                                        <tr>
+                                            <th style="width:48px;">#</th>
+                                            <th>Customer</th>
+                                            <th class="text-end" style="width:90px;">Inv</th>
+                                            <th class="text-end" style="width:140px;">Total</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @for (int i = 0; i < _topCustomers10.Count; i++)
+                                        {
+                                            var t = _topCustomers10[i];
+                                            <tr>
+                                                <td class="tx-date-val">@(i + 1)</td>
+                                                <td class="tx-party-val" title="@t.Name"><b>@t.Name</b></td>
+                                                <td class="text-end">@t.Count</td>
+                                                <td class="text-end fw-semibold">@t.Total.ToString("0.00")</td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        }
+                    </div>
+                </div>
+
+                <!-- Top 10 Vendors -->
+                <div class="card soft-card mb-3">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <div class="fw-semibold fs-5">Top 10 Vendors</div>
+                                <div class="text-muted small">This month — ranked by total purchases.</div>
+                            </div>
+                            <button class="btn btn-sm btn-outline-secondary" @onclick="GoVendors">Vendors →</button>
+                        </div>
+
+                        <hr class="my-3" />
+
+                        @if (_topVendors10.Count == 0)
+                        {
+                            <div class="text-muted">No purchases yet this month.</div>
+                        }
+                        else
+                        {
+                            <div class="table-responsive">
+                                <table class="table tx-table align-middle">
+                                    <thead>
+                                        <tr>
+                                            <th style="width:48px;">#</th>
+                                            <th>Vendor</th>
+                                            <th class="text-end" style="width:90px;">Bills</th>
+                                            <th class="text-end" style="width:140px;">Total</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @for (int i = 0; i < _topVendors10.Count; i++)
+                                        {
+                                            var t = _topVendors10[i];
+                                            <tr>
+                                                <td class="tx-date-val">@(i + 1)</td>
+                                                <td class="tx-party-val" title="@t.Name"><b>@t.Name</b></td>
+                                                <td class="text-end">@t.Count</td>
+                                                <td class="text-end fw-semibold">@t.Total.ToString("0.00")</td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        }
+                    </div>
+                </div>
+
+                <!-- Top 10 Selling Items + Alerts -->
+                <div class="row g-3">
+
+                    <div class="col-12">
+                        <div class="card soft-card">
+                            <div class="card-body">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <div class="fw-semibold fs-5">Top 10 Selling Items</div>
+                                        <div class="text-muted small">This month — by total value.</div>
+                                    </div>
+                                    <button class="btn btn-sm btn-outline-secondary" @onclick="GoItems">Items →</button>
+                                </div>
+
+                                <hr class="my-3" />
+
+                                @if (_topItems10.Count == 0)
+                                {
+                                    <div class="text-muted">No invoice line items found.</div>
+                                }
+                                else
+                                {
+                                    <div class="table-responsive">
+                                        <table class="table tx-table align-middle">
+                                            <thead>
+                                                <tr>
+                                                    <th>Item</th>
+                                                    <th class="text-end" style="width:90px;">Qty</th>
+                                                    <th class="text-end" style="width:140px;">Total</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                @foreach (var x in _topItems10)
+                                                {
+                                                    <tr>
+                                                        <td class="tx-party-val" title="@x.ItemName"><b>@x.ItemName</b></td>
+                                                        <td class="text-end">@x.Qty.ToString("0.##")</td>
+                                                        <td class="text-end fw-semibold">@x.Total.ToString("0.00")</td>
+                                                    </tr>
+                                                }
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                }
+
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Alerts -->
+                    <div class="col-12">
+                        <div class="card soft-card">
+                            <div class="card-body">
+                                <div class="fw-semibold fs-5">Alerts</div>
+                                <div class="text-muted small">Overdue + low stock (real-time).</div>
+
+                                <hr class="my-3" />
+
+                                <div class="row g-3">
+
+                                    <!-- Low Stock -->
+                                    <div class="col-12 col-lg-6">
+                                        <div class="mini-box">
+                                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                                <div class="section-title mb-0">Low Stock (&lt;= 5)</div>
+                                                <a class="small text-decoration-none" href="/inventory">Open →</a>
+                                            </div>
+
+                                            @if (_lowStockTop10.Count == 0)
+                                            {
+                                                <div class="text-muted small">No low stock items.</div>
+                                            }
+                                            else
+                                            {
+                                                <div class="table-responsive">
+                                                    <table class="table table-sm align-middle mb-0">
+                                                        <thead>
+                                                            <tr class="text-uppercase text-muted small">
+                                                                <th>Item</th>
+                                                                <th class="text-end">Qty</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            @foreach (var s in _lowStockTop10)
+                                                            {
+                                                                <tr>
+                                                                    <td class="text-truncate" style="max-width:220px">@s.ItemName</td>
+                                                                    <td class="text-end fw-semibold">@s.Qty.ToString("0.##")</td>
+                                                                </tr>
+                                                            }
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            }
+                                        </div>
+                                    </div>
+
+                                    <!-- Overdue -->
+                                    <div class="col-12 col-lg-6">
+                                        <div class="mini-box">
+                                            <div class="section-title">Overdue</div>
+
+                                            <div class="mb-2">
+                                                <div class="d-flex justify-content-between align-items-center">
+                                                    <div class="text-muted small">AR Invoices</div>
+                                                    <a class="small text-decoration-none" href="/invoices">Open →</a>
+                                                </div>
+
+                                                @if (_overdueInvoices.Count == 0)
+                                                {
+                                                    <div class="text-muted small">No overdue invoices.</div>
+                                                }
+                                                else
+                                                {
+                                                    <div class="table-responsive">
+                                                        <table class="table table-sm align-middle mb-0">
+                                                            <thead>
+                                                                <tr class="text-uppercase text-muted small">
+                                                                    <th>No</th>
+                                                                    <th class="text-end">Days</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                @foreach (var o in _overdueInvoices)
+                                                                {
+                                                                    <tr>
+                                                                        <td class="text-truncate" style="max-width:240px">
+                                                                            <a class="text-decoration-none fw-semibold" href="@($"/invoice-view/{o.Id}")">@o.No</a>
+                                                                        </td>
+                                                                        <td class="text-end fw-semibold">@o.Days</td>
+                                                                    </tr>
+                                                                }
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                }
+                                            </div>
+
+                                            <div class="mt-3">
+                                                <div class="d-flex justify-content-between align-items-center">
+                                                    <div class="text-muted small">AP Bills</div>
+                                                    <a class="small text-decoration-none" href="/purchases">Open →</a>
+                                                </div>
+
+                                                @if (_overduePurchases.Count == 0)
+                                                {
+                                                    <div class="text-muted small">No overdue bills.</div>
+                                                }
+                                                else
+                                                {
+                                                    <div class="table-responsive">
+                                                        <table class="table table-sm align-middle mb-0">
+                                                            <thead>
+                                                                <tr class="text-uppercase text-muted small">
+                                                                    <th>No</th>
+                                                                    <th class="text-end">Days</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                @foreach (var o in _overduePurchases)
+                                                                {
+                                                                    <tr>
+                                                                        <td class="text-truncate" style="max-width:240px">
+                                                                            <a class="text-decoration-none fw-semibold" href="@($"/purchase-view/{o.Id}")">@o.No</a>
+                                                                        </td>
+                                                                        <td class="text-end fw-semibold">@o.Days</td>
+                                                                    </tr>
+                                                                }
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                }
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                </div>
+
+                                <div class="mt-3 d-flex flex-wrap gap-2">
+                                    <button class="btn btn-outline-primary" @onclick="GoCreateInvoice">Create Invoice</button>
+                                    <button class="btn btn-outline-secondary" @onclick="GoPurchaseCreate">New Purchase</button>
+                                    <button class="btn btn-outline-secondary" @onclick="GoCashflow">Cashflow</button>
+                                    <button class="btn btn-outline-secondary" @onclick="GoTrialBalance">Trial Balance</button>
+                                </div>
+
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+
+            </div>
+
+        </div>
+
+    </div>
+</div>
+
+<style>
+    .dash-hero {
+        background: radial-gradient(1100px 500px at 15% 0%, rgba(13,110,253,.22), transparent 60%), radial-gradient(900px 400px at 95% 10%, rgba(25,135,84,.16), transparent 55%), linear-gradient(180deg, rgba(13,110,253,.06), transparent 35%);
+        min-height: 100%;
+    }
+
+    .hero-pill {
+        padding: .35rem .65rem;
+        color: rgba(33,37,41,.75);
+    }
+
+    .soft-pill {
+        padding: .35rem .5rem;
+        border: 1px solid rgba(255,255,255,.35);
+        border-radius: 999px;
+        background: rgba(255,255,255,.12);
+        backdrop-filter: blur(8px);
+    }
+
+    .soft-select {
+        background: rgba(255,255,255,.92);
+        border-radius: 999px;
+        border: 1px solid rgba(0,0,0,.08);
+    }
+
+    .company-strip {
+        border: 1px solid rgba(0,0,0,.06);
+        border-radius: 18px;
+    }
+
+    .soft-card {
+        border: 1px solid rgba(0,0,0,.06);
+        border-radius: 18px;
+        background: rgba(255,255,255,.92);
+        backdrop-filter: blur(8px);
+        box-shadow: 0 18px 45px rgba(0,0,0,.06);
+    }
+
+    .kpi {
+        border: 1px solid rgba(0,0,0,.06);
+        border-radius: 18px;
+        background: rgba(255,255,255,.90);
+        backdrop-filter: blur(8px);
+        transition: transform .12s ease, box-shadow .12s ease;
+    }
+
+    .kpi-strong:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 18px 50px rgba(0,0,0,.10);
+    }
+
+    .kpi-title {
+        font-size: .85rem;
+        color: rgba(33,37,41,.70);
+        text-transform: uppercase;
+        letter-spacing: .04em;
+    }
+
+    .kpi-value {
+        font-size: 2rem;
+        font-weight: 900;
+        margin-top: .2rem;
+        line-height: 1.1;
+    }
+
+    .kpi-sub {
+        margin-top: .35rem;
+        font-size: .85rem;
+        color: rgba(33,37,41,.65);
+    }
+
+    .kpi-mini .kpi-value {
+        font-size: 1.7rem;
+    }
+
+    .kpi-mini-note {
+        margin-top: .35rem;
+        font-size: .78rem;
+    }
+
+    .section-title {
+        font-weight: 900;
+        letter-spacing: .01em;
+        margin-bottom: .5rem;
+    }
+
+    .mini-box {
+        border: 1px solid rgba(0,0,0,.06);
+        border-radius: 14px;
+        padding: .85rem;
+        background: rgba(255,255,255,.75);
+    }
+
+    .tx-table {
+        margin: 0;
+        border-collapse: separate;
+        border-spacing: 0;
+    }
+
+        .tx-table thead th {
+            font-size: .78rem;
+            color: rgba(33,37,41,.55);
+            letter-spacing: .10em;
+            text-transform: uppercase;
+            border-bottom: 1px solid rgba(0,0,0,.06);
+            padding: .55rem .35rem;
+            white-space: nowrap;
+        }
+
+        .tx-table tbody td {
+            padding: .65rem .35rem;
+            border-bottom: 1px solid rgba(0,0,0,.06);
+            vertical-align: middle;
+        }
+
+    .tx-date {
+        width: 72px;
+    }
+
+    .tx-no {
+        width: 120px;
+    }
+
+    .tx-total {
+        width: 110px;
+    }
+
+    .tx-no-val, .tx-link {
+        white-space: nowrap;
+    }
+
+    .tx-link {
+        text-decoration: none;
+        font-weight: 800;
+    }
+
+    .tx-party-val {
+        max-width: 240px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .tx-date-val {
+        color: rgba(33,37,41,.85);
+    }
+
+    .tx-total-val {
+        font-variant-numeric: tabular-nums;
+    }
+
+
+    @@media (min-width: 992px) {
+        .border-lg-start
+
+    {
+        border-left: 1px solid rgba(0,0,0,.08);
+        padding-left: 1.25rem;
+    }
+
+    }
+</style>
+
+@code {
+    private bool _loading;
+    private string? _error;
+
+    private Company? _company;
+    private int _companyId;
+
+    private DateTime _lastUpdated;
+
+    // auto refresh
+    private bool _autoRefresh = true;
+    private int _refreshSeconds = 30;
+    private CancellationTokenSource? _refreshCts;
+    private Task? _refreshTask;
+
+    // KPIs
+    private decimal _salesMonth;
+    private decimal _salesToday;
+    private int _invoiceCountMonth;
+
+    private decimal _purchaseMonth;
+    private decimal _purchaseToday;
+    private int _purchaseCountMonth;
+
+    private decimal _vatOutputMonth;
+    private decimal _vatInputMonth;
+    private decimal _vatNetMonth;
+
+    private decimal _cashBalance;
+    private decimal _arBalance;
+    private decimal _apBalance;
+    private decimal _inventoryValue;
+
+    private int _customerCount;
+    private int _vendorCount;
+    private int _itemCount;
+
+    private int _arOverdueCount;
+    private int _arDueSoonCount;
+    private int _apOverdueCount;
+    private int _apDueSoonCount;
+
+    private List<MiniTxn> _recentInvoices = new();
+    private List<MiniTxn> _recentPurchases = new();
+
+    private List<TopParty> _topCustomers10 = new();
+    private List<TopParty> _topVendors10 = new();
+
+    private List<TopItemRow> _topItems10 = new();
+
+    private List<LowStockRow> _lowStock = new();
+    private List<LowStockRow> _lowStockTop10 = new();
+
+    private List<OverdueRow> _overdueInvoices = new();
+    private List<OverdueRow> _overduePurchases = new();
+
+    private List<CashMoveRow> _cashMovements = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Load();
+        StartAutoRefresh();
+    }
+
+    private void GoCreateInvoice() => Nav.NavigateTo("/invoice-create");
+    private void GoInvoices() => Nav.NavigateTo("/invoices");
+    private void GoCompanySetup() => Nav.NavigateTo("/company-setup");
+    private void GoCustomers() => Nav.NavigateTo("/customers");
+    private void GoItems() => Nav.NavigateTo("/items");
+    private void GoVendors() => Nav.NavigateTo("/vendors");
+    private void GoPurchases() => Nav.NavigateTo("/purchases");
+    private void GoPurchaseCreate() => Nav.NavigateTo("/purchase-create");
+    private void GoInventory() => Nav.NavigateTo("/inventory");
+    private void GoCashflow() => Nav.NavigateTo("/cashflow");
+    private void GoTrialBalance() => Nav.NavigateTo("/trial-balance");
+
+    private async Task Reload() => await Load();
+
+    private void StartAutoRefresh()
+    {
+        _refreshCts?.Cancel();
+        _refreshCts = new CancellationTokenSource();
+        var token = _refreshCts.Token;
+
+        _refreshTask = Task.Run(async () =>
+        {
+            try
+            {
+                while (!token.IsCancellationRequested)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(_refreshSeconds), token);
+
+                    if (token.IsCancellationRequested) break;
+                    if (!_autoRefresh) continue;
+                    if (_loading) continue;
+
+                    await InvokeAsync(async () => await Load());
+                }
+            }
+            catch (OperationCanceledException) { }
+        }, token);
+    }
+
+    private void RestartAutoRefresh()
+    {
+        _refreshCts?.Cancel();
+        _refreshCts?.Dispose();
+        _refreshCts = null;
+        StartAutoRefresh();
+    }
+
+    private async Task Load()
+    {
+        _loading = true;
+        _error = null;
+
+        _recentInvoices.Clear();
+        _recentPurchases.Clear();
+        _topCustomers10.Clear();
+        _topVendors10.Clear();
+        _topItems10.Clear();
+        _lowStock.Clear();
+        _lowStockTop10.Clear();
+        _overdueInvoices.Clear();
+        _overduePurchases.Clear();
+        _cashMovements.Clear();
+
+        try
+        {
+            await CurrentCompany.RefreshAsync();
+            _companyId = CurrentCompany.CompanyId;
+
+            if (_companyId <= 0)
+                throw new Exception("CompanyId not found in claim. Logout and login again.");
+
+            _company = await Db.Companies.AsNoTracking()
+                .FirstOrDefaultAsync(x => x.CompanyId == _companyId);
+
+            var today = DateTime.Today;
+            var monthStart = new DateTime(today.Year, today.Month, 1);
+            var monthEnd = monthStart.AddMonths(1);
+
+            // Sales month agg
+            var monthInvAgg = await Db.Invoices.AsNoTracking()
+                .Where(x => x.CompanyId == _companyId && x.InvoiceDate >= monthStart && x.InvoiceDate < monthEnd)
+                .GroupBy(x => 1)
+                .Select(g => new { Count = g.Count(), Sales = g.Sum(x => x.GrandTotal), Vat = g.Sum(x => x.VatTotal) })
+                .FirstOrDefaultAsync();
+
+            _invoiceCountMonth = monthInvAgg?.Count ?? 0;
+            _salesMonth = monthInvAgg?.Sales ?? 0m;
+            _vatOutputMonth = monthInvAgg?.Vat ?? 0m;
+
+            _salesToday = await Db.Invoices.AsNoTracking()
+                .Where(x => x.CompanyId == _companyId && x.InvoiceDate == today)
+                .Select(x => x.GrandTotal)
+                .SumAsync();
+
+            // Purchase month agg
+            var monthPurAgg = await Db.PurchaseInvoices.AsNoTracking()
+                .Where(x => x.CompanyId == _companyId && x.PurchaseDate >= monthStart && x.PurchaseDate < monthEnd)
+                .GroupBy(x => 1)
+                .Select(g => new { Count = g.Count(), Total = g.Sum(x => x.GrandTotal), Vat = g.Sum(x => x.VatTotal) })
+                .FirstOrDefaultAsync();
+
+            _purchaseCountMonth = monthPurAgg?.Count ?? 0;
+            _purchaseMonth = monthPurAgg?.Total ?? 0m;
+            _vatInputMonth = monthPurAgg?.Vat ?? 0m;
+
+            _purchaseToday = await Db.PurchaseInvoices.AsNoTracking()
+                .Where(x => x.CompanyId == _companyId && x.PurchaseDate == today)
+                .Select(x => x.GrandTotal)
+                .SumAsync();
+
+            _vatNetMonth = _vatOutputMonth - _vatInputMonth;
+
+            // Masters
+            _customerCount = await Db.Customers.AsNoTracking().CountAsync(x => x.CompanyId == _companyId);
+            _vendorCount = await Db.Vendors.AsNoTracking().CountAsync(x => x.CompanyId == _companyId);
+            _itemCount = await Db.Items.AsNoTracking().CountAsync(x => x.CompanyId == _companyId);
+
+            // Ledger balances
+            _cashBalance = await Ledger.GetBalanceAsync(_companyId, 1000);
+            _arBalance = await Ledger.GetBalanceAsync(_companyId, 1100);
+            _inventoryValue = await Ledger.GetBalanceAsync(_companyId, 1200);
+            _apBalance = await Ledger.GetBalanceAsync(_companyId, 2000);
+
+            // Due/Overdue counts
+            _arOverdueCount = await Db.Invoices.AsNoTracking()
+                .CountAsync(x => x.CompanyId == _companyId && x.DueDate < today);
+
+            _arDueSoonCount = await Db.Invoices.AsNoTracking()
+                .CountAsync(x => x.CompanyId == _companyId && x.DueDate >= today && x.DueDate <= today.AddDays(7));
+
+            _apOverdueCount = await Db.PurchaseInvoices.AsNoTracking()
+                .CountAsync(x => x.CompanyId == _companyId && x.DueDate < today);
+
+            _apDueSoonCount = await Db.PurchaseInvoices.AsNoTracking()
+                .CountAsync(x => x.CompanyId == _companyId && x.DueDate >= today && x.DueDate <= today.AddDays(7));
+
+            // Recent invoices
+            _recentInvoices = await Db.Invoices.AsNoTracking()
+                .Where(x => x.CompanyId == _companyId)
+                .OrderByDescending(x => x.InvoiceDate)
+                .ThenByDescending(x => x.InvoiceId)
+                .Select(x => new MiniTxn
+                    {
+                        Id = x.InvoiceId,
+                        No = x.InvoiceNo,
+                        Date = x.InvoiceDate,
+                        Party = x.CustomerName,
+                        Total = x.GrandTotal
+                    })
+                .Take(8)
+                .ToListAsync();
+
+            // Recent purchases
+            _recentPurchases = await Db.PurchaseInvoices.AsNoTracking()
+                .Where(x => x.CompanyId == _companyId)
+                .OrderByDescending(x => x.PurchaseDate)
+                .ThenByDescending(x => x.PurchaseInvoiceId)
+                .Select(x => new MiniTxn
+                    {
+                        Id = x.PurchaseInvoiceId,
+                        No = x.PurchaseNo,
+                        Date = x.PurchaseDate,
+                        Party = x.VendorName,
+                        Total = x.GrandTotal
+                    })
+                .Take(8)
+                .ToListAsync();
+
+            // Top 10 customers
+            _topCustomers10 = await Db.Invoices.AsNoTracking()
+                .Where(x => x.CompanyId == _companyId && x.InvoiceDate >= monthStart && x.InvoiceDate < monthEnd)
+                .GroupBy(x => x.CustomerName)
+                .Select(g => new TopParty
+                    {
+                        Name = g.Key ?? "Unknown",
+                        Count = g.Count(),
+                        Total = g.Sum(x => x.GrandTotal)
+                    })
+                .OrderByDescending(x => x.Total)
+                .Take(10)
+                .ToListAsync();
+
+            // Top 10 vendors
+            _topVendors10 = await Db.PurchaseInvoices.AsNoTracking()
+                .Where(x => x.CompanyId == _companyId && x.PurchaseDate >= monthStart && x.PurchaseDate < monthEnd)
+                .GroupBy(x => x.VendorName)
+                .Select(g => new TopParty
+                    {
+                        Name = g.Key ?? "Unknown",
+                        Count = g.Count(),
+                        Total = g.Sum(x => x.GrandTotal)
+                    })
+                .OrderByDescending(x => x.Total)
+                .Take(10)
+                .ToListAsync();
+
+            // Top 10 items sold
+            var invMonthIds = Db.Invoices.AsNoTracking()
+                .Where(x => x.CompanyId == _companyId && x.InvoiceDate >= monthStart && x.InvoiceDate < monthEnd)
+                .Select(x => x.InvoiceId);
+
+            _topItems10 = await Db.InvoiceLines.AsNoTracking()
+                .Where(l => l.CompanyId == _companyId && invMonthIds.Contains(l.InvoiceId))
+                .GroupBy(l => l.ItemName)
+                .Select(g => new TopItemRow
+                    {
+                        ItemName = g.Key ?? "Item",
+                        Qty = g.Sum(x => x.Qty),
+                        Total = g.Sum(x => x.LineTotal)
+                    })
+                .OrderByDescending(x => x.Total)
+                .Take(10)
+                .ToListAsync();
+
+            // Low stock (<=5)
+            _lowStock = await Db.StockLedgers.AsNoTracking()
+                .Where(x => x.CompanyId == _companyId)
+                .GroupBy(x => new { x.ItemId, x.ItemName })
+                .Select(g => new LowStockRow
+                    {
+                        ItemId = g.Key.ItemId,
+                        ItemName = g.Key.ItemName ?? "",
+                        Qty = g.Sum(x => x.QtyChange)
+                    })
+                .Where(x => x.Qty <= 5m)
+                .OrderBy(x => x.Qty)
+                .Take(50)
+                .ToListAsync();
+
+            _lowStockTop10 = _lowStock.Take(10).ToList();
+
+            // ✅ FIX 2: DateDiffDay returns int? -> use ?? 0
+            _overdueInvoices = await Db.Invoices.AsNoTracking()
+                .Where(x => x.CompanyId == _companyId && x.DueDate < today)
+                .OrderBy(x => x.DueDate)
+                .Select(x => new OverdueRow
+                    {
+                        Id = x.InvoiceId,
+                        No = x.InvoiceNo,
+                        Days = EF.Functions.DateDiffDay(x.DueDate, today) ?? 0
+                    })
+                .Take(8)
+                .ToListAsync();
+
+            _overduePurchases = await Db.PurchaseInvoices.AsNoTracking()
+                .Where(x => x.CompanyId == _companyId && x.DueDate < today)
+                .OrderBy(x => x.DueDate)
+                .Select(x => new OverdueRow
+                    {
+                        Id = x.PurchaseInvoiceId,
+                        No = x.PurchaseNo,
+                        Days = EF.Functions.DateDiffDay(x.DueDate, today) ?? 0
+                    })
+                .Take(8)
+                .ToListAsync();
+
+            // Cash movements (1000)
+            _cashMovements = await Db.GeneralLedgerEntries.AsNoTracking()
+                .Where(x => x.CompanyId == _companyId && (x.DebitAccountNo == 1000 || x.CreditAccountNo == 1000))
+                .OrderByDescending(x => x.TxnDate)
+                .ThenByDescending(x => x.GeneralLedgerEntryId)
+                .Select(x => new CashMoveRow
+                    {
+                        Date = x.TxnDate,
+                        Ref = $"{x.VoucherType}-{x.VoucherNo}",
+                        Narration = x.Narration ?? "",
+                        InAmount = (x.DebitAccountNo == 1000) ? x.Amount : 0m,
+                        OutAmount = (x.CreditAccountNo == 1000) ? x.Amount : 0m
+                    })
+                .Take(10)
+                .ToListAsync();
+
+            _lastUpdated = DateTime.Now;
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            _refreshCts?.Cancel();
+            if (_refreshTask != null)
+                await _refreshTask;
+        }
+        catch { }
+        finally
+        {
+            _refreshCts?.Dispose();
+        }
+    }
+
+    private sealed class MiniTxn
+    {
+        public int Id { get; set; }
+        public string No { get; set; } = "";
+        public DateTime Date { get; set; }
+        public string Party { get; set; } = "";
+        public decimal Total { get; set; }
+    }
+
+    private sealed class TopParty
+    {
+        public string Name { get; set; } = "";
+        public int Count { get; set; }
+        public decimal Total { get; set; }
+    }
+
+    private sealed class TopItemRow
+    {
+        public string ItemName { get; set; } = "";
+        public decimal Qty { get; set; }
+        public decimal Total { get; set; }
+    }
+
+    private sealed class LowStockRow
+    {
+        public int ItemId { get; set; }
+        public string ItemName { get; set; } = "";
+        public decimal Qty { get; set; }
+    }
+
+    private sealed class OverdueRow
+    {
+        public int Id { get; set; }
+        public string No { get; set; } = "";
+        public int Days { get; set; }
+    }
+
+    private sealed class CashMoveRow
+    {
+        public DateTime Date { get; set; }
+        public string Ref { get; set; } = "";
+        public string Narration { get; set; } = "";
+        public decimal InAmount { get; set; }
+        public decimal OutAmount { get; set; }
+    }
+}

@@ -1,0 +1,747 @@
+﻿@page "/construction/pc/{Id:int}/print"
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.EntityFrameworkCore
+@using System.Globalization
+@using System.Reflection
+@using UaeEInvoice.Data
+@using UaeEInvoice.Services.Auth
+@attribute [Authorize]
+
+@inject AppDbContext Db
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@inject ICurrentCompany CurrentCompany
+
+<PageTitle>PC Print</PageTitle>
+
+<style>
+    .pwrap {
+        max-width: 980px;
+        margin: 0 auto;
+        padding: 18px;
+    }
+
+    .toolbar {
+        display: flex;
+        gap: 10px;
+        justify-content: flex-end;
+        margin-bottom: 14px;
+        flex-wrap: wrap;
+    }
+
+    .btnx {
+        border-radius: 999px;
+        padding: .55rem 1.05rem;
+        font-weight: 800;
+    }
+
+    .paper {
+        background: #fff;
+        border: 1px solid rgba(15,23,42,.12);
+        border-radius: 16px;
+        box-shadow: 0 18px 50px rgba(0,0,0,.10);
+        overflow: hidden;
+    }
+
+    .topbar {
+        padding: 16px 18px;
+        background: linear-gradient(135deg,#0b1220,#0a0f1a);
+        color: #eaf1ff;
+        display: flex;
+        gap: 14px;
+        align-items: center;
+        justify-content: space-between;
+    }
+
+    .brand {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+    }
+
+    .logo {
+        width: 56px;
+        height: 56px;
+        border-radius: 14px;
+        background: rgba(255,255,255,.08);
+        border: 1px solid rgba(255,255,255,.12);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+    }
+
+        .logo img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+    .cname {
+        font-weight: 900;
+        font-size: 18px;
+        margin: 0;
+    }
+
+    .cmeta {
+        opacity: .82;
+        font-size: 12.5px;
+        margin-top: 2px;
+        line-height: 1.25rem;
+    }
+
+    .docTitle {
+        text-align: right;
+    }
+
+        .docTitle .t {
+            font-weight: 900;
+            font-size: 18px;
+            margin: 0;
+        }
+
+        .docTitle .s {
+            opacity: .82;
+            font-size: 12.5px;
+            margin-top: 2px;
+        }
+
+    .grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+        padding: 16px 18px;
+    }
+
+    .cardx {
+        border: 1px solid rgba(15,23,42,.10);
+        border-radius: 14px;
+        padding: 12px;
+        background: linear-gradient(180deg,#fff,#fbfdff);
+    }
+
+    .lbl {
+        color: #6b7280;
+        font-size: 12px;
+        margin-bottom: 2px;
+    }
+
+    .val {
+        font-weight: 800;
+        color: #0f172a;
+    }
+
+    .mut {
+        color: #6b7280;
+        font-size: 12px;
+    }
+
+    table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+
+    th, td {
+        padding: 10px 10px;
+        border-bottom: 1px solid rgba(15,23,42,.10);
+        vertical-align: top;
+    }
+
+    th {
+        text-transform: uppercase;
+        letter-spacing: .08em;
+        font-size: 11px;
+        color: #6b7280;
+    }
+
+    .right {
+        text-align: right;
+        white-space: nowrap;
+    }
+
+    .totals {
+        padding: 14px 18px;
+        display: grid;
+        grid-template-columns: 1fr 360px;
+        gap: 16px;
+    }
+
+    .box {
+        border: 1px solid rgba(15,23,42,.10);
+        border-radius: 14px;
+        padding: 12px;
+        background: #fff;
+    }
+
+    .rowx {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 6px 0;
+    }
+
+        .rowx .k {
+            color: #6b7280;
+            font-size: 13px;
+        }
+
+        .rowx .v {
+            font-weight: 900;
+        }
+
+    .grand {
+        border-top: 1px dashed rgba(15,23,42,.25);
+        margin-top: 8px;
+        padding-top: 8px;
+    }
+
+    .sign {
+        padding: 16px 18px 22px 18px;
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 18px;
+    }
+
+    .sig {
+        border: 1px dashed rgba(15,23,42,.25);
+        border-radius: 14px;
+        padding: 12px;
+        min-height: 85px;
+    }
+
+        .sig .sigt {
+            color: #6b7280;
+            font-size: 12px;
+            margin-bottom: 6px;
+        }
+
+    .foot {
+        padding: 12px 18px;
+        color: #6b7280;
+        font-size: 12px;
+        border-top: 1px solid rgba(15,23,42,.08);
+    }
+
+    @@media print {
+        .toolbar {
+            display: none !important;
+        }
+
+        body {
+            background: #fff !important;
+        }
+
+        .pwrap {
+            padding: 0 !important;
+            max-width: 100% !important;
+        }
+
+        .paper {
+            box-shadow: none !important;
+            border: none !important;
+            border-radius: 0 !important;
+        }
+    }
+</style>
+
+<div class="pwrap">
+    <div class="toolbar">
+        <button class="btn btn-outline-secondary btnx" type="button" @onclick="BackToEdit">Back to Edit</button>
+
+        <button class="btn btn-outline-dark btnx" type="button"
+                @onclick="DownloadPdf"
+                disabled="@(_pc == null || _downloading)">
+            @if (_downloading)
+            {
+                <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                <span>Downloading...</span>
+            }
+            else
+            {
+                <span>Download</span>
+            }
+        </button>
+
+        <button class="btn btn-primary btnx" type="button" @onclick="PrintNow">Print</button>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_err))
+    {
+        <div class="alert alert-danger">@_err</div>
+    }
+    else if (_pc == null)
+    {
+        <div class="alert alert-warning">PC not found.</div>
+    }
+    else
+    {
+        <!-- ✅ This wrapper id is used for PDF download -->
+        <div id="pc-doc" class="paper">
+
+            <div class="topbar">
+                <div class="brand">
+                    <div class="logo">
+                        @if (!string.IsNullOrWhiteSpace(_logoPath))
+                        {
+                            <img src="@_logoPath" alt="Logo" />
+                        }
+                        else
+                        {
+                            <div style="font-weight:900;">LOGO</div>
+                        }
+                    </div>
+
+                    <div>
+                        <div class="cname">@_companyName</div>
+                        <div class="cmeta">
+                            TRN: @_companyTRN <br />
+                            @_companyAddress
+                        </div>
+                    </div>
+                </div>
+
+                <div class="docTitle">
+                    <div class="t">Subcontractor Payment Certificate</div>
+                    <div class="s">PC No: <b>@_pcNo</b> • Period: <b>@_periodText</b></div>
+                </div>
+            </div>
+
+            <div class="grid">
+                <div class="cardx">
+                    <div class="lbl">Project</div>
+                    <div class="val">@_projectText</div>
+                    <div class="lbl mt-2">Subcontractor</div>
+                    <div class="val">@_subText</div>
+                </div>
+
+                <div class="cardx">
+                    <div class="lbl">Issue Date</div>
+                    <div class="val">@_issueText</div>
+                    <div class="lbl mt-2">Due Date</div>
+                    <div class="val">@_dueText</div>
+                </div>
+
+                <div class="cardx">
+                    <div class="lbl">VAT %</div>
+                    <div class="val">@_vatPct.ToString("N2")</div>
+                </div>
+
+                <div class="cardx">
+                    <div class="lbl">Retention %</div>
+                    <div class="val">@_retPct.ToString("N2")</div>
+                </div>
+            </div>
+
+            <div style="padding:0 18px 8px 18px;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Work Section</th>
+                            <th class="right">Previous</th>
+                            <th class="right">Current</th>
+                            <th class="right">Total</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var ln in _lines)
+                        {
+                            <tr>
+                                <td>@ln.WorkSection</td>
+                                <td class="right">@ln.Previous.ToString("N2")</td>
+                                <td class="right">@ln.Current.ToString("N2")</td>
+                                <td class="right"><b>@ln.Total.ToString("N2")</b></td>
+                            </tr>
+                        }
+                        <tr>
+                            <td class="mut">Work Done To Date (Sum of totals)</td>
+                            <td></td>
+                            <td></td>
+                            <td class="right"><b>@_calc.WorkDoneToDate.ToString("N2")</b></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="totals">
+                <div class="box">
+                    <div class="lbl">Notes</div>
+                    <div>@_notes</div>
+                </div>
+
+                <div class="box">
+                    <div class="rowx"><div class="k">This Month Gross</div><div class="v">@_calc.ThisMonthGross.ToString("N2")</div></div>
+                    <div class="rowx"><div class="k">Retention</div><div class="v">@_calc.Retention.ToString("N2")</div></div>
+                    <div class="rowx"><div class="k">Backcharge / Deductions</div><div class="v">@_calc.Backcharge.ToString("N2")</div></div>
+                    <div class="rowx"><div class="k">Payable (ex VAT)</div><div class="v">@_calc.PayableExVat.ToString("N2")</div></div>
+                    <div class="rowx"><div class="k">VAT</div><div class="v">@_calc.Vat.ToString("N2")</div></div>
+                    <div class="rowx grand"><div class="k"><b>NET PAYABLE</b></div><div class="v"><b>@_calc.NetPayable.ToString("N2")</b></div></div>
+                </div>
+            </div>
+
+            <div class="sign">
+                <div class="sig"><div class="sigt">Prepared By</div></div>
+                <div class="sig"><div class="sigt">Checked / Approved By</div></div>
+                <div class="sig"><div class="sigt">Subcontractor Sign & Stamp</div></div>
+            </div>
+
+            <div class="foot">
+                Generated from UaeEInvoice • CompanyId: @_companyId • Printed: @DateTime.Now.ToString("dd-MMM-yyyy HH:mm")
+            </div>
+        </div>
+    }
+</div>
+
+<!-- ✅ PDF download library (client-side) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+
+<!-- ✅ JS interop for download -->
+<script>
+    window.pcx = window.pcx || {};
+    window.pcx.downloadPdf = async (elementId, fileName) => {
+        const el = document.getElementById(elementId);
+        if (!el || !window.html2pdf) return;
+
+        // Ensure white background in PDF even if page has gradients
+        const prevBg = el.style.background;
+        el.style.background = "#ffffff";
+
+        const opt = {
+            margin: 0.25, // inches
+            filename: fileName || "PC.pdf",
+            image: { type: "jpeg", quality: 0.98 },
+            html2canvas: { scale: 2, useCORS: true, scrollY: 0 },
+            jsPDF: { unit: "in", format: "a4", orientation: "portrait" }
+        };
+
+        try {
+            await html2pdf().set(opt).from(el).save();
+        } finally {
+            el.style.background = prevBg;
+        }
+    };
+</script>
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private int _companyId;
+    private string? _err;
+
+    private SubcontractorPC? _pc;
+    private List<LineVm> _lines = new();
+    private CalcVm _calc = new();
+
+    private bool _downloading;
+
+    // Company header
+    private string _companyName = "Company";
+    private string _companyTRN = "-";
+    private string _companyAddress = "-";
+    private string? _logoPath;
+
+    private string _pcNo = "";
+    private string _periodText = "-";
+    private string _projectText = "-";
+    private string _subText = "-";
+    private string _issueText = "-";
+    private string _dueText = "-";
+    private string _notes = "-";
+
+    private decimal _vatPct = 0;
+    private decimal _retPct = 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CurrentCompany.RefreshAsync();
+        _companyId = CurrentCompany.CompanyId;
+        await Load();
+    }
+
+    private void BackToEdit() => Nav.NavigateTo($"/construction/pc/{Id}");
+    private async Task PrintNow() => await JS.InvokeVoidAsync("window.print");
+
+    private async Task DownloadPdf()
+    {
+        if (_pc == null) return;
+
+        _downloading = true;
+        _err = null;
+
+        try
+        {
+            var fileName = SafeFileName($"{_pcNo}-{_periodText}.pdf");
+            await JS.InvokeVoidAsync("pcx.downloadPdf", "pc-doc", fileName);
+        }
+        catch (Exception ex)
+        {
+            _err = "Download failed: " + ex.Message;
+        }
+        finally
+        {
+            _downloading = false;
+        }
+    }
+
+    private static string SafeFileName(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return "PC.pdf";
+
+        // Replace invalid filename chars
+        foreach (var ch in System.IO.Path.GetInvalidFileNameChars())
+            name = name.Replace(ch, '-');
+
+        // Trim and avoid repeated dashes
+        name = name.Trim().Replace("  ", " ").Replace(" ", "-");
+        while (name.Contains("--")) name = name.Replace("--", "-");
+
+        if (!name.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
+            name += ".pdf";
+
+        return name;
+    }
+
+    private async Task Load()
+    {
+        try
+        {
+            await LoadCompanyHeader();
+
+            _pc = await TryFindPcById_NoTracking(Id);
+            if (_pc == null) return;
+
+            _pcNo = GetString(_pc, "PCNo", "PcNo", "ClaimNo") ?? $"PC-{Id}";
+            _notes = GetString(_pc, "Notes", "Remark", "Remarks") ?? "-";
+
+            var pm = GetDate(_pc, "PeriodMonth", "Period", "Month", "PeriodDate");
+            _periodText = pm.HasValue ? pm.Value.ToString("MMMM, yyyy") : "-";
+
+            var issue = GetDate(_pc, "IssueDate", "PcDate", "ClaimDate", "Date");
+            var due = GetDate(_pc, "DueDate", "PaymentDueDate");
+            _issueText = issue.HasValue ? issue.Value.ToString("dd-MM-yyyy") : "-";
+            _dueText = due.HasValue ? due.Value.ToString("dd-MM-yyyy") : "-";
+
+            var vatRaw = GetDec(_pc, "VatRate", "VATRate", "VatPercent", "VATPercent", "VatPct");
+            _vatPct = (vatRaw > 0 && vatRaw <= 1) ? vatRaw * 100m : vatRaw;
+
+            var retRaw = GetDec(_pc, "RetentionPct", "RetentionPercent", "RetentionPercentage", "RetentionRate");
+            _retPct = (retRaw > 0 && retRaw <= 1) ? retRaw * 100m : retRaw;
+
+            var pid = GetInt(_pc, "ProjectId", "ConstructionProjectId");
+            var sid = GetInt(_pc, "SubcontractorId", "ConstructionSubcontractorId");
+
+            var proj = await TryFindProjectById(pid);
+            _projectText = proj != null ? BuildProjectDisplay(proj) : "-";
+
+            var sub = await Db.Set<ConstructionSubcontractor>().AsNoTracking()
+                .FirstOrDefaultAsync(x => x.ConstructionSubcontractorId == sid);
+            _subText = sub != null ? sub.Name : "-";
+
+            _lines = await TryLoadLines(Id);
+            if (_lines.Count == 0) _lines.Add(new LineVm { WorkSection = "General Works" });
+
+            Recalc();
+        }
+        catch (Exception ex)
+        {
+            _err = ex.Message;
+        }
+    }
+
+    // ✅ Project fetch with EF.Property (translatable) + safe fallback
+    private async Task<ConstructionProject?> TryFindProjectById(int projectId)
+    {
+        if (projectId <= 0) return null;
+
+        var set = Db.Set<ConstructionProject>().AsNoTracking();
+
+        foreach (var key in new[] { "ConstructionProjectId", "ProjectId", "Id" })
+        {
+            try
+            {
+                return await set.FirstOrDefaultAsync(p =>
+                    EF.Property<int>(p, "CompanyId") == _companyId &&
+                    EF.Property<int>(p, key) == projectId);
+            }
+            catch { }
+        }
+
+        foreach (var key in new[] { "ConstructionProjectId", "ProjectId", "Id" })
+        {
+            try
+            {
+                return await set.FirstOrDefaultAsync(p => EF.Property<int>(p, key) == projectId);
+            }
+            catch { }
+        }
+
+        return null;
+    }
+
+    private async Task LoadCompanyHeader()
+    {
+        var c = await Db.Set<Company>().AsNoTracking().FirstOrDefaultAsync(x => x.CompanyId == _companyId);
+        if (c == null) return;
+
+        _companyName = c.LegalName ?? c.ShortName ?? "Company";
+        _companyTRN = c.TRN ?? "-";
+        _logoPath = string.IsNullOrWhiteSpace(c.LogoPath) ? null : c.LogoPath;
+
+        var parts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(c.AddressLine1)) parts.Add(c.AddressLine1);
+        if (!string.IsNullOrWhiteSpace(c.AddressLine2)) parts.Add(c.AddressLine2);
+        if (!string.IsNullOrWhiteSpace(c.City)) parts.Add(c.City);
+        if (!string.IsNullOrWhiteSpace(c.Emirate)) parts.Add(c.Emirate);
+        if (!string.IsNullOrWhiteSpace(c.POBox)) parts.Add($"PO Box {c.POBox}");
+
+        _companyAddress = parts.Count > 0 ? string.Join(", ", parts) : "-";
+    }
+
+    private void Recalc()
+    {
+        foreach (var ln in _lines)
+            ln.Total = decimal.Round(ln.Previous + ln.Current, 2);
+
+        _calc.WorkDoneToDate = decimal.Round(_lines.Sum(x => x.Total), 2);
+        _calc.ThisMonthGross = decimal.Round(_lines.Sum(x => x.Current), 2);
+
+        var retentionRate = (_retPct <= 0) ? 0m : (_retPct / 100m);
+        _calc.Retention = decimal.Round(_calc.ThisMonthGross * retentionRate, 2);
+
+        _calc.Backcharge = decimal.Round(GetDec(_pc!, "BackchargeThisMonth", "Backcharge", "Deduction", "Deductions"), 2);
+
+        _calc.PayableExVat = decimal.Round(_calc.ThisMonthGross - _calc.Retention - _calc.Backcharge, 2);
+        if (_calc.PayableExVat < 0) _calc.PayableExVat = 0;
+
+        var vatRate = (_vatPct <= 0) ? 0m : (_vatPct / 100m);
+        _calc.Vat = decimal.Round(_calc.PayableExVat * vatRate, 2);
+        _calc.NetPayable = decimal.Round(_calc.PayableExVat + _calc.Vat, 2);
+    }
+
+    private async Task<SubcontractorPC?> TryFindPcById_NoTracking(int id)
+    {
+        var set = Db.Set<SubcontractorPC>().AsNoTracking();
+        foreach (var keyName in new[] { "SubcontractorPCId", "PCId", "PcId", "Id" })
+        {
+            try
+            {
+                return await set.FirstOrDefaultAsync(x =>
+                    EF.Property<int>(x, "CompanyId") == _companyId &&
+                    EF.Property<int>(x, keyName) == id);
+            }
+            catch { }
+        }
+        return null;
+    }
+
+    private async Task<List<LineVm>> TryLoadLines(int pcId)
+    {
+        var set = Db.Set<SubcontractorPCLine>().AsNoTracking();
+        foreach (var fk in new[] { "SubcontractorPCId", "PCId", "PcId" })
+        {
+            try
+            {
+                var rows = await set.Where(l => EF.Property<int>(l, fk) == pcId).ToListAsync();
+                if (rows.Count > 0) return rows.Select(MapLine).ToList();
+            }
+            catch { }
+        }
+        return new();
+    }
+
+    private static LineVm MapLine(object line)
+    {
+        var ws = GetString(line, "WorkSection", "Section", "Description", "Work") ?? "";
+        var prev = GetDec(line, "PreviousAmount", "Previous", "Prev", "PrevAmount");
+        var curr = GetDec(line, "CurrentAmount", "Current", "Curr", "CurrAmount");
+        var tot = GetDec(line, "TotalAmount", "Total", "TotalValue", "Amount");
+        return new LineVm { WorkSection = ws, Previous = prev, Current = curr, Total = tot };
+    }
+
+    // ---------- reflection helpers ----------
+    private static string BuildProjectDisplay(object p)
+    {
+        var code = GetString(p, "Code", "ProjectCode", "SiteCode") ?? "";
+        var title = GetString(p, "Name", "ProjectName", "SiteName", "Title", "ProjectTitle", "Description") ?? "(Project)";
+        code = code.Trim(); title = title.Trim();
+        if (code.Length > 0 && title.Length > 0) return $"{code} - {title}";
+        return title.Length > 0 ? title : (code.Length > 0 ? code : "Project");
+    }
+
+    private static int GetInt(object obj, params string[] names)
+    {
+        foreach (var n in names)
+        {
+            var p = obj.GetType().GetProperty(n);
+            if (p == null) continue;
+            var v = p.GetValue(obj);
+            if (v == null) continue;
+            if (v is int i) return i;
+            if (int.TryParse(Convert.ToString(v, CultureInfo.InvariantCulture), out var x)) return x;
+        }
+        return 0;
+    }
+
+    private static decimal GetDec(object obj, params string[] names)
+    {
+        foreach (var n in names)
+        {
+            var p = obj.GetType().GetProperty(n);
+            if (p == null) continue;
+            var v = p.GetValue(obj);
+            if (v == null) continue;
+            if (v is decimal d) return d;
+            if (decimal.TryParse(Convert.ToString(v, CultureInfo.InvariantCulture), NumberStyles.Any, CultureInfo.InvariantCulture, out var x)) return x;
+        }
+        return 0m;
+    }
+
+    private static string? GetString(object obj, params string[] names)
+    {
+        foreach (var n in names)
+        {
+            var p = obj.GetType().GetProperty(n);
+            if (p == null) continue;
+            var v = p.GetValue(obj);
+            if (v == null) continue;
+            return Convert.ToString(v, CultureInfo.InvariantCulture);
+        }
+        return null;
+    }
+
+    private static DateTime? GetDate(object obj, params string[] names)
+    {
+        foreach (var n in names)
+        {
+            var p = obj.GetType().GetProperty(n);
+            if (p == null) continue;
+            var v = p.GetValue(obj);
+            if (v == null) continue;
+
+            if (v is DateTime dt) return dt;
+
+            var s = Convert.ToString(v, CultureInfo.InvariantCulture) ?? "";
+            if (DateTime.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed))
+                return parsed;
+        }
+        return null;
+    }
+
+    private sealed class LineVm
+    {
+        public string WorkSection { get; set; } = "";
+        public decimal Previous { get; set; }
+        public decimal Current { get; set; }
+        public decimal Total { get; set; }
+    }
+
+    private sealed class CalcVm
+    {
+        public decimal WorkDoneToDate { get; set; }
+        public decimal ThisMonthGross { get; set; }
+        public decimal Retention { get; set; }
+        public decimal Backcharge { get; set; }
+        public decimal PayableExVat { get; set; }
+        public decimal Vat { get; set; }
+        public decimal NetPayable { get; set; }
+    }
+}

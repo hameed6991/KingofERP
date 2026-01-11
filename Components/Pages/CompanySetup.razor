@@ -1,0 +1,1003 @@
+﻿@page "/company-setup"
+
+@using System
+@using System.IO
+@using System.Linq
+@using System.Threading.Tasks
+@using System.Collections.Generic
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.EntityFrameworkCore
+@using UaeEInvoice.Data
+@using UaeEInvoice.Services
+@using UaeEInvoice.Services.Auth
+@using System.ComponentModel.DataAnnotations
+
+@attribute [Authorize]
+
+@inject AppDbContext Db
+@inject ICurrentCompany CurrentCompany
+@inject NavigationManager Nav
+@inject LedgerService Ledger
+@inject AccountRoleService Roles
+@inject IWebHostEnvironment Env
+
+<style>
+    .soft-card {
+        border: 1px solid rgba(0,0,0,.06);
+        border-radius: 22px;
+        background: #fff;
+    }
+
+    .soft-shadow {
+        box-shadow: 0 10px 30px rgba(0,0,0,.06);
+    }
+
+    .hero {
+        border-radius: 22px;
+        border: 1px solid rgba(0,0,0,.06);
+        background: linear-gradient(135deg, rgba(13,110,253,.12), rgba(255,255,255,0));
+        padding: 18px;
+    }
+
+    .title {
+        font-weight: 900;
+        letter-spacing: .2px;
+        margin: 0;
+    }
+
+    .muted {
+        color: rgba(0,0,0,.55);
+    }
+
+    .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: .45rem;
+        padding: .30rem .70rem;
+        border-radius: 999px;
+        border: 1px solid rgba(0,0,0,.08);
+        background: #fff;
+        font-size: .85rem;
+    }
+
+    .step-pill {
+        border: 1px solid rgba(0,0,0,.08);
+        border-radius: 999px;
+        padding: .50rem .95rem;
+        background: #fff;
+        cursor: pointer;
+        user-select: none;
+    }
+
+        .step-pill.active {
+            background: rgba(13,110,253,.10);
+            border-color: rgba(13,110,253,.35);
+            font-weight: 800;
+        }
+
+        .step-pill.done {
+            background: rgba(25,135,84,.10);
+            border-color: rgba(25,135,84,.35);
+        }
+
+    .logo-box {
+        width: 86px;
+        height: 86px;
+        border-radius: 18px;
+        border: 1px dashed rgba(0,0,0,.18);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+        background: #fafafa;
+    }
+
+        .logo-box img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+    .preview-card {
+        border-radius: 22px;
+        border: 1px solid rgba(0,0,0,.06);
+        background: linear-gradient(180deg, rgba(13,110,253,.06), rgba(0,0,0,0));
+    }
+
+    .field-hint {
+        font-size: .82rem;
+        color: rgba(0,0,0,.55);
+    }
+
+    .form-control, .form-select {
+        border-radius: 14px !important;
+        border: 1px solid rgba(15, 23, 42, .10) !important;
+        box-shadow: 0 10px 25px rgba(2, 6, 23, .04);
+    }
+</style>
+
+<div class="container-xxl py-4">
+
+    <div class="hero mb-3">
+        <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+            <div>
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <h2 class="title">Company Setup</h2>
+                    <span class="chip">🧭 One-time Wizard</span>
+                    <span class="chip">✅ Error-free Typing</span>
+                </div>
+                <div class="muted">First time setup only. After this, you will use Company Update page.</div>
+
+                <div class="d-flex flex-wrap gap-2 mt-2">
+                    <span class="chip">🏢 CompanyId: @_companyId</span>
+                    <span class="chip">🧾 Preview: @PreviewInvoiceNumber()</span>
+                    <span class="chip">💱 Currency: @_vm.CurrencyCode</span>
+                </div>
+            </div>
+
+            <div class="d-flex gap-2">
+                <button class="btn btn-outline-secondary" type="button" @onclick="Reload" disabled="@_saving">Reload</button>
+                <button class="btn btn-primary" type="button" @onclick="Save" disabled="@(_saving || _loading)">
+                    @(_saving ? "Saving..." : "Save & Continue")
+                </button>
+            </div>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_error))
+    {
+        <div class="alert alert-danger soft-card soft-shadow p-3">
+            <strong>Error:</strong> @_error
+        </div>
+    }
+
+    @if (_loading)
+    {
+        <div class="soft-card soft-shadow p-3">
+            <div class="text-muted">Loading...</div>
+        </div>
+    }
+    else
+    {
+        @if (!string.IsNullOrWhiteSpace(_message))
+        {
+            <div class="alert alert-success soft-card soft-shadow p-3">
+                ✅ @_message
+            </div>
+        }
+
+        <div class="d-flex flex-wrap gap-2 mb-3">
+            <div class="step-pill @(IsActive(1) ? "active" : (IsDone(1) ? "done" : ""))" @onclick="() => GoStep(1)">1) Business</div>
+            <div class="step-pill @(IsActive(2) ? "active" : (IsDone(2) ? "done" : ""))" @onclick="() => GoStep(2)">2) Address & Tax</div>
+            <div class="step-pill @(IsActive(3) ? "active" : (IsDone(3) ? "done" : ""))" @onclick="() => GoStep(3)">3) Invoice</div>
+            <div class="step-pill @(IsActive(4) ? "active" : (IsDone(4) ? "done" : ""))" @onclick="() => GoStep(4)">4) Opening</div>
+        </div>
+
+        <EditForm Model="_vm" class="row g-3">
+            <DataAnnotationsValidator />
+            <ValidationSummary />
+
+            <div class="col-12 col-lg-8">
+                <div class="row g-3">
+
+                    @if (_step == 1)
+                    {
+                        <div class="col-12">
+                            <div class="soft-card soft-shadow border-0 p-3 p-md-4">
+                                <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+                                    <div>
+                                        <div class="fw-bold fs-5">1) Business Profile</div>
+                                        <div class="muted small">Invoice header, reports & emails.</div>
+                                    </div>
+
+                                    <div class="d-flex align-items-center gap-3">
+                                        <div class="logo-box">
+                                            @if (!string.IsNullOrWhiteSpace(_logoPreviewUrl))
+                                            {
+                                                <img src="@_logoPreviewUrl" alt="Logo" />
+                                            }
+                                            else
+                                            {
+                                                <span class="text-muted small">LOGO</span>
+                                            }
+                                        </div>
+                                        <div>
+                                            <label class="form-label mb-1">Company Logo (optional)</label>
+                                            <InputFile OnChange="OnLogoSelected" accept="image/*" />
+                                            <div class="field-hint">Square PNG/JPG ≤ 2MB.</div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <hr />
+
+                                <div class="row g-3">
+                                    <div class="col-12">
+                                        <label class="form-label">Legal Company Name <span class="text-danger">*</span></label>
+                                        <input class="form-control"
+                                               value="@_vm.LegalName"
+                                               @oninput="(ChangeEventArgs e) => _vm.LegalName = e.Value?.ToString()"
+                                               placeholder="e.g., Mega Trading LLC" />
+                                    </div>
+
+                                    <div class="col-12 col-md-6">
+                                        <label class="form-label">Short Name <span class="text-danger">*</span></label>
+                                        <input class="form-control"
+                                               value="@_vm.ShortName"
+                                               @oninput="(ChangeEventArgs e) => _vm.ShortName = e.Value?.ToString()"
+                                               placeholder="e.g., Mega" />
+                                        <div class="field-hint">DB column NOT NULL</div>
+                                    </div>
+
+                                    <div class="col-12 col-md-6">
+                                        <label class="form-label">Industry</label>
+                                        <InputSelect class="form-select" @bind-Value="_vm.Industry">
+                                            <option value="">-- Select Industry --</option>
+                                            @foreach (var i in _industries)
+                                            {
+                                                <option value="@i">@i</option>
+                                            }
+                                        </InputSelect>
+                                    </div>
+
+                                    <div class="col-12 col-md-6">
+                                        <label class="form-label">Business Type</label>
+                                        <input class="form-control"
+                                               value="@_vm.BusinessType"
+                                               @oninput="(ChangeEventArgs e) => _vm.BusinessType = e.Value?.ToString()"
+                                               placeholder="Trading / Services" />
+                                    </div>
+
+                                    <div class="col-12 col-md-6">
+                                        <label class="form-label">Currency</label>
+                                        <InputSelect class="form-select" @bind-Value="_vm.CurrencyCode">
+                                            <option value="AED">AED</option>
+                                            <option value="USD">USD</option>
+                                            <option value="EUR">EUR</option>
+                                            <option value="INR">INR</option>
+                                            <option value="SAR">SAR</option>
+                                            <option value="QAR">QAR</option>
+                                        </InputSelect>
+                                    </div>
+
+                                    <div class="col-12 col-md-6">
+                                        <label class="form-label">Email</label>
+                                        <input class="form-control"
+                                               value="@_vm.Email"
+                                               @oninput="(ChangeEventArgs e) => _vm.Email = e.Value?.ToString()" />
+                                    </div>
+
+                                    <div class="col-12 col-md-6">
+                                        <label class="form-label">Phone</label>
+                                        <input class="form-control"
+                                               value="@_vm.Phone"
+                                               @oninput="(ChangeEventArgs e) => _vm.Phone = e.Value?.ToString()" />
+                                    </div>
+
+                                    <div class="col-12">
+                                        <label class="form-label">Website</label>
+                                        <input class="form-control"
+                                               value="@_vm.Website"
+                                               @oninput="(ChangeEventArgs e) => _vm.Website = e.Value?.ToString()" />
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    }
+
+                    @if (_step == 2)
+                    {
+                        <div class="col-12">
+                            <div class="soft-card soft-shadow border-0 p-3 p-md-4">
+                                <div class="fw-bold fs-5">2) Address & Tax</div>
+                                <div class="muted small">Printed on invoice.</div>
+                                <hr />
+
+                                <div class="row g-3">
+                                    <div class="col-12 col-md-6">
+                                        <label class="form-label">TRN <span class="text-danger">*</span></label>
+                                        <input class="form-control"
+                                               value="@_vm.TRN"
+                                               @oninput="(ChangeEventArgs e) => _vm.TRN = e.Value?.ToString()"
+                                               placeholder="15 digit TRN" />
+                                        <div class="field-hint">Exactly 15 digits</div>
+                                    </div>
+
+                                    <div class="col-12 col-md-6">
+                                        <label class="form-label">Country</label>
+                                        <input class="form-control"
+                                               value="@_vm.Country"
+                                               @oninput="(ChangeEventArgs e) => _vm.Country = e.Value?.ToString()" />
+                                    </div>
+
+                                    <div class="col-12">
+                                        <label class="form-label">Address Line 1</label>
+                                        <input class="form-control"
+                                               value="@_vm.AddressLine1"
+                                               @oninput="(ChangeEventArgs e) => _vm.AddressLine1 = e.Value?.ToString()" />
+                                    </div>
+
+                                    <div class="col-12">
+                                        <label class="form-label">Address Line 2</label>
+                                        <input class="form-control"
+                                               value="@_vm.AddressLine2"
+                                               @oninput="(ChangeEventArgs e) => _vm.AddressLine2 = e.Value?.ToString()" />
+                                    </div>
+
+                                    <div class="col-12 col-md-4">
+                                        <label class="form-label">PO Box</label>
+                                        <input class="form-control"
+                                               value="@_vm.POBox"
+                                               @oninput="(ChangeEventArgs e) => _vm.POBox = e.Value?.ToString()" />
+                                    </div>
+
+                                    <div class="col-12 col-md-4">
+                                        <label class="form-label">Emirate <span class="text-danger">*</span></label>
+                                        <input class="form-control"
+                                               value="@_vm.Emirate"
+                                               @oninput="(ChangeEventArgs e) => _vm.Emirate = e.Value?.ToString()" />
+                                    </div>
+
+                                    <div class="col-12 col-md-4">
+                                        <label class="form-label">City <span class="text-danger">*</span></label>
+                                        <input class="form-control"
+                                               value="@_vm.City"
+                                               @oninput="(ChangeEventArgs e) => _vm.City = e.Value?.ToString()" />
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    }
+
+                    @if (_step == 3)
+                    {
+                        <div class="col-12">
+                            <div class="soft-card soft-shadow border-0 p-3 p-md-4">
+                                <div class="d-flex justify-content-between flex-wrap gap-2">
+                                    <div>
+                                        <div class="fw-bold fs-5">3) Invoice Settings</div>
+                                        <div class="muted small">Prefix, next number, VAT, footer note.</div>
+                                    </div>
+                                    <div class="preview-card p-3">
+                                        <div class="small muted">Invoice Preview</div>
+                                        <div class="fw-bold fs-5">@PreviewInvoiceNumber()</div>
+                                    </div>
+                                </div>
+
+                                <hr />
+
+                                <div class="row g-3">
+                                    <div class="col-12 col-md-4">
+                                        <label class="form-label">Invoice Prefix <span class="text-danger">*</span></label>
+                                        <input class="form-control"
+                                               value="@_vm.InvoicePrefix"
+                                               @oninput="(ChangeEventArgs e) => _vm.InvoicePrefix = e.Value?.ToString()" />
+                                    </div>
+
+                                    <div class="col-12 col-md-4">
+                                        <label class="form-label">Next Invoice Number <span class="text-danger">*</span></label>
+                                        <InputNumber class="form-control" @bind-Value="_vm.NextInvoiceNumber" />
+                                    </div>
+
+                                    <div class="col-12 col-md-4">
+                                        <label class="form-label">Default VAT Rate</label>
+                                        <InputNumber class="form-control" @bind-Value="_vm.DefaultVatRate" />
+                                        <div class="field-hint">0.05 = 5%</div>
+                                    </div>
+
+                                    <div class="col-12 col-md-4">
+                                        <label class="form-label">Payment Terms (Days)</label>
+                                        <InputNumber class="form-control" @bind-Value="_vm.PaymentTermsDays" />
+                                    </div>
+
+                                    <div class="col-12">
+                                        <label class="form-label">Invoice Footer Note</label>
+                                        <InputTextArea class="form-control" @bind-Value="_vm.InvoiceFooterNote" rows="3" />
+                                    </div>
+                                </div>
+
+                                <div class="small text-muted mt-3">
+                                    ✅ After save: COA + Account Roles auto map.
+                                </div>
+                            </div>
+                        </div>
+                    }
+
+                    @if (_step == 4)
+                    {
+                        <div class="col-12">
+                            <div class="soft-card soft-shadow border-0 p-3 p-md-4">
+                                <div class="fw-bold fs-5">4) Opening Balances</div>
+                                <div class="muted small">Will post one time only.</div>
+                                <hr />
+
+                                <div class="row g-3">
+                                    <div class="col-12 col-md-4">
+                                        <label class="form-label">Opening Balance Date</label>
+                                        <InputDate class="form-control" @bind-Value="_vm.OpeningBalanceDate" />
+                                    </div>
+                                    <div class="col-12 col-md-4">
+                                        <label class="form-label">Cash Opening</label>
+                                        <InputNumber class="form-control" @bind-Value="_vm.OpeningCash" />
+                                    </div>
+                                    <div class="col-12 col-md-4">
+                                        <label class="form-label">Bank Opening</label>
+                                        <InputNumber class="form-control" @bind-Value="_vm.OpeningBank" />
+                                    </div>
+                                    <div class="col-12 col-md-4">
+                                        <label class="form-label">Accounts Receivable</label>
+                                        <InputNumber class="form-control" @bind-Value="_vm.OpeningAR" />
+                                    </div>
+                                    <div class="col-12 col-md-4">
+                                        <label class="form-label">Accounts Payable</label>
+                                        <InputNumber class="form-control" @bind-Value="_vm.OpeningAP" />
+                                    </div>
+                                    <div class="col-12 col-md-4">
+                                        <label class="form-label">Inventory Value</label>
+                                        <InputNumber class="form-control" @bind-Value="_vm.OpeningInventory" />
+                                    </div>
+                                </div>
+
+                                <div class="mt-3 p-3 preview-card">
+                                    <div class="d-flex justify-content-between flex-wrap gap-2">
+                                        <div>
+                                            <div class="small muted">Total Debits</div>
+                                            <div class="fw-bold">@TotalDebits():0.00</div>
+                                        </div>
+                                        <div>
+                                            <div class="small muted">Total Credits</div>
+                                            <div class="fw-bold">@TotalCredits():0.00</div>
+                                        </div>
+                                        <div>
+                                            <div class="small muted">Difference</div>
+                                            <div class="fw-bold">@Difference():0.00</div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                            </div>
+                        </div>
+                    }
+
+                    <div class="col-12">
+                        <div class="soft-card soft-shadow border-0 p-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
+                            <button type="button" class="btn btn-outline-secondary" @onclick="PrevStep" disabled="@(_step==1)">⬅ Back</button>
+
+                            <div class="muted small">Step @_step / 4</div>
+
+                            @if (_step < 4)
+                            {
+                                <button type="button" class="btn btn-primary" @onclick="NextStep" disabled="@(!CanGoNext())">Next ➜</button>
+                            }
+                            else
+                            {
+                                <button type="button" class="btn btn-success" @onclick="Save" disabled="@_saving">
+                                    @(_saving ? "Saving..." : "Finish Setup ✅")
+                                </button>
+                            }
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
+            <!-- RIGHT PREVIEW -->
+            <div class="col-12 col-lg-4">
+                <div class="soft-card soft-shadow border-0 p-3">
+                    <div class="fw-bold">Live Preview</div>
+                    <div class="muted small">Invoice header look.</div>
+
+                    <div class="mt-3 p-3 preview-card">
+                        <div class="d-flex gap-3">
+                            <div class="logo-box">
+                                @if (!string.IsNullOrWhiteSpace(_logoPreviewUrl))
+                                {
+                                    <img src="@_logoPreviewUrl" />
+                                }
+                                else
+                                {
+                                    <span class="text-muted small">LOGO</span>
+                                }
+                            </div>
+                            <div class="flex-grow-1">
+                                <div class="fw-bold">@(_vm.LegalName ?? "")</div>
+                                <div class="small muted">@(_vm.Industry ?? "")</div>
+                                <div class="small">TRN: <b>@(_vm.TRN ?? "")</b></div>
+                            </div>
+                        </div>
+
+                        <hr />
+
+                        <div class="small muted">
+                            @_vm.AddressLine1 <br />
+                            @_vm.City, @_vm.Emirate <br />
+                            @_vm.Country
+                        </div>
+
+                        <hr />
+
+                        <div class="d-flex justify-content-between">
+                            <div>
+                                <div class="small muted">Invoice</div>
+                                <div class="fw-bold">@PreviewInvoiceNumber()</div>
+                            </div>
+                            <div class="text-end">
+                                <div class="small muted">Currency</div>
+                                <div class="fw-bold">@_vm.CurrencyCode</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="d-grid mt-3">
+                        <button class="btn btn-outline-secondary" type="button" @onclick="Reload" disabled="@_saving">Reload</button>
+                    </div>
+                </div>
+            </div>
+
+        </EditForm>
+    }
+</div>
+
+@code {
+    private bool _loading = true;
+    private bool _saving;
+    private string? _error;
+    private string? _message;
+
+    private int _companyId;
+    private int _step = 1;
+
+    private IBrowserFile? _logoFile;
+    private string? _logoPreviewUrl;
+
+    private CompanyVm _vm = new();
+
+    private readonly List<string> _industries = new()
+    {
+        "Accounting & Auditing","Advertising / Marketing","Automotive","Construction","E-Commerce",
+        "Education / Training","Electronics","Food & Beverage","Healthcare / Clinic","Hospitality / Hotel",
+        "IT Services / Software","Logistics / Transport","Manufacturing","Real Estate","Retail / Trading",
+        "Salon / Spa","Travel & Tourism","Other"
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CurrentCompany.RefreshAsync();
+        _companyId = CurrentCompany.CompanyId;
+
+        if (_companyId <= 0)
+        {
+            _error = "CompanyId claim not found. Logout & login again.";
+            _loading = false;
+            return;
+        }
+
+        // One-time setup only
+        var exists = await Db.Companies.AsNoTracking().AnyAsync(x => x.CompanyId == _companyId);
+        if (exists)
+        {
+            Nav.NavigateTo("/company-update", forceLoad: true);
+            return;
+        }
+
+        _vm = new CompanyVm
+            {
+                LegalName = "",
+                ShortName = "",
+                CurrencyCode = "AED",
+                Country = "United Arab Emirates",
+                Emirate = "Dubai",
+                City = "Dubai",
+                InvoicePrefix = "INV",
+                NextInvoiceNumber = 1,
+                DefaultVatRate = 0.05m,
+                PaymentTermsDays = 0
+            };
+
+        _loading = false;
+    }
+
+    private bool IsActive(int s) => _step == s;
+    private bool IsDone(int s) => _step > s;
+
+    private void GoStep(int s) => _step = Math.Clamp(s, 1, 4);
+    private void NextStep() { if (_step < 4) _step++; }
+    private void PrevStep() { if (_step > 1) _step--; }
+
+    private bool CanGoNext()
+    {
+        if (_step == 1)
+            return !string.IsNullOrWhiteSpace((_vm.LegalName ?? "").Trim())
+                && !string.IsNullOrWhiteSpace((_vm.ShortName ?? "").Trim());
+
+        if (_step == 2)
+        {
+            var trn = DigitsOnly(_vm.TRN);
+            return trn.Length == 15;
+        }
+
+        if (_step == 3)
+            return !string.IsNullOrWhiteSpace((_vm.InvoicePrefix ?? "").Trim());
+
+        return true;
+    }
+
+    private async Task Reload()
+    {
+        _error = _message = null;
+        _logoFile = null;
+        _logoPreviewUrl = null;
+        _step = 1;
+
+        _vm.LegalName = "";
+        _vm.ShortName = "";
+        _vm.TRN = "";
+        _vm.Email = "";
+        _vm.Phone = "";
+        _vm.Website = "";
+        _vm.AddressLine1 = "";
+        _vm.AddressLine2 = "";
+        _vm.POBox = "";
+        _vm.CurrencyCode = "AED";
+        _vm.Country = "United Arab Emirates";
+        _vm.Emirate = "Dubai";
+        _vm.City = "Dubai";
+        _vm.InvoicePrefix = "INV";
+        _vm.NextInvoiceNumber = 1;
+        _vm.DefaultVatRate = 0.05m;
+        _vm.PaymentTermsDays = 0;
+        _vm.InvoiceFooterNote = "";
+        _vm.OpeningBalanceDate = null;
+        _vm.OpeningCash = _vm.OpeningBank = _vm.OpeningAR = _vm.OpeningAP = _vm.OpeningInventory = 0m;
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task OnLogoSelected(InputFileChangeEventArgs e)
+    {
+        _error = null;
+
+        try
+        {
+            _logoFile = e.File;
+            if (_logoFile == null) return;
+
+            if (_logoFile.Size > 2 * 1024 * 1024)
+            {
+                _error = "Logo too large. Upload under 2MB.";
+                _logoFile = null;
+                _logoPreviewUrl = null;
+                return;
+            }
+
+            using var ms = new MemoryStream();
+            await _logoFile.OpenReadStream(2 * 1024 * 1024).CopyToAsync(ms);
+            _logoPreviewUrl = $"data:{_logoFile.ContentType};base64,{Convert.ToBase64String(ms.ToArray())}";
+        }
+        catch (Exception ex)
+        {
+            _error = ex.InnerException?.Message ?? ex.Message;
+            _logoFile = null;
+            _logoPreviewUrl = null;
+        }
+    }
+
+    private async Task Save()
+    {
+        _saving = true;
+        _error = null;
+        _message = null;
+
+        try
+        {
+            await CurrentCompany.RefreshAsync();
+            _companyId = CurrentCompany.CompanyId;
+            if (_companyId <= 0) throw new Exception("CompanyId claim not found.");
+
+            _vm.LegalName = (_vm.LegalName ?? "").Trim();
+            _vm.ShortName = (_vm.ShortName ?? "").Trim();
+
+            if (string.IsNullOrWhiteSpace(_vm.ShortName) && !string.IsNullOrWhiteSpace(_vm.LegalName))
+                _vm.ShortName = _vm.LegalName.Length > 12 ? _vm.LegalName[..12] : _vm.LegalName;
+
+            if (string.IsNullOrWhiteSpace(_vm.LegalName)) { _step = 1; throw new Exception("Legal Company Name is required."); }
+            if (string.IsNullOrWhiteSpace(_vm.ShortName)) { _step = 1; throw new Exception("Short Name is required."); }
+
+            var trnDigits = DigitsOnly(_vm.TRN);
+            if (trnDigits.Length != 15) { _step = 2; throw new Exception("TRN must be exactly 15 digits."); }
+            _vm.TRN = trnDigits;
+
+            _vm.InvoicePrefix = (_vm.InvoicePrefix ?? "").Trim();
+            if (string.IsNullOrWhiteSpace(_vm.InvoicePrefix)) { _step = 3; throw new Exception("Invoice Prefix is required."); }
+            if (string.IsNullOrWhiteSpace(_vm.CurrencyCode)) _vm.CurrencyCode = "AED";
+
+            // Logo save
+            string? logoPath = null;
+            if (_logoFile != null)
+            {
+                var root = Path.Combine(Env.WebRootPath, "uploads", "company", _companyId.ToString());
+                Directory.CreateDirectory(root);
+
+                var ext = Path.GetExtension(_logoFile.Name)?.ToLowerInvariant();
+                if (ext != ".png" && ext != ".jpg" && ext != ".jpeg" && ext != ".webp") ext = ".png";
+
+                var fileName = "logo" + ext;
+                var savePath = Path.Combine(root, fileName);
+
+                using var fs = new FileStream(savePath, FileMode.Create);
+                await _logoFile.OpenReadStream(2 * 1024 * 1024).CopyToAsync(fs);
+
+                logoPath = $"/uploads/company/{_companyId}/{fileName}";
+            }
+
+            var entity = new Company
+                {
+                    CompanyId = _companyId,
+                    LegalName = _vm.LegalName,
+                    ShortName = _vm.ShortName,
+                    Industry = _vm.Industry,
+                    BusinessType = _vm.BusinessType,
+                    CurrencyCode = _vm.CurrencyCode,
+                    Email = _vm.Email,
+                    Phone = _vm.Phone,
+                    Website = _vm.Website,
+
+                    TRN = _vm.TRN,
+                    Country = _vm.Country,
+                    AddressLine1 = _vm.AddressLine1,
+                    AddressLine2 = _vm.AddressLine2,
+                    POBox = _vm.POBox,
+                    Emirate = _vm.Emirate,
+                    City = _vm.City,
+
+                    InvoicePrefix = _vm.InvoicePrefix,
+                    NextInvoiceNumber = _vm.NextInvoiceNumber <= 0 ? 1 : _vm.NextInvoiceNumber,
+                    DefaultVatRate = _vm.DefaultVatRate,
+                    PaymentTermsDays = _vm.PaymentTermsDays,
+                    InvoiceFooterNote = _vm.InvoiceFooterNote,
+
+                    OpeningBalanceDate = _vm.OpeningBalanceDate,
+                    OpeningCash = _vm.OpeningCash,
+                    OpeningBank = _vm.OpeningBank,
+                    OpeningAR = _vm.OpeningAR,
+                    OpeningAP = _vm.OpeningAP,
+                    OpeningInventory = _vm.OpeningInventory,
+
+                    LogoPath = logoPath
+                };
+
+            Db.Companies.Add(entity);
+            await Db.SaveChangesAsync();
+
+            // 1) Ensure COA (base + new 3 accounts)
+            await Ledger.EnsureDefaultAccountsAsync(_companyId);
+
+            // 2) Automap roles (base + PDC keys)
+            await AutoMapBaseRolesIfMissing(_companyId);
+
+            // 3) Post opening balances once (idempotent)
+            await TryPostOpeningBalancesOnce(_companyId);
+
+            _message = "Setup completed. Redirecting to Customers...";
+            Nav.NavigateTo("/customers?from=setup", forceLoad: true);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.InnerException?.Message ?? ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    // =========================
+    // ✅ OPENING BALANCES (POST ONCE)
+    // =========================
+    private async Task TryPostOpeningBalancesOnce(int companyId)
+    {
+        // If no openings => skip
+        if (_vm.OpeningCash <= 0m
+            && _vm.OpeningBank <= 0m
+            && _vm.OpeningAR <= 0m
+            && _vm.OpeningInventory <= 0m
+            && _vm.OpeningAP <= 0m)
+            return;
+
+        var already = await Db.GeneralLedgerEntries.AsNoTracking()
+            .AnyAsync(x => x.CompanyId == companyId && x.VoucherType == "OPEN" && x.VoucherNo == "OPEN");
+
+        if (already) return;
+
+        // Ensure Bank + Opening Equity accounts exist (for posting)
+        await EnsureCoaAccountIfMissing(companyId, 1010, "Bank", "Asset", "BalanceSheet", "Operating", isCashAccount: true, isWorkingCapital: true);
+        await EnsureCoaAccountIfMissing(companyId, 3000, "Opening Balance Equity", "Equity", "BalanceSheet", "Operating", isCashAccount: false, isWorkingCapital: false);
+
+        await Db.SaveChangesAsync();
+
+        var dt = (_vm.OpeningBalanceDate ?? DateTime.Today).Date;
+
+        var lines = new List<LedgerService.PostLine>();
+
+        // Assets: Debit Asset, Credit Opening Equity
+        if (_vm.OpeningCash > 0m) lines.Add(new LedgerService.PostLine { DebitAccountNo = 1000, CreditAccountNo = 3000, Amount = _vm.OpeningCash, Narration = "Opening Cash" });
+        if (_vm.OpeningBank > 0m) lines.Add(new LedgerService.PostLine { DebitAccountNo = 1010, CreditAccountNo = 3000, Amount = _vm.OpeningBank, Narration = "Opening Bank" });
+        if (_vm.OpeningAR > 0m) lines.Add(new LedgerService.PostLine { DebitAccountNo = 1100, CreditAccountNo = 3000, Amount = _vm.OpeningAR, Narration = "Opening Accounts Receivable" });
+        if (_vm.OpeningInventory > 0m) lines.Add(new LedgerService.PostLine { DebitAccountNo = 1200, CreditAccountNo = 3000, Amount = _vm.OpeningInventory, Narration = "Opening Inventory" });
+
+        // AP: Credit AP, Debit Opening Equity
+        if (_vm.OpeningAP > 0m) lines.Add(new LedgerService.PostLine { DebitAccountNo = 3000, CreditAccountNo = 2000, Amount = _vm.OpeningAP, Narration = "Opening Accounts Payable" });
+
+        if (lines.Count == 0) return;
+
+        await Ledger.PostManyAsync(
+            companyId: companyId,
+            date: dt,
+            voucherType: "OPEN",
+            voucherNo: "OPEN",
+            lines: lines,
+            refId: null);
+    }
+
+    private async Task EnsureCoaAccountIfMissing(
+        int companyId,
+        int accountNo,
+        string name,
+        string accountType,
+        string financialStatement,
+        string cashFlowGroup,
+        bool isCashAccount,
+        bool isWorkingCapital)
+    {
+        var exists = await Db.ChartOfAccounts.AsNoTracking()
+            .AnyAsync(x => x.CompanyId == companyId && (x.AccountNo == accountNo || x.AccountName == name));
+
+        if (exists) return;
+
+        Db.ChartOfAccounts.Add(new ChartOfAccount
+            {
+                CompanyId = companyId,
+                AccountNo = accountNo,
+                AccountName = name,
+                AccountType = accountType,
+                FinancialStatement = financialStatement,
+                CashFlowGroup = cashFlowGroup,
+                IsActive = true,
+                IsCashAccount = isCashAccount,
+                IsNonCashExpense = false,
+                IsWorkingCapital = isWorkingCapital
+            });
+    }
+
+    // =========================
+    // ✅ AUTOMAP ROLES (BASE + PDC)
+    // =========================
+    private async Task AutoMapBaseRolesIfMissing(int companyId)
+    {
+        // If any mapping already exists => we keep base roles untouched,
+        // but still try to add PDC roles (safe upgrade path).
+        var any = await Db.Set<AccountRoleMap>()
+            .AsNoTracking()
+            .AnyAsync(x => x.CompanyId == companyId && x.IsActive);
+
+        var coa = await Db.Set<ChartOfAccount>()
+            .AsNoTracking()
+            .Where(x => x.CompanyId == companyId)
+            .ToListAsync();
+
+        int? FindByName(params string[] keys)
+        {
+            foreach (var k in keys)
+            {
+                var hit = coa.FirstOrDefault(x =>
+                    (x.AccountName ?? "").Contains(k, StringComparison.OrdinalIgnoreCase));
+                if (hit != null) return hit.AccountNo;
+            }
+            return null;
+        }
+
+        // Base roles
+        var cash = FindByName("Cash in hand", "Cash");
+        var bank = FindByName("Bank");
+        var ar = FindByName("Accounts Receivable", "Receivable");
+        var ap = FindByName("Accounts Payable", "Payable");
+        var inv = FindByName("Inventory");
+        var sales = FindByName("Sales");
+        var vatOut = FindByName("VAT Output", "VAT Payable");
+        var vatIn = FindByName("VAT Input", "VAT Receivable");
+        var cogs = FindByName("Cost of Goods Sold", "COGS");
+
+        // ✅ NEW: Cheque/PDC roles
+        var pdcRecv = FindByName("PDC Receivable", "Cheques-in-hand", "Cheques in hand", "Cheque in hand");
+        var pdcPayClr = FindByName("PDC Payable Clearing", "PDC Payable", "Cheque Payable");
+        var bankCharges = FindByName("Bank Charges", "Bank Charge", "Bank Fees", "Charges");
+
+        // Fallbacks
+        cash ??= coa.Any(x => x.AccountNo == 1000) ? 1000 : null;
+        ar ??= coa.Any(x => x.AccountNo == 1100) ? 1100 : null;
+        inv ??= coa.Any(x => x.AccountNo == 1200) ? 1200 : null;
+        ap ??= coa.Any(x => x.AccountNo == 2000) ? 2000 : null;
+        sales ??= coa.Any(x => x.AccountNo == 4000) ? 4000 : null;
+        cogs ??= coa.Any(x => x.AccountNo == 5000) ? 5000 : null;
+
+        // Ensure Bank exists if user entered OpeningBank later
+        bank ??= coa.Any(x => x.AccountNo == 1010) ? 1010 : null;
+
+        // New 3 accounts (preferred nos)
+        pdcRecv ??= coa.Any(x => x.AccountNo == 1300) ? 1300 : null;
+        pdcPayClr ??= coa.Any(x => x.AccountNo == 2200) ? 2200 : null;
+        bankCharges ??= coa.Any(x => x.AccountNo == 5200) ? 5200 : null;
+
+        // If base mappings already exist, do NOT override them.
+        if (!any)
+        {
+            if (cash.HasValue) await Roles.UpsertAsync(companyId, AccountRoleKeys.CASH, cash.Value);
+            if (bank.HasValue) await Roles.UpsertAsync(companyId, AccountRoleKeys.BANK, bank.Value);
+            if (ar.HasValue) await Roles.UpsertAsync(companyId, AccountRoleKeys.AR, ar.Value);
+            if (ap.HasValue) await Roles.UpsertAsync(companyId, AccountRoleKeys.AP, ap.Value);
+
+            if (inv.HasValue) await Roles.UpsertAsync(companyId, AccountRoleKeys.INVENTORY, inv.Value);
+            if (sales.HasValue) await Roles.UpsertAsync(companyId, AccountRoleKeys.SALES, sales.Value);
+
+            if (vatOut.HasValue) await Roles.UpsertAsync(companyId, AccountRoleKeys.VAT_OUTPUT, vatOut.Value);
+            if (vatIn.HasValue) await Roles.UpsertAsync(companyId, AccountRoleKeys.VAT_INPUT, vatIn.Value);
+
+            if (cogs.HasValue) await Roles.UpsertAsync(companyId, AccountRoleKeys.COGS, cogs.Value);
+        }
+
+        // ✅ Always try to add new roles (upgrade safe)
+        if (pdcRecv.HasValue) await Roles.UpsertAsync(companyId, AccountRoleKeys.PDC_RECEIVABLE, pdcRecv.Value);
+        if (pdcPayClr.HasValue) await Roles.UpsertAsync(companyId, AccountRoleKeys.PDC_PAYABLE_CLEARING, pdcPayClr.Value);
+        if (bankCharges.HasValue) await Roles.UpsertAsync(companyId, AccountRoleKeys.BANK_CHARGES, bankCharges.Value);
+    }
+
+    private string PreviewInvoiceNumber()
+    {
+        var num = _vm.NextInvoiceNumber <= 0 ? 1 : _vm.NextInvoiceNumber;
+        var pref = string.IsNullOrWhiteSpace(_vm.InvoicePrefix) ? "INV" : _vm.InvoicePrefix;
+        return $"{pref}-{num:000000}";
+    }
+
+    private static string DigitsOnly(string? s)
+        => new string((s ?? "").Where(char.IsDigit).ToArray());
+
+    private decimal TotalDebits() => (_vm.OpeningCash + _vm.OpeningBank + _vm.OpeningAR + _vm.OpeningInventory);
+    private decimal TotalCredits() => (_vm.OpeningAP);
+    private decimal Difference() => TotalDebits() - TotalCredits();
+
+    private class CompanyVm
+    {
+        [Required] public string? LegalName { get; set; }
+        [Required] public string? ShortName { get; set; }
+
+        public string? Industry { get; set; }
+        public string? BusinessType { get; set; }
+
+        public string CurrencyCode { get; set; } = "AED";
+        public string? Email { get; set; }
+        public string? Phone { get; set; }
+        public string? Website { get; set; }
+
+        [Required] public string? TRN { get; set; }
+        public string? Country { get; set; }
+        public string? AddressLine1 { get; set; }
+        public string? AddressLine2 { get; set; }
+        public string? POBox { get; set; }
+        public string? Emirate { get; set; }
+        public string? City { get; set; }
+
+        [Required] public string? InvoicePrefix { get; set; } = "INV";
+        public int NextInvoiceNumber { get; set; } = 1;
+        public decimal DefaultVatRate { get; set; } = 0.05m;
+        public int PaymentTermsDays { get; set; } = 0;
+        public string? InvoiceFooterNote { get; set; }
+
+        public DateTime? OpeningBalanceDate { get; set; }
+        public decimal OpeningCash { get; set; }
+        public decimal OpeningBank { get; set; }
+        public decimal OpeningAR { get; set; }
+        public decimal OpeningAP { get; set; }
+        public decimal OpeningInventory { get; set; }
+    }
+}

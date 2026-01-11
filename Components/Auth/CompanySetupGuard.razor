@@ -1,0 +1,65 @@
+﻿@using Microsoft.AspNetCore.Components
+@using Microsoft.AspNetCore.Components.Routing
+@using UaeEInvoice.Services.Auth
+
+@inject NavigationManager Nav
+@inject ICompanySetupGate Gate
+
+@if (!_ready)
+{
+    <LayoutView Layout="@DefaultLayout">
+        <div class="container-xxl py-5">
+            <div class="alert alert-info rounded-4 shadow-sm border-0">
+                <b>Checking company setup...</b>
+                <div class="text-muted">Please wait</div>
+            </div>
+        </div>
+    </LayoutView>
+}
+else
+{
+    <RouteView RouteData="@RouteData" DefaultLayout="@DefaultLayout" />
+}
+
+@code {
+    [Parameter] public RouteData RouteData { get; set; } = default!;
+    [Parameter] public Type DefaultLayout { get; set; } = default!;
+
+    private bool _ready;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _ready = false;
+
+        var rel = Nav.ToBaseRelativePath(Nav.Uri);
+        rel = (rel ?? "").Trim('/');
+        var pathOnly = rel.Split('?', '#')[0];
+
+        // ✅ Allowed pages even when setup not complete
+        bool isAllowed =
+            pathOnly.Equals("company-setup", StringComparison.OrdinalIgnoreCase) ||
+            pathOnly.Equals("login", StringComparison.OrdinalIgnoreCase) ||
+            pathOnly.Equals("login-2fa", StringComparison.OrdinalIgnoreCase) ||
+            pathOnly.Equals("access-denied", StringComparison.OrdinalIgnoreCase) ||
+            pathOnly.Equals("logout", StringComparison.OrdinalIgnoreCase) ||
+            pathOnly.StartsWith("account/enable-2fa", StringComparison.OrdinalIgnoreCase);
+
+        var st = await Gate.GetStatusAsync();
+
+        // logged-in but claim missing => safe logout
+        if (st.IsAuthenticated && !st.HasCompanyClaim && !isAllowed)
+        {
+            Nav.NavigateTo("/logout", replace: true);
+            return;
+        }
+
+        // ✅ Setup incomplete => force company-setup
+        if (st.IsAuthenticated && st.HasCompanyClaim && !st.IsSetupComplete && !isAllowed)
+        {
+            Nav.NavigateTo("/company-setup", replace: true);
+            return;
+        }
+
+        _ready = true;
+    }
+}

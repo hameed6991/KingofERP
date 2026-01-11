@@ -1,0 +1,478 @@
+﻿@page "/settings/invoice-templates/new"
+@page "/settings/invoice-templates/{Id:int}"
+@page "/settings/invoice-templates/edit/{Id:int}"
+
+@using UaeEInvoice.Data
+@using UaeEInvoice.Services
+@using UaeEInvoice.Services.Auth
+
+@inject NavigationManager Nav
+@inject ICurrentCompany CurrentCompany
+@inject InvoiceTemplateService Svc
+
+<PageTitle>Template Editor</PageTitle>
+
+<style>
+    .tpl-wrap {
+        background: radial-gradient(1000px 600px at 10% 0%, rgba(59,130,246,.18), transparent 60%), radial-gradient(900px 520px at 90% 0%, rgba(168,85,247,.16), transparent 60%), linear-gradient(180deg,#0b1226,#050816 70%,#030513);
+        border-radius: 22px;
+        padding: 18px;
+        min-height: calc(100vh - 110px);
+        color: rgba(255,255,255,.92);
+    }
+
+    .glass {
+        background: rgba(255,255,255,.06);
+        border: 1px solid rgba(255,255,255,.12);
+        border-radius: 22px;
+        box-shadow: 0 18px 60px rgba(0,0,0,.35);
+        backdrop-filter: blur(10px);
+        overflow: hidden;
+    }
+
+    .lbl {
+        color: rgba(255,255,255,.70);
+        font-size: .85rem;
+    }
+
+    .mut {
+        color: rgba(255,255,255,.60);
+    }
+
+    .inp, .sel {
+        background: rgba(255,255,255,.06) !important;
+        border: 1px solid rgba(255,255,255,.14) !important;
+        color: rgba(255,255,255,.92) !important;
+        border-radius: 14px;
+    }
+
+    .soft-hr {
+        border-color: rgba(255,255,255,.12);
+    }
+
+    .chip {
+        border-radius: 999px;
+        padding: 6px 10px;
+        border: 1px solid rgba(255,255,255,.14);
+        background: rgba(255,255,255,.05);
+        font-size: 12px;
+        color: rgba(255,255,255,.78);
+    }
+
+    .colrow {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 10px;
+        border: 1px solid rgba(255,255,255,.10);
+        background: rgba(0,0,0,.10);
+        border-radius: 16px;
+        margin-bottom: 10px;
+    }
+
+    .mini-btn {
+        border: 1px solid rgba(255,255,255,.14);
+        background: rgba(255,255,255,.06);
+        color: rgba(255,255,255,.9);
+        border-radius: 12px;
+        padding: 6px 10px;
+        font-size: 12px;
+    }
+
+        .mini-btn:hover {
+            background: rgba(255,255,255,.10);
+        }
+</style>
+
+<div class="container-xxl py-4">
+    <div class="tpl-wrap">
+
+        <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
+            <div>
+                <h3 class="mb-1" style="font-weight:900;">Template Editor</h3>
+                <div class="mut">Columns + sub-columns (groups) + live preview</div>
+            </div>
+            <div class="d-flex gap-2 flex-wrap">
+                <button class="btn btn-outline-light" type="button" @onclick="Back">Back</button>
+                <button class="btn btn-primary" type="button" @onclick="Save" disabled="@_saving">
+                    @(_saving ? "Saving..." : "Save")
+                </button>
+            </div>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(_err))
+        {
+            <div class="alert alert-danger">@_err</div>
+        }
+        @if (!string.IsNullOrWhiteSpace(_msg))
+        {
+            <div class="alert alert-success">@_msg</div>
+        }
+
+        <div class="row g-3">
+            <!-- LEFT SETTINGS -->
+            <div class="col-12 col-lg-4">
+                <div class="glass p-3">
+
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <div class="fw-bold">Settings</div>
+                        <div class="mut small">Theme + layout + columns</div>
+                    </div>
+
+                    <div class="mb-2">
+                        <div class="lbl mb-1">Template Name</div>
+                        <input class="form-control inp" @bind="_tpl.Name" @bind:event="oninput" />
+                    </div>
+
+                    <div class="row g-2">
+                        <div class="col-6">
+                            <div class="lbl mb-1">Industry</div>
+                            <input class="form-control inp" @bind="_settings.Industry" @bind:event="oninput" />
+                        </div>
+                        <div class="col-6">
+                            <div class="lbl mb-1">Style</div>
+                            <select class="form-select sel" @bind="_settings.Style">
+                                <option>Modern</option>
+                                <option>Classic</option>
+                                <option>Minimal</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="row g-2 mt-1">
+                        <div class="col-6">
+                            <div class="lbl mb-1">Header</div>
+                            <select class="form-select sel" @bind="_settings.HeaderStyle">
+                                <option>Split</option>
+                                <option>Compact</option>
+                                <option>Center</option>
+                            </select>
+                        </div>
+                        <div class="col-6">
+                            <div class="lbl mb-1">Accent</div>
+                            <input class="form-control inp" @bind="_settings.AccentHex" @bind:event="oninput" />
+                            <div class="mut small">Example: #8B5CF6</div>
+                        </div>
+                    </div>
+
+                    <div class="row g-2 mt-1">
+                        <div class="col-6">
+                            <div class="lbl mb-1">Corners: @_settings.Corner px</div>
+                            <input type="range" class="form-range" min="10" max="34" step="1" @bind="_settings.Corner" />
+                        </div>
+                        <div class="col-6">
+                            <div class="lbl mb-1">Font: @_settings.FontScale %</div>
+                            <input type="range" class="form-range" min="85" max="120" step="1" @bind="_settings.FontScale" />
+                        </div>
+                    </div>
+
+                    <hr class="soft-hr" />
+
+                    <div class="row g-2">
+                        <div class="col-6">
+                            <label class="form-check d-flex gap-2 align-items-center">
+                                <input class="form-check-input" type="checkbox" @bind="_settings.ShowLogo" />
+                                <span>Show Logo</span>
+                            </label>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-check d-flex gap-2 align-items-center">
+                                <input class="form-check-input" type="checkbox" @bind="_settings.ShowTRN" />
+                                <span>Show TRN</span>
+                            </label>
+                        </div>
+
+                        <div class="col-6">
+                            <label class="form-check d-flex gap-2 align-items-center">
+                                <input class="form-check-input" type="checkbox" @bind="_settings.ShowQRCode" />
+                                <span>QR Code</span>
+                            </label>
+                        </div>
+
+                        <div class="col-6">
+                            <label class="form-check d-flex gap-2 align-items-center">
+                                <input class="form-check-input" type="checkbox" @bind="_settings.ShowNotes" />
+                                <span>Notes</span>
+                            </label>
+                        </div>
+
+                        <div class="col-6">
+                            <label class="form-check d-flex gap-2 align-items-center">
+                                <input class="form-check-input" type="checkbox" @bind="_settings.ShowTerms" />
+                                <span>Terms</span>
+                            </label>
+                        </div>
+
+                        <div class="col-6">
+                            <label class="form-check d-flex gap-2 align-items-center">
+                                <input class="form-check-input" type="checkbox" @bind="_settings.EnableColumnGroups" />
+                                <span>Sub-Columns</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="d-grid mt-3">
+                        <button class="btn btn-outline-info" type="button" @onclick="ToggleWatermark">
+                            @(_settings.WatermarkEnabled ? "Watermark: ON" : "Watermark: OFF")
+                        </button>
+                    </div>
+
+                    <hr class="soft-hr" />
+
+                    <!-- Columns -->
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <div class="fw-bold">Items Table Columns</div>
+                        <span class="chip">@VisibleCount() / @_settings.ItemColumns.Count</span>
+                    </div>
+
+                    @for (int i = 0; i < _settings.ItemColumns.Count; i++)
+                    {
+                        var c = _settings.ItemColumns[i];
+                        var idx = i; // ✅ stable
+
+                        <div class="colrow" @key="c.Key">
+                            <div style="min-width:0;">
+                                <div class="d-flex gap-2 align-items-center">
+                                    <input class="form-check-input" type="checkbox" @bind="c.Visible" />
+                                    <div style="font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                                        @c.Title
+                                    </div>
+                                </div>
+                                <div class="mut small">
+                                    Key: <b>@c.Key</b>
+                                    @if (!string.IsNullOrWhiteSpace(c.GroupTitle))
+                                    {
+                                        <span> • Group: <b>@c.GroupTitle</b></span>
+                                    }
+                                </div>
+                            </div>
+
+                            <div class="d-flex gap-1 align-items-center">
+                                <select class="form-select sel" style="width:96px;" @bind="c.Align">
+                                    <option value="left">Left</option>
+                                    <option value="right">Right</option>
+                                    <option value="center">Center</option>
+                                </select>
+
+                                <button class="mini-btn" type="button" title="Move Up"
+                                        @onclick="() => MoveUp(idx)" disabled="@(idx==0)">
+                                    ↑
+                                </button>
+
+                                <button class="mini-btn" type="button" title="Move Down"
+                                        @onclick="() => MoveDown(idx)" disabled="@(idx==_settings.ItemColumns.Count-1)">
+                                    ↓
+                                </button>
+
+                                <button class="mini-btn" type="button" title="Remove"
+                                        @onclick="() => RemoveCol(idx)">
+                                    ✕
+                                </button>
+                            </div>
+                        </div>
+                    }
+
+                    <div class="glass p-2 mt-2" style="background: rgba(0,0,0,.18);">
+                        <div class="fw-bold mb-1">Add Custom Column</div>
+                        <div class="row g-2">
+                            <div class="col-7">
+                                <input class="form-control inp" placeholder="Title (ex: SKU / HSN)"
+                                       @bind="_newColTitle" @bind:event="oninput" />
+                            </div>
+                            <div class="col-5">
+                                <input class="form-control inp" placeholder="Group title (optional)"
+                                       @bind="_newColGroupTitle" @bind:event="oninput" />
+                            </div>
+                            <div class="col-7">
+                                <input class="form-control inp" placeholder="Key (optional)"
+                                       @bind="_newColKey" @bind:event="oninput" />
+                                <div class="mut small">Empty ok → auto key generated</div>
+                            </div>
+                            <div class="col-5 d-grid">
+                                <button class="btn btn-outline-light" type="button" @onclick="AddCustomColumn">Add</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <hr class="soft-hr" />
+
+                    <div class="mb-2">
+                        <div class="lbl mb-1">Footer Note</div>
+                        <textarea class="form-control inp" rows="2" @bind="_settings.FooterNote"></textarea>
+                    </div>
+
+                    <div class="mb-0">
+                        <div class="lbl mb-1">Terms</div>
+                        <textarea class="form-control inp" rows="4" @bind="_settings.TermsHtml"></textarea>
+                    </div>
+                </div>
+            </div>
+
+            <!-- RIGHT PREVIEW -->
+            <div class="col-12 col-lg-8">
+                <div class="glass p-3">
+                    <div class="fw-bold mb-1">Live Preview</div>
+                    <div class="mut small mb-2">Instant render based on your settings</div>
+
+                    <InvoiceTemplatePreview Settings="_settings" Compact="false" />
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+@code {
+    [Parameter] public int? Id { get; set; }
+
+    private InvoiceTemplate _tpl = new();
+    private InvoiceTemplateSettings _settings = new();
+
+    private bool _saving;
+    private string? _err;
+    private string? _msg;
+
+    private string _newColTitle = "";
+    private string _newColKey = "";
+    private string _newColGroupTitle = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        _err = null;
+        _msg = null;
+
+        await CurrentCompany.RefreshAsync();
+        if (CurrentCompany.CompanyId <= 0)
+        {
+            _err = "Company not found. Logout & login again.";
+            return;
+        }
+
+        if (Id.HasValue && Id.Value > 0)
+        {
+            var row = await Svc.GetAsync(Id.Value);
+            if (row == null)
+            {
+                _err = "Template not found.";
+                return;
+            }
+
+            _tpl = row;
+            _settings = InvoiceTemplateSettings.FromJson(_tpl.SettingsJson);
+        }
+        else
+        {
+            _tpl = new InvoiceTemplate
+                {
+                    Name = "My Premium Template",
+                    IndustryTag = "General",
+                    IsActive = true
+                };
+
+            _settings = new InvoiceTemplateSettings();
+        }
+
+        _settings.EnsureDefaults();
+    }
+
+    private void Back() => Nav.NavigateTo("/settings/invoice-templates");
+
+    private async Task Save()
+    {
+        _saving = true;
+        _err = null;
+        _msg = null;
+
+        try
+        {
+            _settings.EnsureDefaults();
+            _tpl.SettingsJson = _settings.ToJson();
+            _tpl.IndustryTag = _settings.Industry;
+
+            if (_tpl.InvoiceTemplateId <= 0)
+            {
+                var newId = await Svc.CreateAsync(_tpl);
+                _msg = "Template created ✅";
+                Nav.NavigateTo($"/settings/invoice-templates/{newId}", replace: true);
+            }
+            else
+            {
+                await Svc.UpdateAsync(_tpl);
+                _msg = "Template saved ✅";
+            }
+        }
+        catch (Exception ex)
+        {
+            _err = ex.InnerException?.Message ?? ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private void ToggleWatermark() => _settings.WatermarkEnabled = !_settings.WatermarkEnabled;
+    private int VisibleCount() => _settings.ItemColumns.Count(x => x.Visible);
+
+    // ✅ SAFE reorder (no crash)
+    private void MoveUp(int i)
+    {
+        var list = _settings.ItemColumns;
+        if (i <= 0 || i >= list.Count) return;
+        (list[i - 1], list[i]) = (list[i], list[i - 1]);
+    }
+
+    private void MoveDown(int i)
+    {
+        var list = _settings.ItemColumns;
+        if (i < 0 || i >= list.Count - 1) return;
+        (list[i + 1], list[i]) = (list[i], list[i + 1]);
+    }
+
+    private void RemoveCol(int i)
+    {
+        var list = _settings.ItemColumns;
+        if (i < 0 || i >= list.Count) return;
+        list.RemoveAt(i);
+        _settings.EnsureDefaults();
+    }
+
+    private void AddCustomColumn()
+    {
+        _err = null;
+
+        var title = (_newColTitle ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            _err = "Please enter column title.";
+            return;
+        }
+
+        var key = (_newColKey ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(key))
+            key = "custom_" + Guid.NewGuid().ToString("N")[..6];
+
+        if (_settings.ItemColumns.Any(x => x.Key.Equals(key, StringComparison.OrdinalIgnoreCase)))
+            key = key + "_" + Guid.NewGuid().ToString("N")[..3];
+
+        var gTitle = string.IsNullOrWhiteSpace(_newColGroupTitle) ? null : _newColGroupTitle.Trim();
+        var gKey = string.IsNullOrWhiteSpace(gTitle) ? null : gTitle.ToLowerInvariant().Replace(" ", "");
+
+        _settings.ItemColumns.Add(new InvoiceTemplateColumnDef
+            {
+                Key = key,
+                Title = title,
+                Visible = true,
+                Align = "left",
+                GroupTitle = gTitle,
+                GroupKey = gKey
+            });
+
+        _newColTitle = "";
+        _newColKey = "";
+        _newColGroupTitle = "";
+
+        _settings.EnsureDefaults();
+    }
+}

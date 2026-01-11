@@ -1,0 +1,290 @@
+﻿@page "/inventory-ledger"
+@page "/inventory-ledger/{ItemId:int}"
+@using Microsoft.EntityFrameworkCore
+@using UaeEInvoice.Data
+@using UaeEInvoice.Services.Auth
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject NavigationManager Nav
+@inject ICurrentCompany CurrentCompany
+
+<h1 class="display-6 fw-bold">Inventory Ledger</h1>
+<p class="text-muted">Shows PURCHASE + SALE movements from StockLedger (with running quantity).</p>
+
+@if (!string.IsNullOrWhiteSpace(_error))
+{
+    <div class="alert alert-danger">@_error</div>
+}
+
+<div class="card p-3 shadow-sm rounded-4 mb-3">
+    <div class="row g-3 align-items-end">
+        <div class="col-md-5">
+            <label class="form-label">Item</label>
+            <select class="form-select" value="@SelectedItemId" @onchange="ItemChanged">
+                <option value="0">-- Select Item --</option>
+                @foreach (var it in Items)
+                {
+                    <option value="@it.ItemId">@it.Name (@it.ItemId)</option>
+                }
+            </select>
+            <div class="form-text">Pick an item to see its running stock balance.</div>
+        </div>
+
+        <div class="col-md-3">
+            <label class="form-label">From</label>
+            <input type="date" class="form-control"
+                   @bind-value="FromDate" @bind-value:format="yyyy-MM-dd" />
+        </div>
+
+        <div class="col-md-3">
+            <label class="form-label">To</label>
+            <input type="date" class="form-control"
+                   @bind-value="ToDate" @bind-value:format="yyyy-MM-dd" />
+        </div>
+
+        <div class="col-md-1 d-grid">
+            <button class="btn btn-primary" @onclick="LoadAsync">Go</button>
+        </div>
+    </div>
+
+    <div class="mt-3 d-flex gap-2">
+        <button class="btn btn-outline-secondary btn-sm" @onclick="ThisMonth">This Month</button>
+        <button class="btn btn-outline-secondary btn-sm" @onclick="Last30Days">Last 30 Days</button>
+    </div>
+</div>
+
+<div class="card p-3 shadow-sm rounded-4">
+    <div class="table-responsive">
+        <table class="table align-middle">
+            <thead>
+                <tr class="text-uppercase text-muted small">
+                    <th style="width:120px;">Date</th>
+                    <th style="width:130px;">Type</th>
+                    <th style="width:160px;">Ref</th>
+                    <th>Notes</th>
+                    <th class="text-end" style="width:110px;">In</th>
+                    <th class="text-end" style="width:110px;">Out</th>
+                    <th class="text-end" style="width:110px;">Change</th>
+                    <th class="text-end" style="width:110px;">Unit Cost</th>
+                    <th class="text-end" style="width:130px;">Running Qty</th>
+                </tr>
+            </thead>
+
+            <tbody>
+                <tr class="table-light">
+                    <td colspan="8" class="fw-semibold">Opening Quantity</td>
+                    <td class="text-end fw-bold">@_openingQty.ToString("N2")</td>
+                </tr>
+
+                @if (_rows.Count == 0)
+                {
+                    <tr>
+                        <td colspan="9" class="text-center text-muted py-5">No stock entries.</td>
+                    </tr>
+                }
+                else
+                {
+                    @foreach (var r in _rows)
+                    {
+                        <tr>
+                            <td>@r.TxnDate.ToString("dd-MM-yyyy")</td>
+                            <td>
+                                <span class="badge bg-light text-dark border">@r.TxnType</span>
+                            </td>
+
+                            <td>
+                                @if (!string.IsNullOrWhiteSpace(r.RefNo))
+                                {
+                                    <a href="@($"/voucher/{Uri.EscapeDataString(r.RefNo)}")">@r.RefNo</a>
+                                }
+                                else
+                                {
+                                    <span class="text-muted">—</span>
+                                }
+                            </td>
+
+                            <td>@(string.IsNullOrWhiteSpace(r.Notes) ? "—" : r.Notes)</td>
+
+                            <td class="text-end">@r.InQty.ToString("N2")</td>
+                            <td class="text-end">@r.OutQty.ToString("N2")</td>
+                            <td class="text-end">@r.QtyChange.ToString("N2")</td>
+                            <td class="text-end">@r.UnitCost.ToString("N2")</td>
+                            <td class="text-end fw-semibold">@r.RunningQty.ToString("N2")</td>
+                        </tr>
+                    }
+                }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+@code {
+    [Parameter] public int ItemId { get; set; } // optional route param
+
+    private string? _error;
+    private int _companyId;
+
+    private List<ItemMini> Items = new();
+    private int SelectedItemId;
+
+    private DateTime FromDate = DateTime.Today.AddDays(-30);
+    private DateTime ToDate = DateTime.Today;
+
+    private decimal _openingQty;
+    private List<RowVm> _rows = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CurrentCompany.RefreshAsync();
+        _companyId = CurrentCompany.CompanyId;
+
+        if (_companyId <= 0)
+        {
+            _error = "CompanyId not found from login/session.";
+            return;
+        }
+
+        await LoadItemsAsync();
+
+        // set selected item from route
+        SelectedItemId = ItemId;
+
+        // if no route item, pick first item (optional)
+        if (SelectedItemId <= 0 && Items.Count > 0)
+            SelectedItemId = Items[0].ItemId;
+
+        await LoadAsync();
+    }
+
+    private async Task LoadItemsAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        Items = await db.Items
+            .AsNoTracking()
+            .Where(x => x.CompanyId == _companyId && x.IsActive)
+            .OrderBy(x => x.Name)
+            .Select(x => new ItemMini { ItemId = x.ItemId, Name = x.Name })
+            .ToListAsync();
+    }
+
+    private async Task ItemChanged(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var id))
+        {
+            SelectedItemId = id;
+
+            if (SelectedItemId > 0)
+                Nav.NavigateTo($"/inventory-ledger/{SelectedItemId}");
+            else
+                Nav.NavigateTo("/inventory-ledger");
+
+            await LoadAsync();
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        _error = null;
+        _rows.Clear();
+        _openingQty = 0m;
+
+        try
+        {
+            if (SelectedItemId <= 0)
+            {
+                _error = "Please select an item to view inventory ledger.";
+                return;
+            }
+
+            var from = FromDate.Date;
+            var toExclusive = ToDate.Date.AddDays(1);
+
+            await using var db = await DbFactory.CreateDbContextAsync();
+
+            // Opening Qty = sum before FromDate
+            _openingQty = await db.StockLedgers
+                .AsNoTracking()
+                .Where(x => x.CompanyId == _companyId
+                         && x.ItemId == SelectedItemId
+                         && x.TxnDate < from)
+                .Select(x => x.QtyChange)
+                .SumAsync();
+
+            // NOTE: This query shows PURCHASE + SALE + any other TxnType (no filtering)
+            var entries = await db.StockLedgers
+                .AsNoTracking()
+                .Where(x => x.CompanyId == _companyId
+                         && x.ItemId == SelectedItemId
+                         && x.TxnDate >= from
+                         && x.TxnDate < toExclusive)
+                .OrderBy(x => x.TxnDate)
+                .ThenBy(x => x.StockLedgerId)
+                .Take(500) // as you asked
+                .ToListAsync();
+
+            decimal running = _openingQty;
+
+            foreach (var sl in entries)
+            {
+                running += sl.QtyChange;
+
+                var inQty = sl.QtyChange > 0 ? sl.QtyChange : 0m;
+                var outQty = sl.QtyChange < 0 ? -sl.QtyChange : 0m;
+
+                _rows.Add(new RowVm
+                    {
+                        TxnDate = sl.TxnDate,
+                        TxnType = sl.TxnType ?? "—",
+                        RefNo = sl.RefNo,
+                        Notes = sl.Notes,
+                        InQty = inQty,
+                        OutQty = outQty,
+                        QtyChange = sl.QtyChange,
+                        UnitCost = sl.UnitCost,
+                        RunningQty = running
+                    });
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private Task ThisMonth()
+    {
+        var now = DateTime.Today;
+        FromDate = new DateTime(now.Year, now.Month, 1);
+        ToDate = now;
+        return LoadAsync();
+    }
+
+    private Task Last30Days()
+    {
+        var now = DateTime.Today;
+        FromDate = now.AddDays(-30);
+        ToDate = now;
+        return LoadAsync();
+    }
+
+    private sealed class ItemMini
+    {
+        public int ItemId { get; set; }
+        public string Name { get; set; } = "";
+    }
+
+    private sealed class RowVm
+    {
+        public DateTime TxnDate { get; set; }
+        public string TxnType { get; set; } = "";
+        public string? RefNo { get; set; }
+        public string? Notes { get; set; }
+
+        public decimal InQty { get; set; }
+        public decimal OutQty { get; set; }
+        public decimal QtyChange { get; set; }
+        public decimal UnitCost { get; set; }
+
+        public decimal RunningQty { get; set; }
+    }
+}

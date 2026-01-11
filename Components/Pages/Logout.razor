@@ -1,0 +1,35 @@
+﻿@page "/logout"
+@using Microsoft.AspNetCore.Authentication
+@using Microsoft.AspNetCore.Authentication.Cookies
+@using Microsoft.AspNetCore.Identity
+@inject IHttpContextAccessor Http
+@inject NavigationManager Nav
+
+<div class="container-xxl py-5">
+    <div class="card p-4 shadow-sm">
+        <h4 class="mb-1">Logging out…</h4>
+        <div class="text-muted">Please wait</div>
+    </div>
+</div>
+
+@code {
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var ctx = Http.HttpContext;
+            if (ctx != null)
+            {
+                // ✅ Cookie Signout (most common)
+                await ctx.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+
+                // ✅ Identity cookie (if you use Identity)
+                await ctx.SignOutAsync(IdentityConstants.ApplicationScheme);
+            }
+        }
+        catch { }
+
+        // ✅ Force reload so cookie cleared properly
+        Nav.NavigateTo("/login", forceLoad: true);
+    }
+}
