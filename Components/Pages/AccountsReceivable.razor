@@ -106,7 +106,7 @@
 
 <div class="container-xxl py-4">
 
-    <!-- ✅ HERO -->
+    <!-- HERO -->
     <div class="hero mb-3 soft-shadow">
         <div class="d-flex align-items-start justify-content-between flex-wrap gap-2">
             <div>
@@ -138,7 +138,7 @@
     }
 
     <div class="row g-3 mt-1">
-        <!-- LEFT: LIST -->
+        <!-- LEFT -->
         <div class="col-12 col-lg-7">
             <div class="card soft-card soft-shadow">
                 <div class="card-body">
@@ -261,14 +261,14 @@
                         </div>
 
                         <div class="text-muted small">
-                            These JV lines won’t reduce any single invoice until Journal line is allocated with InvoiceId (Option-A).
+                            These JV lines won’t reduce any single invoice until Journal line is allocated with InvoiceId.
                         </div>
                     }
                 </div>
             </div>
         </div>
 
-        <!-- RIGHT: RECEIPT -->
+        <!-- RIGHT -->
         <div class="col-12 col-lg-5">
             <div class="card soft-card soft-shadow">
                 <div class="card-body">
@@ -388,7 +388,7 @@
             @if (selected != null)
             {
                 <div class="text-muted small mt-2">
-                    Tip: Click another invoice on left to switch instantly.
+                    Tip: If you select “Bank” method, ledger will debit Bank account (e.g., 1010) ✅
                 </div>
             }
         </div>
@@ -401,7 +401,11 @@
     private bool onlyPending = true;
 
     private int _companyId;
-    private int _arAccountNo = 1100; // fallback
+
+    // Control accounts
+    private int _arAccountNo = 1100;   // fallback AR
+    private int _cashAccountNo = 1000; // fallback Cash
+    private int _bankAccountNo = 1010; // fallback Bank
 
     private List<Row> rows = new();
     private Row? selected;
@@ -418,18 +422,21 @@
     {
         await CurrentCompany.RefreshAsync();
         _companyId = CurrentCompany.CompanyId;
-        if (_companyId <= 0) { err = "CompanyId not found."; return; }
+        if (_companyId <= 0)
+        {
+            err = "CompanyId not found from login/session. Please logout & login again.";
+            return;
+        }
 
-        await ResolveArAccountAsync();
+        await ResolveControlAccountsAsync();
         await Load();
     }
 
     private void SearchChanged(ChangeEventArgs e)
-    {
-        search = (e?.Value?.ToString() ?? "").Trim();
-    }
+        => search = (e?.Value?.ToString() ?? "").Trim();
 
-    private async Task ResolveArAccountAsync()
+    // ✅ Resolve AR / Cash / Bank from COA (best effort)
+    private async Task ResolveControlAccountsAsync()
     {
         var coa = await Db.ChartOfAccounts.AsNoTracking()
             .Where(x => x.CompanyId == _companyId)
@@ -442,6 +449,31 @@
             (x.AccountName ?? "").Contains("Debtors", StringComparison.OrdinalIgnoreCase));
 
         if (ar != null) _arAccountNo = ar.AccountNo;
+
+        var cash = coa.FirstOrDefault(x =>
+            string.Equals((x.AccountType ?? "").Trim(), "CASH", StringComparison.OrdinalIgnoreCase) ||
+            (x.AccountName ?? "").Equals("Cash", StringComparison.OrdinalIgnoreCase) ||
+            (x.AccountName ?? "").Contains("Cash", StringComparison.OrdinalIgnoreCase));
+
+        if (cash != null) _cashAccountNo = cash.AccountNo;
+
+        var bank = coa.FirstOrDefault(x =>
+            string.Equals((x.AccountType ?? "").Trim(), "BANK", StringComparison.OrdinalIgnoreCase) ||
+            (x.AccountName ?? "").Contains("Bank", StringComparison.OrdinalIgnoreCase));
+
+        if (bank != null) _bankAccountNo = bank.AccountNo;
+    }
+
+    private int GetDebitAccountByMethod(string? method)
+    {
+        var m = (method ?? "Cash").Trim().ToUpperInvariant();
+
+        // ✅ Bank-like methods → Bank
+        if (m is "BANK" or "ONLINE" or "CARD")
+            return _bankAccountNo;
+
+        // ✅ Default → Cash
+        return _cashAccountNo;
     }
 
     private async Task Load()
@@ -449,7 +481,10 @@
         loading = true;
         msg = err = null;
 
-        selected = null;
+    selected:
+        {
+            selected = null;
+        }
         history.Clear();
         rec = new ReceiptModel();
         unallocatedJv.Clear();
@@ -482,7 +517,7 @@
                 .Select(g => new { InvoiceId = g.Key, Received = g.Sum(z => z.Amount) })
                 .ToDictionaryAsync(x => x.InvoiceId, x => x.Received);
 
-            // ✅ JV allocations: AR adjustment per invoice (Debit - Credit)
+            // JV allocations affecting AR per invoice (Debit - Credit)
             var jvAdjMap = await Db.LedgerEntries.AsNoTracking()
                 .Where(le => le.CompanyId == _companyId && le.AccountNo == _arAccountNo && le.InvoiceId != null)
                 .GroupBy(le => le.InvoiceId!.Value)
@@ -492,7 +527,7 @@
             rows = list.Select(x =>
             {
                 var received = recvMap.TryGetValue(x.InvoiceId, out var v) ? v : 0m;
-                var adj = jvAdjMap.TryGetValue(x.InvoiceId, out var a) ? a : 0m; // credit reduces (negative)
+                var adj = jvAdjMap.TryGetValue(x.InvoiceId, out var a) ? a : 0m;
                 var balance = x.GrandTotal + adj - received;
 
                 return new Row
@@ -511,7 +546,6 @@
             if (onlyPending)
                 rows = rows.Where(x => x.Balance > 0.0001m).ToList();
 
-            // ✅ Unallocated JV affecting AR (not linked to invoice)
             unallocatedJv = await Db.LedgerEntries.AsNoTracking()
                 .Where(x => x.CompanyId == _companyId && x.AccountNo == _arAccountNo && x.InvoiceId == null)
                 .OrderByDescending(x => x.TxnDate)
@@ -582,13 +616,16 @@
                 });
             await Db.SaveChangesAsync();
 
-            // Dr Cash, Cr AR (control)
+            // ✅ IMPORTANT FIX:
+            // Dr Cash/Bank (based on method), Cr AR (control)
+            var debitAccount = GetDebitAccountByMethod(rec.Method);
+
             await Ledger.PostAsync(
                 companyId: _companyId,
                 date: receiptDate,
                 voucherType: "REC",
                 voucherNo: selected.InvoiceNo,
-                debitAccountNo: 1000,
+                debitAccountNo: debitAccount,
                 creditAccountNo: _arAccountNo,
                 amount: rec.Amount,
                 narration: $"Receipt against {selected.InvoiceNo}",
@@ -597,7 +634,7 @@
 
             await tx.CommitAsync();
 
-            msg = "Receipt saved ✅ (Ledger posted)";
+            msg = $"Receipt saved ✅ (Posted: Dr {debitAccount}, Cr {_arAccountNo})";
             rec = new ReceiptModel();
             await Load();
         }
