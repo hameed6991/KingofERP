@@ -138,7 +138,7 @@
     }
 
     <div class="row g-3 mt-1">
-        <!-- LEFT -->
+        <!-- LEFT: LIST -->
         <div class="col-12 col-lg-7">
             <div class="card soft-card soft-shadow">
                 <div class="card-body">
@@ -268,7 +268,7 @@
             </div>
         </div>
 
-        <!-- RIGHT -->
+        <!-- RIGHT: RECEIPT -->
         <div class="col-12 col-lg-5">
             <div class="card soft-card soft-shadow">
                 <div class="card-body">
@@ -388,7 +388,7 @@
             @if (selected != null)
             {
                 <div class="text-muted small mt-2">
-                    Tip: If you select “Bank” method, ledger will debit Bank account (e.g., 1010) ✅
+                    Tip: Method = Bank/Card/Online -> Bank ledger (1010) will update.
                 </div>
             }
         </div>
@@ -401,9 +401,7 @@
     private bool onlyPending = true;
 
     private int _companyId;
-
-    // Control accounts
-    private int _arAccountNo = 1100;   // fallback AR
+    private int _arAccountNo = 1100; // fallback AR control
     private int _cashAccountNo = 1000; // fallback Cash
     private int _bankAccountNo = 1010; // fallback Bank
 
@@ -422,21 +420,18 @@
     {
         await CurrentCompany.RefreshAsync();
         _companyId = CurrentCompany.CompanyId;
-        if (_companyId <= 0)
-        {
-            err = "CompanyId not found from login/session. Please logout & login again.";
-            return;
-        }
+        if (_companyId <= 0) { err = "CompanyId not found."; return; }
 
-        await ResolveControlAccountsAsync();
+        await ResolveAccountsAsync();
         await Load();
     }
 
     private void SearchChanged(ChangeEventArgs e)
-        => search = (e?.Value?.ToString() ?? "").Trim();
+    {
+        search = (e?.Value?.ToString() ?? "").Trim();
+    }
 
-    // ✅ Resolve AR / Cash / Bank from COA (best effort)
-    private async Task ResolveControlAccountsAsync()
+    private async Task ResolveAccountsAsync()
     {
         var coa = await Db.ChartOfAccounts.AsNoTracking()
             .Where(x => x.CompanyId == _companyId)
@@ -447,32 +442,23 @@
             string.Equals((x.AccountType ?? "").Trim(), "AR", StringComparison.OrdinalIgnoreCase) ||
             (x.AccountName ?? "").Contains("Receivable", StringComparison.OrdinalIgnoreCase) ||
             (x.AccountName ?? "").Contains("Debtors", StringComparison.OrdinalIgnoreCase));
-
         if (ar != null) _arAccountNo = ar.AccountNo;
 
         var cash = coa.FirstOrDefault(x =>
-            string.Equals((x.AccountType ?? "").Trim(), "CASH", StringComparison.OrdinalIgnoreCase) ||
             (x.AccountName ?? "").Equals("Cash", StringComparison.OrdinalIgnoreCase) ||
             (x.AccountName ?? "").Contains("Cash", StringComparison.OrdinalIgnoreCase));
-
         if (cash != null) _cashAccountNo = cash.AccountNo;
 
         var bank = coa.FirstOrDefault(x =>
-            string.Equals((x.AccountType ?? "").Trim(), "BANK", StringComparison.OrdinalIgnoreCase) ||
-            (x.AccountName ?? "").Contains("Bank", StringComparison.OrdinalIgnoreCase));
-
+            (x.AccountName ?? "").Contains("Bank", StringComparison.OrdinalIgnoreCase) ||
+            (x.AccountNo == 1010));
         if (bank != null) _bankAccountNo = bank.AccountNo;
     }
 
     private int GetDebitAccountByMethod(string? method)
     {
         var m = (method ?? "Cash").Trim().ToUpperInvariant();
-
-        // ✅ Bank-like methods → Bank
-        if (m is "BANK" or "ONLINE" or "CARD")
-            return _bankAccountNo;
-
-        // ✅ Default → Cash
+        if (m == "BANK" || m == "ONLINE" || m == "CARD") return _bankAccountNo;
         return _cashAccountNo;
     }
 
@@ -481,10 +467,7 @@
         loading = true;
         msg = err = null;
 
-    selected:
-        {
-            selected = null;
-        }
+        selected = null;
         history.Clear();
         rec = new ReceiptModel();
         unallocatedJv.Clear();
@@ -517,7 +500,7 @@
                 .Select(g => new { InvoiceId = g.Key, Received = g.Sum(z => z.Amount) })
                 .ToDictionaryAsync(x => x.InvoiceId, x => x.Received);
 
-            // JV allocations affecting AR per invoice (Debit - Credit)
+            // AR adjustment per invoice (Debit - Credit)
             var jvAdjMap = await Db.LedgerEntries.AsNoTracking()
                 .Where(le => le.CompanyId == _companyId && le.AccountNo == _arAccountNo && le.InvoiceId != null)
                 .GroupBy(le => le.InvoiceId!.Value)
@@ -605,7 +588,7 @@
 
             using var tx = await Db.Database.BeginTransactionAsync();
 
-            Db.InvoiceReceipts.Add(new InvoiceReceipt
+            var receipt = new InvoiceReceipt
                 {
                     InvoiceId = selected.InvoiceId,
                     ReceiptDate = receiptDate,
@@ -613,28 +596,33 @@
                     Method = rec.Method ?? "Cash",
                     ReferenceNo = rec.ReferenceNo,
                     Notes = rec.Notes
-                });
-            await Db.SaveChangesAsync();
+                };
 
-            // ✅ IMPORTANT FIX:
-            // Dr Cash/Bank (based on method), Cr AR (control)
-            var debitAccount = GetDebitAccountByMethod(rec.Method);
+            Db.InvoiceReceipts.Add(receipt);
+            await Db.SaveChangesAsync(); // ✅ get InvoiceReceiptId
 
+            // ✅ Method based debit account (Cash/Bank)
+            var debitAccount = GetDebitAccountByMethod(receipt.Method);
+
+            // ✅ Unique voucher no (prevents overwrite/skip)
+            var voucherNo = $"RCPT-{receipt.InvoiceReceiptId:000000}";
+
+            // Dr Cash/Bank, Cr AR control
             await Ledger.PostAsync(
                 companyId: _companyId,
                 date: receiptDate,
-                voucherType: "REC",
-                voucherNo: selected.InvoiceNo,
+                voucherType: "RCPT",
+                voucherNo: voucherNo,
                 debitAccountNo: debitAccount,
                 creditAccountNo: _arAccountNo,
-                amount: rec.Amount,
-                narration: $"Receipt against {selected.InvoiceNo}",
+                amount: receipt.Amount,
+                narration: $"Receipt against {selected.InvoiceNo} ({receipt.Method})",
                 refId: selected.InvoiceId
             );
 
             await tx.CommitAsync();
 
-            msg = $"Receipt saved ✅ (Posted: Dr {debitAccount}, Cr {_arAccountNo})";
+            msg = $"Receipt saved ✅ Posted to {(debitAccount == _bankAccountNo ? "Bank" : "Cash")} ledger.";
             rec = new ReceiptModel();
             await Load();
         }
