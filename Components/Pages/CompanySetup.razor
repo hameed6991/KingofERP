@@ -542,6 +542,7 @@
 @code {
     private bool _loading = true;
     private bool _saving;
+    private bool _setupCompleted; // prevent double save
     private string? _error;
     private string? _message;
 
@@ -563,6 +564,9 @@
 
     protected override async Task OnInitializedAsync()
     {
+        _loading = true;
+        _error = null;
+
         await CurrentCompany.RefreshAsync();
         _companyId = CurrentCompany.CompanyId;
 
@@ -572,6 +576,9 @@
             _loading = false;
             return;
         }
+
+        // IMPORTANT: Clear tracker (online Blazor Server circuits reuse scoped DbContext)
+        Db.ChangeTracker.Clear();
 
         // One-time setup only
         var exists = await Db.Companies.AsNoTracking().AnyAsync(x => x.CompanyId == _companyId);
@@ -651,6 +658,9 @@
         _vm.OpeningBalanceDate = null;
         _vm.OpeningCash = _vm.OpeningBank = _vm.OpeningAR = _vm.OpeningAP = _vm.OpeningInventory = 0m;
 
+        // important
+        Db.ChangeTracker.Clear();
+
         await InvokeAsync(StateHasChanged);
     }
 
@@ -683,17 +693,40 @@
         }
     }
 
+    // ✅ 핵심: tracked entity conflict fix
+    private async Task<Company> GetOrCreateCompanyEntityAsync(int companyId)
+    {
+        // 1) if already tracked in this DbContext, reuse it
+        var local = Db.Companies.Local.FirstOrDefault(x => x.CompanyId == companyId);
+        if (local != null) return local;
+
+        // 2) try load from DB (tracked)
+        var existing = await Db.Companies.FirstOrDefaultAsync(x => x.CompanyId == companyId);
+        if (existing != null) return existing;
+
+        // 3) create new
+        var created = new Company { CompanyId = companyId };
+        Db.Companies.Add(created);
+        return created;
+    }
+
     private async Task Save()
     {
+        if (_saving || _setupCompleted) return;
+
         _saving = true;
         _error = null;
         _message = null;
 
         try
         {
+            // Refresh company claim
             await CurrentCompany.RefreshAsync();
             _companyId = CurrentCompany.CompanyId;
             if (_companyId <= 0) throw new Exception("CompanyId claim not found.");
+
+            // VERY IMPORTANT: clear tracker to avoid any tracked Company from other services
+            Db.ChangeTracker.Clear();
 
             _vm.LegalName = (_vm.LegalName ?? "").Trim();
             _vm.ShortName = (_vm.ShortName ?? "").Trim();
@@ -712,7 +745,7 @@
             if (string.IsNullOrWhiteSpace(_vm.InvoicePrefix)) { _step = 3; throw new Exception("Invoice Prefix is required."); }
             if (string.IsNullOrWhiteSpace(_vm.CurrencyCode)) _vm.CurrencyCode = "AED";
 
-            // Logo save
+            // Save Logo (optional)
             string? logoPath = null;
             if (_logoFile != null)
             {
@@ -731,54 +764,58 @@
                 logoPath = $"/uploads/company/{_companyId}/{fileName}";
             }
 
-            var entity = new Company
-                {
-                    CompanyId = _companyId,
-                    LegalName = _vm.LegalName,
-                    ShortName = _vm.ShortName,
-                    Industry = _vm.Industry,
-                    BusinessType = _vm.BusinessType,
-                    CurrencyCode = _vm.CurrencyCode,
-                    Email = _vm.Email,
-                    Phone = _vm.Phone,
-                    Website = _vm.Website,
+            // ✅ get ONE instance (tracked) and update fields on SAME instance
+            var entity = await GetOrCreateCompanyEntityAsync(_companyId);
 
-                    TRN = _vm.TRN,
-                    Country = _vm.Country,
-                    AddressLine1 = _vm.AddressLine1,
-                    AddressLine2 = _vm.AddressLine2,
-                    POBox = _vm.POBox,
-                    Emirate = _vm.Emirate,
-                    City = _vm.City,
+            entity.LegalName = _vm.LegalName;
+            entity.ShortName = _vm.ShortName;
+            entity.Industry = _vm.Industry;
+            entity.BusinessType = _vm.BusinessType;
+            entity.CurrencyCode = _vm.CurrencyCode;
+            entity.Email = _vm.Email;
+            entity.Phone = _vm.Phone;
+            entity.Website = _vm.Website;
 
-                    InvoicePrefix = _vm.InvoicePrefix,
-                    NextInvoiceNumber = _vm.NextInvoiceNumber <= 0 ? 1 : _vm.NextInvoiceNumber,
-                    DefaultVatRate = _vm.DefaultVatRate,
-                    PaymentTermsDays = _vm.PaymentTermsDays,
-                    InvoiceFooterNote = _vm.InvoiceFooterNote,
+            entity.TRN = _vm.TRN;
+            entity.Country = _vm.Country;
+            entity.AddressLine1 = _vm.AddressLine1;
+            entity.AddressLine2 = _vm.AddressLine2;
+            entity.POBox = _vm.POBox;
+            entity.Emirate = _vm.Emirate;
+            entity.City = _vm.City;
 
-                    OpeningBalanceDate = _vm.OpeningBalanceDate,
-                    OpeningCash = _vm.OpeningCash,
-                    OpeningBank = _vm.OpeningBank,
-                    OpeningAR = _vm.OpeningAR,
-                    OpeningAP = _vm.OpeningAP,
-                    OpeningInventory = _vm.OpeningInventory,
+            entity.InvoicePrefix = _vm.InvoicePrefix;
+            entity.NextInvoiceNumber = _vm.NextInvoiceNumber <= 0 ? 1 : _vm.NextInvoiceNumber;
+            entity.DefaultVatRate = _vm.DefaultVatRate;
+            entity.PaymentTermsDays = _vm.PaymentTermsDays;
+            entity.InvoiceFooterNote = _vm.InvoiceFooterNote;
 
-                    LogoPath = logoPath
-                };
+            entity.OpeningBalanceDate = _vm.OpeningBalanceDate;
+            entity.OpeningCash = _vm.OpeningCash;
+            entity.OpeningBank = _vm.OpeningBank;
+            entity.OpeningAR = _vm.OpeningAR;
+            entity.OpeningAP = _vm.OpeningAP;
+            entity.OpeningInventory = _vm.OpeningInventory;
 
-            Db.Companies.Add(entity);
+            // only overwrite logo if uploaded now
+            if (!string.IsNullOrWhiteSpace(logoPath))
+                entity.LogoPath = logoPath;
+
             await Db.SaveChangesAsync();
 
-            // 1) Ensure COA (base + new 3 accounts)
+            // Optional: clear tracker before calling other services (reduces conflicts)
+            Db.ChangeTracker.Clear();
+
+            // 1) Ensure COA
             await Ledger.EnsureDefaultAccountsAsync(_companyId);
 
-            // 2) Automap roles (base + PDC keys)
+            // 2) Automap roles
             await AutoMapBaseRolesIfMissing(_companyId);
 
-            // 3) Post opening balances once (idempotent)
+            // 3) Post opening balances once
             await TryPostOpeningBalancesOnce(_companyId);
 
+            _setupCompleted = true;
             _message = "Setup completed. Redirecting to Customers...";
             Nav.NavigateTo("/customers?from=setup", forceLoad: true);
         }
@@ -797,7 +834,6 @@
     // =========================
     private async Task TryPostOpeningBalancesOnce(int companyId)
     {
-        // If no openings => skip
         if (_vm.OpeningCash <= 0m
             && _vm.OpeningBank <= 0m
             && _vm.OpeningAR <= 0m
@@ -810,7 +846,6 @@
 
         if (already) return;
 
-        // Ensure Bank + Opening Equity accounts exist (for posting)
         await EnsureCoaAccountIfMissing(companyId, 1010, "Bank", "Asset", "BalanceSheet", "Operating", isCashAccount: true, isWorkingCapital: true);
         await EnsureCoaAccountIfMissing(companyId, 3000, "Opening Balance Equity", "Equity", "BalanceSheet", "Operating", isCashAccount: false, isWorkingCapital: false);
 
@@ -820,13 +855,11 @@
 
         var lines = new List<LedgerService.PostLine>();
 
-        // Assets: Debit Asset, Credit Opening Equity
         if (_vm.OpeningCash > 0m) lines.Add(new LedgerService.PostLine { DebitAccountNo = 1000, CreditAccountNo = 3000, Amount = _vm.OpeningCash, Narration = "Opening Cash" });
         if (_vm.OpeningBank > 0m) lines.Add(new LedgerService.PostLine { DebitAccountNo = 1010, CreditAccountNo = 3000, Amount = _vm.OpeningBank, Narration = "Opening Bank" });
         if (_vm.OpeningAR > 0m) lines.Add(new LedgerService.PostLine { DebitAccountNo = 1100, CreditAccountNo = 3000, Amount = _vm.OpeningAR, Narration = "Opening Accounts Receivable" });
         if (_vm.OpeningInventory > 0m) lines.Add(new LedgerService.PostLine { DebitAccountNo = 1200, CreditAccountNo = 3000, Amount = _vm.OpeningInventory, Narration = "Opening Inventory" });
 
-        // AP: Credit AP, Debit Opening Equity
         if (_vm.OpeningAP > 0m) lines.Add(new LedgerService.PostLine { DebitAccountNo = 3000, CreditAccountNo = 2000, Amount = _vm.OpeningAP, Narration = "Opening Accounts Payable" });
 
         if (lines.Count == 0) return;
@@ -870,13 +903,8 @@
             });
     }
 
-    // =========================
-    // ✅ AUTOMAP ROLES (BASE + PDC)
-    // =========================
     private async Task AutoMapBaseRolesIfMissing(int companyId)
     {
-        // If any mapping already exists => we keep base roles untouched,
-        // but still try to add PDC roles (safe upgrade path).
         var any = await Db.Set<AccountRoleMap>()
             .AsNoTracking()
             .AnyAsync(x => x.CompanyId == companyId && x.IsActive);
@@ -897,7 +925,6 @@
             return null;
         }
 
-        // Base roles
         var cash = FindByName("Cash in hand", "Cash");
         var bank = FindByName("Bank");
         var ar = FindByName("Accounts Receivable", "Receivable");
@@ -908,12 +935,10 @@
         var vatIn = FindByName("VAT Input", "VAT Receivable");
         var cogs = FindByName("Cost of Goods Sold", "COGS");
 
-        // ✅ NEW: Cheque/PDC roles
         var pdcRecv = FindByName("PDC Receivable", "Cheques-in-hand", "Cheques in hand", "Cheque in hand");
         var pdcPayClr = FindByName("PDC Payable Clearing", "PDC Payable", "Cheque Payable");
         var bankCharges = FindByName("Bank Charges", "Bank Charge", "Bank Fees", "Charges");
 
-        // Fallbacks
         cash ??= coa.Any(x => x.AccountNo == 1000) ? 1000 : null;
         ar ??= coa.Any(x => x.AccountNo == 1100) ? 1100 : null;
         inv ??= coa.Any(x => x.AccountNo == 1200) ? 1200 : null;
@@ -921,15 +946,12 @@
         sales ??= coa.Any(x => x.AccountNo == 4000) ? 4000 : null;
         cogs ??= coa.Any(x => x.AccountNo == 5000) ? 5000 : null;
 
-        // Ensure Bank exists if user entered OpeningBank later
         bank ??= coa.Any(x => x.AccountNo == 1010) ? 1010 : null;
 
-        // New 3 accounts (preferred nos)
         pdcRecv ??= coa.Any(x => x.AccountNo == 1300) ? 1300 : null;
         pdcPayClr ??= coa.Any(x => x.AccountNo == 2200) ? 2200 : null;
         bankCharges ??= coa.Any(x => x.AccountNo == 5200) ? 5200 : null;
 
-        // If base mappings already exist, do NOT override them.
         if (!any)
         {
             if (cash.HasValue) await Roles.UpsertAsync(companyId, AccountRoleKeys.CASH, cash.Value);
@@ -946,7 +968,6 @@
             if (cogs.HasValue) await Roles.UpsertAsync(companyId, AccountRoleKeys.COGS, cogs.Value);
         }
 
-        // ✅ Always try to add new roles (upgrade safe)
         if (pdcRecv.HasValue) await Roles.UpsertAsync(companyId, AccountRoleKeys.PDC_RECEIVABLE, pdcRecv.Value);
         if (pdcPayClr.HasValue) await Roles.UpsertAsync(companyId, AccountRoleKeys.PDC_PAYABLE_CLEARING, pdcPayClr.Value);
         if (bankCharges.HasValue) await Roles.UpsertAsync(companyId, AccountRoleKeys.BANK_CHARGES, bankCharges.Value);
@@ -1001,3 +1022,4 @@
         public decimal OpeningInventory { get; set; }
     }
 }
+
