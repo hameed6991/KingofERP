@@ -431,6 +431,31 @@
         search = (e?.Value?.ToString() ?? "").Trim();
     }
 
+    // private async Task ResolveAccountsAsync()
+    // {
+    //     var coa = await Db.ChartOfAccounts.AsNoTracking()
+    //         .Where(x => x.CompanyId == _companyId)
+    //         .Select(x => new { x.AccountNo, x.AccountName, x.AccountType })
+    //         .ToListAsync();
+
+    //     var ar = coa.FirstOrDefault(x =>
+    //         string.Equals((x.AccountType ?? "").Trim(), "AR", StringComparison.OrdinalIgnoreCase) ||
+    //         (x.AccountName ?? "").Contains("Receivable", StringComparison.OrdinalIgnoreCase) ||
+    //         (x.AccountName ?? "").Contains("Debtors", StringComparison.OrdinalIgnoreCase));
+    //     if (ar != null) _arAccountNo = ar.AccountNo;
+
+    //     var cash = coa.FirstOrDefault(x =>
+    //         (x.AccountName ?? "").Equals("Cash", StringComparison.OrdinalIgnoreCase) ||
+    //         (x.AccountName ?? "").Contains("Cash", StringComparison.OrdinalIgnoreCase));
+    //     if (cash != null) _cashAccountNo = cash.AccountNo;
+
+    //     var bank = coa.FirstOrDefault(x =>
+    //         (x.AccountName ?? "").Contains("Bank", StringComparison.OrdinalIgnoreCase) ||
+    //         (x.AccountNo == 1010));
+    //     if (bank != null) _bankAccountNo = bank.AccountNo;
+    // }
+
+
     private async Task ResolveAccountsAsync()
     {
         var coa = await Db.ChartOfAccounts.AsNoTracking()
@@ -438,22 +463,55 @@
             .Select(x => new { x.AccountNo, x.AccountName, x.AccountType })
             .ToListAsync();
 
+        // 1) AR control
         var ar = coa.FirstOrDefault(x =>
             string.Equals((x.AccountType ?? "").Trim(), "AR", StringComparison.OrdinalIgnoreCase) ||
             (x.AccountName ?? "").Contains("Receivable", StringComparison.OrdinalIgnoreCase) ||
             (x.AccountName ?? "").Contains("Debtors", StringComparison.OrdinalIgnoreCase));
+
         if (ar != null) _arAccountNo = ar.AccountNo;
 
-        var cash = coa.FirstOrDefault(x =>
-            (x.AccountName ?? "").Equals("Cash", StringComparison.OrdinalIgnoreCase) ||
-            (x.AccountName ?? "").Contains("Cash", StringComparison.OrdinalIgnoreCase));
+        // 2) Cash
+        var cash = coa
+            .Where(x =>
+                (x.AccountName ?? "").Contains("Cash", StringComparison.OrdinalIgnoreCase) &&
+                !(x.AccountName ?? "").Contains("Petty", StringComparison.OrdinalIgnoreCase)) // optional
+            .OrderByDescending(x => x.AccountNo == 1000)
+            .ThenBy(x => x.AccountNo)
+            .FirstOrDefault();
+
         if (cash != null) _cashAccountNo = cash.AccountNo;
 
-        var bank = coa.FirstOrDefault(x =>
-            (x.AccountName ?? "").Contains("Bank", StringComparison.OrdinalIgnoreCase) ||
-            (x.AccountNo == 1010));
+        // 3) Bank  ✅ IMPORTANT: exclude Bank Charges / Fees / Expenses
+        bool IsRealBank(string? name)
+        {
+            name ??= "";
+            var n = name.Trim();
+
+            if (!n.Contains("Bank", StringComparison.OrdinalIgnoreCase)) return false;
+
+            // ❌ exclude expense accounts
+            if (n.Contains("Charge", StringComparison.OrdinalIgnoreCase)) return false;
+            if (n.Contains("Charges", StringComparison.OrdinalIgnoreCase)) return false;
+            if (n.Contains("Fee", StringComparison.OrdinalIgnoreCase)) return false;
+            if (n.Contains("Fees", StringComparison.OrdinalIgnoreCase)) return false;
+            if (n.Contains("Expense", StringComparison.OrdinalIgnoreCase)) return false;
+            if (n.Contains("Commission", StringComparison.OrdinalIgnoreCase)) return false;
+
+            return true;
+        }
+
+        var bank = coa
+            .Where(x => IsRealBank(x.AccountName))
+            .OrderByDescending(x => x.AccountNo == 1010)                  // prefer 1010
+            .ThenByDescending(x => (x.AccountName ?? "").Equals("Bank", StringComparison.OrdinalIgnoreCase))
+            .ThenBy(x => x.AccountNo)
+            .FirstOrDefault();
+
         if (bank != null) _bankAccountNo = bank.AccountNo;
+        else _bankAccountNo = 1010; // fallback
     }
+
 
     private int GetDebitAccountByMethod(string? method)
     {
